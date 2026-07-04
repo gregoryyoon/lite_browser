@@ -8,8 +8,8 @@
 #if defined(OS_WIN)
 #include <windows.h>
 #endif
-#include <stdarg.h>
 #include <stdio.h>
+#include <stdarg.h>
 
 #include "include/capi/cef_browser_capi.h"
 #include "include/capi/cef_command_line_capi.h"
@@ -20,8 +20,8 @@
 #include "tests/cefsimple_capi/simple_utils.h"
 #include "tests/cefsimple_capi/simple_views.h"
 
-static void LogMsg(const char *format, ...) {
-  FILE *f = fopen("C:\\projects\\lite_browser\\debug_c.txt", "a");
+static void LogMsg(const char* format, ...) {
+  FILE* f = fopen("C:\\projects\\lite_browser\\debug_c.txt", "a");
   if (f) {
     va_list args;
     va_start(args, format);
@@ -32,7 +32,7 @@ static void LogMsg(const char *format, ...) {
 }
 
 // Resolves local path to ui/index.html
-static void ResolveUIPath(cef_string_t *out_url) {
+static void ResolveUIPath(cef_string_t* out_url) {
 #if defined(OS_WIN)
   char exe_path[MAX_PATH];
   GetModuleFileNameA(NULL, exe_path, MAX_PATH);
@@ -42,16 +42,14 @@ static void ResolveUIPath(cef_string_t *out_url) {
 
   int found = 0;
   for (int i = 0; i < 8; i++) {
-    char *last_backslash = strrchr(path, '\\');
-    if (!last_backslash)
-      break;
+    char* last_backslash = strrchr(path, '\\');
+    if (!last_backslash) break;
     *last_backslash = '\0';
 
     char test_path[MAX_PATH];
     snprintf(test_path, sizeof(test_path), "%s\\ui\\index.html", path);
     DWORD attrib = GetFileAttributesA(test_path);
-    if (attrib != INVALID_FILE_ATTRIBUTES &&
-        !(attrib & FILE_ATTRIBUTE_DIRECTORY)) {
+    if (attrib != INVALID_FILE_ATTRIBUTES && !(attrib & FILE_ATTRIBUTE_DIRECTORY)) {
       char file_url[MAX_PATH + 16];
       snprintf(file_url, sizeof(file_url), "file:///%s/ui/index.html", path);
       for (size_t j = 8; file_url[j]; j++) {
@@ -66,13 +64,11 @@ static void ResolveUIPath(cef_string_t *out_url) {
   }
 
   if (!found) {
-    cef_string_from_ascii("file:///C:/projects/lite_browser/ui/index.html", 46,
-                          out_url);
+    cef_string_from_ascii("file:///C:/projects/lite_browser/ui/index.html", 46, out_url);
   }
 #else
   // Fallback for non-Windows (e.g. Linux/Mac)
-  cef_string_from_ascii("file:///projects/lite_browser/ui/index.html", 43,
-                        out_url);
+  cef_string_from_ascii("file:///projects/lite_browser/ui/index.html", 43, out_url);
 #endif
 }
 
@@ -80,8 +76,8 @@ static void ResolveUIPath(cef_string_t *out_url) {
 IMPLEMENT_REFCOUNTING_MANUAL(simple_app_t, simple_app, ref_count)
 
 // Release function for simple_app_t with custom cleanup logic.
-int CEF_CALLBACK simple_app_release(cef_base_ref_counted_t *self) {
-  simple_app_t *app = (simple_app_t *)self;
+int CEF_CALLBACK simple_app_release(cef_base_ref_counted_t* self) {
+  simple_app_t* app = (simple_app_t*)self;
   int count = atomic_fetch_sub(&app->ref_count, 1) - 1;
   if (count == 0) {
     // Release the browser process handler if we own one.
@@ -97,9 +93,9 @@ int CEF_CALLBACK simple_app_release(cef_base_ref_counted_t *self) {
 
 // Returns the browser process handler.
 // Adds a reference before returning (CEF will release it when done).
-cef_browser_process_handler_t *CEF_CALLBACK
-simple_app_get_browser_process_handler(cef_app_t *self) {
-  simple_app_t *app = (simple_app_t *)self;
+cef_browser_process_handler_t* CEF_CALLBACK
+simple_app_get_browser_process_handler(cef_app_t* self) {
+  simple_app_t* app = (simple_app_t*)self;
   if (app->browser_process_handler) {
     // Add reference for CEF (it will release when done).
     app->browser_process_handler->handler.base.add_ref(
@@ -111,51 +107,51 @@ simple_app_get_browser_process_handler(cef_app_t *self) {
 
 // Forward declarations for browser process handler functions.
 void CEF_CALLBACK browser_process_handler_on_context_initialized(
-    cef_browser_process_handler_t *self);
-cef_client_t *CEF_CALLBACK
-browser_process_handler_get_default_client(cef_browser_process_handler_t *self);
+    cef_browser_process_handler_t* self);
+cef_client_t* CEF_CALLBACK
+browser_process_handler_get_default_client(cef_browser_process_handler_t* self);
 
 // Implement reference counting functions for browser process handler.
 IMPLEMENT_REFCOUNTING_SIMPLE(simple_browser_process_handler_t,
-                             browser_process_handler, ref_count)
+                             browser_process_handler,
+                             ref_count)
 
 #if defined(OS_WIN)
 HWND g_main_hwnd = NULL;
 
-LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
-                                        LPARAM lParam) {
+LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
   switch (message) {
-  case WM_SIZE: {
-    int width = LOWORD(lParam);
-    int height = HIWORD(lParam);
-    if (g_ui_browser) {
-      cef_browser_host_t *host = g_ui_browser->get_host(g_ui_browser);
-      if (host) {
-        HWND ui_hwnd = host->get_window_handle(host);
-        if (ui_hwnd) {
-          MoveWindow(ui_hwnd, 0, 0, width, 80, TRUE);
+    case WM_SIZE: {
+      int width = LOWORD(lParam);
+      int height = HIWORD(lParam);
+      if (g_ui_browser) {
+        cef_browser_host_t* host = g_ui_browser->get_host(g_ui_browser);
+        if (host) {
+          HWND ui_hwnd = host->get_window_handle(host);
+          if (ui_hwnd) {
+            MoveWindow(ui_hwnd, 0, 0, width, 80, TRUE);
+          }
+          host->base.release(&host->base);
         }
-        host->base.release(&host->base);
       }
-    }
-    if (g_content_browser) {
-      cef_browser_host_t *host = g_content_browser->get_host(g_content_browser);
-      if (host) {
-        HWND content_hwnd = host->get_window_handle(host);
-        if (content_hwnd) {
-          MoveWindow(content_hwnd, 0, 80, width, height - 80, TRUE);
+      if (g_content_browser) {
+        cef_browser_host_t* host = g_content_browser->get_host(g_content_browser);
+        if (host) {
+          HWND content_hwnd = host->get_window_handle(host);
+          if (content_hwnd) {
+            MoveWindow(content_hwnd, 0, 80, width, height - 80, TRUE);
+          }
+          host->base.release(&host->base);
         }
-        host->base.release(&host->base);
       }
+      return 0;
     }
-    return 0;
-  }
-  case WM_CLOSE:
-    DestroyWindow(hwnd);
-    return 0;
-  case WM_DESTROY:
-    cef_quit_message_loop();
-    return 0;
+    case WM_CLOSE:
+      DestroyWindow(hwnd);
+      return 0;
+    case WM_DESTROY:
+      cef_quit_message_loop();
+      return 0;
   }
   return DefWindowProc(hwnd, message, wParam, lParam);
 }
@@ -163,9 +159,9 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
 
 // Called after CEF initialization to create the browser.
 void CEF_CALLBACK browser_process_handler_on_context_initialized(
-    cef_browser_process_handler_t *self) {
+    cef_browser_process_handler_t* self) {
   // Get the global command line.
-  cef_command_line_t *command_line = cef_command_line_get_global();
+  cef_command_line_t* command_line = cef_command_line_get_global();
   CHECK(command_line);
 
   // Check if Alloy style will be used.
@@ -175,7 +171,7 @@ void CEF_CALLBACK browser_process_handler_on_context_initialized(
   cef_string_clear(&alloy_switch);
 
   // Create the client handler.
-  simple_handler_t *client_handler = simple_handler_create(use_alloy_style);
+  simple_handler_t* client_handler = simple_handler_create(use_alloy_style);
   CHECK(client_handler);
 
   // The client_handler is stored globally via simple_handler_get_instance().
@@ -198,7 +194,7 @@ void CEF_CALLBACK browser_process_handler_on_context_initialized(
   } else {
     cef_string_from_ascii("https://www.google.com", 22, &url);
   }
-
+  
   cef_string_utf8_t url_utf8 = {};
   cef_string_to_utf8(url.str, url.length, &url_utf8);
   if (url_utf8.str && url_utf8.length > 0) {
@@ -228,14 +224,14 @@ void CEF_CALLBACK browser_process_handler_on_context_initialized(
 
   if (use_views) {
     // Create the BrowserView using Views framework.
-    simple_browser_view_delegate_t *browser_view_delegate =
-        browser_view_delegate_create(runtime_style);
+    simple_browser_view_delegate_t* browser_view_delegate =
+        browser_view_delegate_create(runtime_style, 0, 0);
     CHECK(browser_view_delegate);
 
     // Create the browser view.
     // We transfer our client_handler and browser_view_delegate references to
     // CEF. CEF will release them when the browser view is destroyed.
-    cef_browser_view_t *browser_view = cef_browser_view_create(
+    cef_browser_view_t* browser_view = cef_browser_view_create(
         &client_handler->client, &url, &browser_settings, NULL, NULL,
         &browser_view_delegate->delegate);
 
@@ -285,8 +281,8 @@ void CEF_CALLBACK browser_process_handler_on_context_initialized(
 
       // Create the Window. It will show itself after creation.
       // We transfer our browser_view reference to the window delegate.
-      simple_window_delegate_t *window_delegate = window_delegate_create(
-          browser_view, runtime_style, initial_show_state);
+      simple_window_delegate_t* window_delegate = window_delegate_create(
+          browser_view, NULL, runtime_style, initial_show_state);
       CHECK(window_delegate);
 
       // Create the window.
@@ -311,7 +307,8 @@ void CEF_CALLBACK browser_process_handler_on_context_initialized(
     g_main_hwnd = CreateWindowEx(
         0, L"LiteBrowserMainWindowClass", L"Lite Browser",
         WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | WS_VISIBLE,
-        CW_USEDEFAULT, CW_USEDEFAULT, 800, 600, NULL, NULL, hInstance, NULL);
+        CW_USEDEFAULT, CW_USEDEFAULT, 800, 600,
+        NULL, NULL, hInstance, NULL);
 
     if (g_main_hwnd) {
       RECT rect;
@@ -322,8 +319,7 @@ void CEF_CALLBACK browser_process_handler_on_context_initialized(
       // 1. Create UI child browser
       cef_window_info_t ui_window_info = {};
       ui_window_info.size = sizeof(cef_window_info_t);
-      ui_window_info.style =
-          WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
+      ui_window_info.style = WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
       ui_window_info.parent_window = g_main_hwnd;
       ui_window_info.bounds.x = 0;
       ui_window_info.bounds.y = 0;
@@ -335,15 +331,14 @@ void CEF_CALLBACK browser_process_handler_on_context_initialized(
       cef_string_t ui_url = {};
       ResolveUIPath(&ui_url);
 
-      cef_browser_host_create_browser(&ui_window_info, &client_handler->client,
-                                      &ui_url, &browser_settings, NULL, NULL);
+      cef_browser_host_create_browser(&ui_window_info, &client_handler->client, &ui_url,
+                                      &browser_settings, NULL, NULL);
       cef_string_clear(&ui_url);
 
       // 2. Create Content child browser
       cef_window_info_t content_window_info = {};
       content_window_info.size = sizeof(cef_window_info_t);
-      content_window_info.style =
-          WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
+      content_window_info.style = WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
       content_window_info.parent_window = g_main_hwnd;
       content_window_info.bounds.x = 0;
       content_window_info.bounds.y = 80;
@@ -354,12 +349,10 @@ void CEF_CALLBACK browser_process_handler_on_context_initialized(
       cef_string_t content_url = {};
       cef_string_from_ascii(g_startup_url, strlen(g_startup_url), &content_url);
 
-      simple_handler_t *content_client_handler =
-          simple_handler_create(use_alloy_style);
+      simple_handler_t* content_client_handler = simple_handler_create(use_alloy_style);
 
-      cef_browser_host_create_browser(
-          &content_window_info, &content_client_handler->client, &content_url,
-          &browser_settings, NULL, NULL);
+      cef_browser_host_create_browser(&content_window_info, &content_client_handler->client, &content_url,
+                                      &browser_settings, NULL, NULL);
       cef_string_clear(&content_url);
     }
 #else
@@ -383,10 +376,10 @@ void CEF_CALLBACK browser_process_handler_on_context_initialized(
 }
 
 // Returns the default client handler for Chrome style UI.
-cef_client_t *CEF_CALLBACK browser_process_handler_get_default_client(
-    cef_browser_process_handler_t *self) {
+cef_client_t* CEF_CALLBACK browser_process_handler_get_default_client(
+    cef_browser_process_handler_t* self) {
   // Return the global instance (matches C++ SimpleApp::GetDefaultClient).
-  simple_handler_t *instance = simple_handler_get_instance();
+  simple_handler_t* instance = simple_handler_get_instance();
   if (instance) {
     // Add reference before returning (CEF will release it).
     instance->client.base.add_ref(&instance->client.base);
@@ -397,9 +390,9 @@ cef_client_t *CEF_CALLBACK browser_process_handler_get_default_client(
 }
 
 // Creates a browser process handler instance.
-simple_browser_process_handler_t *browser_process_handler_create(void) {
-  simple_browser_process_handler_t *handler =
-      (simple_browser_process_handler_t *)calloc(
+simple_browser_process_handler_t* browser_process_handler_create(void) {
+  simple_browser_process_handler_t* handler =
+      (simple_browser_process_handler_t*)calloc(
           1, sizeof(simple_browser_process_handler_t));
   CHECK(handler);
 
@@ -421,8 +414,8 @@ simple_browser_process_handler_t *browser_process_handler_create(void) {
 }
 
 // Creates the application instance.
-simple_app_t *simple_app_create(void) {
-  simple_app_t *app = (simple_app_t *)calloc(1, sizeof(simple_app_t));
+simple_app_t* simple_app_create(void) {
+  simple_app_t* app = (simple_app_t*)calloc(1, sizeof(simple_app_t));
   CHECK(app);
 
   // Initialize base structure.

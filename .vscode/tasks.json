@@ -1,0 +1,25 @@
+{
+    // See https://go.microsoft.com/fwlink/?LinkId=733558
+    // for the documentation about the tasks.json format
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "cefsimple_capi",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build",
+                "C:\\projects\\lite_browser\\cef_binary_149.0.6\\build",
+                "--target",
+                "cefsimple_capi",
+                "--config",
+                "Debug"
+            ],
+            "problemMatcher": [],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        }
+    ]
+}

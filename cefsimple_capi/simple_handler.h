@@ -28,12 +28,14 @@ typedef struct _simple_handler_t {
   atomic_int ref_count;
 
   // Handler implementations (owned by this structure).
-  simple_display_handler_t *display_handler;
-  simple_life_span_handler_t *life_span_handler;
-  simple_load_handler_t *load_handler;
-  simple_request_handler_t *request_handler;
+  simple_display_handler_t* display_handler;
+  simple_life_span_handler_t* life_span_handler;
+  simple_load_handler_t* load_handler;
+  simple_request_handler_t* request_handler;
 
-
+  // Browser instances managed by this handler.
+  cef_browser_t* ui_browser;
+  cef_browser_t* content_browser;
 
   // True if this client is Alloy style, otherwise Chrome style.
   int is_alloy_style;
@@ -55,7 +57,7 @@ typedef struct _simple_request_handler_t {
   atomic_int ref_count;
 
   // Back reference to parent handler.
-  simple_handler_t *parent;
+  simple_handler_t* parent;
 } simple_request_handler_t;
 
 // Display handler structure.
@@ -68,7 +70,7 @@ typedef struct _simple_display_handler_t {
   atomic_int ref_count;
 
   // Back reference to parent handler.
-  simple_handler_t *parent;
+  simple_handler_t* parent;
 } simple_display_handler_t;
 
 // Life span handler structure.
@@ -81,7 +83,7 @@ typedef struct _simple_life_span_handler_t {
   atomic_int ref_count;
 
   // Back reference to parent handler.
-  simple_handler_t *parent;
+  simple_handler_t* parent;
 } simple_life_span_handler_t;
 
 // Load handler structure.
@@ -94,7 +96,7 @@ typedef struct _simple_load_handler_t {
   atomic_int ref_count;
 
   // Back reference to parent handler.
-  simple_handler_t *parent;
+  simple_handler_t* parent;
 } simple_load_handler_t;
 
 // Create a new client handler instance.
@@ -102,33 +104,33 @@ typedef struct _simple_load_handler_t {
 //   is_alloy_style - 1 for Alloy style, 0 for Chrome style
 // Returns a pointer with ref count of 1.
 // Caller is responsible for releasing the reference when done.
-simple_handler_t *simple_handler_create(int is_alloy_style);
+simple_handler_t* simple_handler_create(int is_alloy_style);
 
 // Get the global singleton instance (if created).
 // Does NOT add a reference.
 // Returns NULL if no instance has been created yet.
-simple_handler_t *simple_handler_get_instance(void);
+simple_handler_t* simple_handler_get_instance(void);
 
 // Request that all existing browser windows close.
-void simple_handler_close_all_browsers(simple_handler_t *handler,
+void simple_handler_close_all_browsers(simple_handler_t* handler,
                                        int force_close);
 
 // Show the main window (for macOS dock icon activation).
-void simple_handler_show_main_window(simple_handler_t *handler);
+void simple_handler_show_main_window(simple_handler_t* handler);
 
 // Platform-specific title change implementation.
 // Declared here but implemented in platform-specific .c files.
-void simple_handler_platform_title_change(simple_handler_t *handler,
-                                          cef_browser_t *browser,
-                                          const cef_string_t *title);
+void simple_handler_platform_title_change(simple_handler_t* handler,
+                                          cef_browser_t* browser,
+                                          const cef_string_t* title);
 
 // Platform-specific show window implementation (macOS only).
 // Declared here but implemented in platform-specific .c files.
-void simple_handler_platform_show_window(simple_handler_t *handler,
-                                         cef_browser_t *browser);
+void simple_handler_platform_show_window(simple_handler_t* handler,
+                                         cef_browser_t* browser);
 
-extern cef_browser_t *g_ui_browser;
-extern cef_browser_t *g_content_browser;
+extern cef_browser_t* g_ui_browser;
+extern cef_browser_t* g_content_browser;
 extern char g_startup_url[1024];
 
-#endif // CEF_TESTS_CEFSIMPLE_CAPI_SIMPLE_HANDLER_H_
+#endif  // CEF_TESTS_CEFSIMPLE_CAPI_SIMPLE_HANDLER_H_

@@ -25,6 +25,12 @@ typedef struct _simple_browser_view_delegate_t {
 
   // Runtime style for the browser.
   cef_runtime_style_t runtime_style;
+
+  // Whether this is the delegate for the UI browser view
+  int is_ui_view;
+
+  // Preferred height of the browser view
+  int preferred_height;
 } simple_browser_view_delegate_t;
 
 //
@@ -37,9 +43,9 @@ typedef struct _simple_window_delegate_t {
   // Reference count for this object.
   atomic_int ref_count;
 
-  // Browser view to add to the window (owned by this structure).
-  // We keep CEF's reference from the creation call.
-  cef_browser_view_t* browser_view;
+  // Browser views to add to the window (owned by this structure).
+  cef_browser_view_t* ui_browser_view;
+  cef_browser_view_t* content_browser_view;
 
   // Runtime style for the window.
   cef_runtime_style_t runtime_style;
@@ -53,15 +59,18 @@ typedef struct _simple_window_delegate_t {
 // Caller is responsible for releasing the reference when done.
 //
 simple_browser_view_delegate_t* browser_view_delegate_create(
-    cef_runtime_style_t runtime_style);
+    cef_runtime_style_t runtime_style,
+    int is_ui_view,
+    int preferred_height);
 
 //
 // Creates a window delegate.
-// Takes ownership of the browser_view reference.
+// Takes ownership of the browser_view references.
 // Caller is responsible for releasing the reference when done.
 //
 simple_window_delegate_t* window_delegate_create(
-    cef_browser_view_t* browser_view,
+    cef_browser_view_t* ui_browser_view,
+    cef_browser_view_t* content_browser_view,
     cef_runtime_style_t runtime_style,
     cef_show_state_t initial_show_state);
 
