@@ -1,0 +1,37 @@
+# Ignore build outputs and binary packages
+build/
+Debug/
+Release/
+ipch/
+*.suo
+*.user
+*.ncb
+*.sdf
+*.opensdf
+*.db
+*.opendb
+.vs/
+bin/
+obj/
+
+# Ignore heavy CEF pre-built binaries and assets
+cef_binary_149.0.6/build/
+cef_binary_149.0.6/Debug/
+cef_binary_149.0.6/Release/
+cef_binary_149.0.6/Resources/
+cef_binary_149.0.6/include/
+cef_binary_149.0.6/libcef_dll/
+cef_binary_149.0.6/tests/cefclient/
+cef_binary_149.0.6/tests/cefsimple/
+cef_binary_149.0.6/tests/ceftests/
+cef_binary_149.0.6/*.lib
+cef_binary_149.0.6/*.dll
+cef_binary_149.0.6/*.exe
+cef_binary_149.0.6/*.pak
+cef_binary_149.0.6/*.bin
+cef_binary_149.0.6/*.dat
+cef_binary_149.0.6/locales/
+cef_binary_149.0.6/swiftshader/
+
+# Ignore temp debug log files
+debug_c.txt
