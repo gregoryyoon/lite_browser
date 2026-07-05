@@ -10,6 +10,7 @@
 #include "include/capi/cef_browser_capi.h"
 #include "include/capi/cef_client_capi.h"
 #include "include/capi/cef_request_handler_capi.h"
+#include "tests/cefsimple_capi/browser_context.h"
 #include "tests/cefsimple_capi/simple_browser_list.h"
 
 // Forward declarations.
@@ -33,7 +34,8 @@ typedef struct _simple_handler_t {
   simple_load_handler_t *load_handler;
   simple_request_handler_t *request_handler;
 
-
+  // Pointer to the browser window context this handler belongs to.
+  browser_window_t *window_ctx;
 
   // True if this client is Alloy style, otherwise Chrome style.
   int is_alloy_style;
@@ -127,8 +129,11 @@ void simple_handler_platform_title_change(simple_handler_t *handler,
 void simple_handler_platform_show_window(simple_handler_t *handler,
                                          cef_browser_t *browser);
 
-extern cef_browser_t *g_ui_browser;
-extern cef_browser_t *g_content_browser;
+void update_ui_tabs(browser_window_t* win_ctx);
+void update_ui_nav_state(browser_window_t* win_ctx);
+
+// extern cef_browser_t *g_ui_browser;
+// extern cef_browser_t *g_content_browser;
 extern char g_startup_url[1024];
 
 #endif // CEF_TESTS_CEFSIMPLE_CAPI_SIMPLE_HANDLER_H_

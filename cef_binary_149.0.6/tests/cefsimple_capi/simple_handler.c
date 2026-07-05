@@ -29,8 +29,8 @@ static void LogMsg(const char *format, ...) {
 // Global instance pointer.
 static simple_handler_t *g_instance = NULL;
 
-cef_browser_t *g_ui_browser = NULL;
-cef_browser_t *g_content_browser = NULL;
+// cef_browser_t *g_ui_browser = NULL;
+// cef_browser_t *g_content_browser = NULL;
 char g_startup_url[1024] = "https://www.google.com";
 
 // Forward declarations for handler create functions.
@@ -278,6 +278,64 @@ void simple_handler_platform_show_window(simple_handler_t *handler,
 }
 #endif
 
+void update_ui_tabs(browser_window_t* win_ctx) {
+  if (!win_ctx || !win_ctx->ui_browser) return;
+
+  char json[4096] = "[";
+  for (int i = 0; i < win_ctx->tab_count; i++) {
+    char tab_str[512];
+    snprintf(tab_str, sizeof(tab_str), 
+             "{\"id\":%d,\"title\":\"%s\",\"url\":\"%s\"}%s", 
+             win_ctx->tabs[i].tab_id, 
+             win_ctx->tabs[i].title, 
+             win_ctx->tabs[i].url,
+             (i == win_ctx->tab_count - 1) ? "" : ",");
+    strcat(json, tab_str);
+  }
+  strcat(json, "]");
+
+  char js_code[4500];
+  snprintf(js_code, sizeof(js_code), "if (window.updateTabsList) { window.updateTabsList(%s, %d); }", 
+           json, 
+           (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) ? 
+           win_ctx->tabs[win_ctx->active_tab_index].tab_id : 0);
+
+  cef_frame_t* frame = win_ctx->ui_browser->get_main_frame(win_ctx->ui_browser);
+  if (frame) {
+    cef_string_t js_str = {};
+    cef_string_from_utf8(js_code, strlen(js_code), &js_str);
+    frame->execute_java_script(frame, &js_str, NULL, 0);
+    cef_string_clear(&js_str);
+    frame->base.release(&frame->base);
+  }
+}
+
+void update_ui_nav_state(browser_window_t* win_ctx) {
+  if (!win_ctx || win_ctx->active_tab_index < 0 || win_ctx->active_tab_index >= win_ctx->tab_count) return;
+
+  cef_browser_t* cb = win_ctx->tabs[win_ctx->active_tab_index].browser;
+  if (!cb || !win_ctx->ui_browser) return;
+
+  int can_go_back = cb->can_go_back(cb);
+  int can_go_forward = cb->can_go_forward(cb);
+  int is_loading = cb->is_loading(cb);
+
+  char js_code[1536];
+  snprintf(js_code, sizeof(js_code), 
+           "if (window.updateNavState) { window.updateNavState(%d, %d, %d); } "
+           "if (window.updateAddress) { window.updateAddress('%s'); }", 
+           can_go_back, can_go_forward, is_loading, win_ctx->tabs[win_ctx->active_tab_index].url);
+
+  cef_frame_t* frame = win_ctx->ui_browser->get_main_frame(win_ctx->ui_browser);
+  if (frame) {
+    cef_string_t js_str = {};
+    cef_string_from_utf8(js_code, strlen(js_code), &js_str);
+    frame->execute_java_script(frame, &js_str, NULL, 0);
+    cef_string_clear(&js_str);
+    frame->base.release(&frame->base);
+  }
+}
+
 //
 // Request handler implementation.
 //
@@ -288,67 +346,318 @@ IMPLEMENT_REFCOUNTING_SIMPLE(simple_request_handler_t, request_handler,
 int CEF_CALLBACK request_handler_on_before_browse(
     cef_request_handler_t *self, cef_browser_t *browser, cef_frame_t *frame,
     cef_request_t *request, int user_gesture, int is_redirect) {
-  // (unused handler removed)
 
   cef_string_userfree_t url_userfree = request->get_url(request);
   if (url_userfree) {
     cef_string_utf8_t url_utf8 = {};
     cef_string_to_utf8(url_userfree->str, url_userfree->length, &url_utf8);
 
-    LogMsg("on_before_browse: url=%s, g_ui_browser=%p, g_content_browser=%p\n",
-           url_utf8.str ? url_utf8.str : "(null)", g_ui_browser,
-           g_content_browser);
-
     if (url_utf8.str && strncmp(url_utf8.str, "http://ui-action/", 17) == 0) {
       const char *action = url_utf8.str + 17;
       LogMsg("Interrupted ui-action: %s\n", action);
 
-      if (g_content_browser) {
-        cef_browser_t *cb = g_content_browser;
-        if (strcmp(action, "back") == 0) {
-          LogMsg("Action: go_back\n");
-          cb->go_back(cb);
-        } else if (strcmp(action, "forward") == 0) {
-          cb->go_forward(cb);
-        } else if (strcmp(action, "reload") == 0) {
-          cb->reload(cb);
-        } else if (strncmp(action, "load?url=", 9) == 0) {
-          const char *encoded_url = action + 9;
-          LogMsg("Action: load?url=%s\n", encoded_url);
+      simple_request_handler_t *req_handler = (simple_request_handler_t*)self;
+      simple_handler_t *parent_handler = req_handler->parent;
+      browser_window_t *win_ctx = parent_handler->window_ctx;
 
-          char *decoded = (char *)malloc(strlen(encoded_url) + 1);
-          if (decoded) {
-            size_t i = 0, j = 0;
-            while (encoded_url[i]) {
-              if (encoded_url[i] == '%' && encoded_url[i + 1] &&
-                  encoded_url[i + 2]) {
-                char hex[3] = {encoded_url[i + 1], encoded_url[i + 2], '\0'};
-                decoded[j++] = (char)strtol(hex, NULL, 16);
-                i += 3;
-              } else if (encoded_url[i] == '+') {
-                decoded[j++] = ' ';
-                i++;
-              } else {
-                decoded[j++] = encoded_url[i];
-                i++;
+      if (win_ctx) {
+        cef_browser_t *cb = NULL;
+        if (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+          cb = win_ctx->tabs[win_ctx->active_tab_index].browser;
+        }
+
+        if (strcmp(action, "back") == 0) {
+          if (cb) cb->go_back(cb);
+        } else if (strcmp(action, "forward") == 0) {
+          if (cb) cb->go_forward(cb);
+        } else if (strcmp(action, "reload") == 0) {
+          if (cb) cb->reload(cb);
+        } else if (strncmp(action, "load?url=", 9) == 0) {
+          if (cb) {
+            const char *encoded_url = action + 9;
+            char *decoded = (char *)malloc(strlen(encoded_url) + 1);
+            if (decoded) {
+              size_t i = 0, j = 0;
+              while (encoded_url[i]) {
+                if (encoded_url[i] == '%' && encoded_url[i + 1] && encoded_url[i + 2]) {
+                  char hex[3] = {encoded_url[i + 1], encoded_url[i + 2], '\0'};
+                  decoded[j++] = (char)strtol(hex, NULL, 16);
+                  i += 3;
+                } else if (encoded_url[i] == '+') {
+                  decoded[j++] = ' ';
+                  i++;
+                } else {
+                  decoded[j++] = encoded_url[i];
+                  i++;
+                }
+              }
+              decoded[j] = '\0';
+
+              cef_string_t cef_url = {};
+              cef_string_from_utf8(decoded, strlen(decoded), &cef_url);
+
+              cef_frame_t *main_frame = cb->get_main_frame(cb);
+              if (main_frame) {
+                main_frame->load_url(main_frame, &cef_url);
+                main_frame->base.release(&main_frame->base);
+              }
+              cef_string_clear(&cef_url);
+              free(decoded);
+            }
+          }
+        } else if (strcmp(action, "new-tab") == 0) {
+          if (win_ctx->tab_count < MAX_TABS) {
+            RECT rect;
+            GetClientRect(win_ctx->main_hwnd, &rect);
+            int width = rect.right;
+            int height = rect.bottom;
+
+            cef_browser_settings_t browser_settings = {};
+            browser_settings.size = sizeof(cef_browser_settings_t);
+
+            cef_window_info_t content_window_info = {};
+            content_window_info.size = sizeof(cef_window_info_t);
+            content_window_info.style = WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
+            content_window_info.parent_window = win_ctx->main_hwnd;
+            content_window_info.bounds.x = 1;
+            content_window_info.bounds.y = 101;
+            content_window_info.bounds.width = width - 2;
+            content_window_info.bounds.height = height - 102;
+            content_window_info.runtime_style = CEF_RUNTIME_STYLE_DEFAULT;
+
+            cef_string_t content_url = {};
+            cef_string_from_ascii("https://www.google.com", 22, &content_url);
+
+            simple_handler_t *content_handler = simple_handler_create(0);
+            content_handler->window_ctx = win_ctx;
+
+            int next_idx = win_ctx->tab_count;
+            int max_id = 0;
+            for(int k=0; k<win_ctx->tab_count; k++) {
+              if (win_ctx->tabs[k].tab_id > max_id) max_id = win_ctx->tabs[k].tab_id;
+            }
+            win_ctx->tabs[next_idx].tab_id = max_id + 1;
+            win_ctx->tabs[next_idx].browser = NULL;
+            win_ctx->tabs[next_idx].hwnd = NULL;
+            strcpy(win_ctx->tabs[next_idx].title, "새 탭");
+            strcpy(win_ctx->tabs[next_idx].url, "https://www.google.com");
+            win_ctx->tab_count++;
+
+            cef_browser_host_create_browser(
+                &content_window_info, &content_handler->client, &content_url,
+                &browser_settings, NULL, NULL);
+            cef_string_clear(&content_url);
+          }
+        } else if (strncmp(action, "switch-tab?id=", 14) == 0) {
+          int target_id = atoi(action + 14);
+          int found_idx = -1;
+          for (int i = 0; i < win_ctx->tab_count; i++) {
+            if (win_ctx->tabs[i].tab_id == target_id) {
+              found_idx = i;
+              break;
+            }
+          }
+          if (found_idx != -1 && found_idx != win_ctx->active_tab_index) {
+            int old_idx = win_ctx->active_tab_index;
+            if (old_idx >= 0 && old_idx < win_ctx->tab_count && win_ctx->tabs[old_idx].hwnd) {
+              ShowWindow(win_ctx->tabs[old_idx].hwnd, SW_HIDE);
+            }
+
+            win_ctx->active_tab_index = found_idx;
+            if (win_ctx->tabs[found_idx].hwnd) {
+              ShowWindow(win_ctx->tabs[found_idx].hwnd, SW_SHOW);
+              
+              RECT rect;
+              GetClientRect(win_ctx->main_hwnd, &rect);
+              MoveWindow(win_ctx->tabs[found_idx].hwnd, 1, 101, rect.right - 2, rect.bottom - 102, TRUE);
+
+              cef_browser_host_t* host = win_ctx->tabs[found_idx].browser->get_host(win_ctx->tabs[found_idx].browser);
+              if (host) {
+                host->was_resized(host);
+                host->set_focus(host, 1);
+                host->base.release(&host->base);
               }
             }
-            decoded[j] = '\0';
-
-            LogMsg("Decoded URL to load: %s\n", decoded);
-
-            cef_string_t cef_url = {};
-            cef_string_from_utf8(decoded, strlen(decoded), &cef_url);
-
-            cef_frame_t *main_frame = cb->get_main_frame(cb);
-            if (main_frame) {
-              main_frame->load_url(main_frame, &cef_url);
-              main_frame->base.release(&main_frame->base);
+            update_ui_tabs(win_ctx);
+            update_ui_nav_state(win_ctx);
+          }
+        } else if (strncmp(action, "close-tab?id=", 13) == 0) {
+          int target_id = atoi(action + 13);
+          int found_idx = -1;
+          for (int i = 0; i < win_ctx->tab_count; i++) {
+            if (win_ctx->tabs[i].tab_id == target_id) {
+              found_idx = i;
+              break;
             }
+          }
+          if (found_idx != -1) {
+            if (win_ctx->tab_count <= 1) {
+              PostMessage(win_ctx->main_hwnd, WM_CLOSE, 0, 0);
+            } else {
+              cef_browser_t* target_browser = win_ctx->tabs[found_idx].browser;
+              if (target_browser) {
+                cef_browser_host_t* host = target_browser->get_host(target_browser);
+                if (host) {
+                  host->close_browser(host, 1);
+                  host->base.release(&host->base);
+                }
+              }
 
-            cef_string_clear(&cef_url);
+              int old_active = win_ctx->active_tab_index;
+              int new_active = old_active;
+              if (old_active == found_idx) {
+                new_active = (found_idx == win_ctx->tab_count - 1) ? found_idx - 1 : found_idx;
+                if (win_ctx->tabs[new_active].hwnd) {
+                  ShowWindow(win_ctx->tabs[new_active].hwnd, SW_SHOW);
+                  RECT rect;
+                  GetClientRect(win_ctx->main_hwnd, &rect);
+                  MoveWindow(win_ctx->tabs[new_active].hwnd, 1, 101, rect.right - 2, rect.bottom - 102, TRUE);
+                  cef_browser_host_t* host = win_ctx->tabs[new_active].browser->get_host(win_ctx->tabs[new_active].browser);
+                  if (host) {
+                    host->was_resized(host);
+                    host->set_focus(host, 1);
+                    host->base.release(&host->base);
+                  }
+                }
+              } else if (old_active > found_idx) {
+                new_active = old_active - 1;
+              }
 
-            free(decoded);
+              for (int i = found_idx; i < win_ctx->tab_count - 1; i++) {
+                win_ctx->tabs[i] = win_ctx->tabs[i + 1];
+              }
+              win_ctx->tab_count--;
+              win_ctx->active_tab_index = new_active;
+
+              update_ui_tabs(win_ctx);
+              update_ui_nav_state(win_ctx);
+            }
+          }
+        } else if (strcmp(action, "new-window") == 0) {
+          create_browser_window("https://www.google.com");
+        } else if (strncmp(action, "detach-tab?id=", 14) == 0) {
+          int target_id = atoi(action + 14);
+          int found_idx = -1;
+          for (int i = 0; i < win_ctx->tab_count; i++) {
+            if (win_ctx->tabs[i].tab_id == target_id) {
+              found_idx = i;
+              break;
+            }
+          }
+          if (found_idx != -1 && win_ctx->tab_count > 1) {
+            cef_browser_t* detached_browser = win_ctx->tabs[found_idx].browser;
+            HWND detached_hwnd = win_ctx->tabs[found_idx].hwnd;
+            char target_url[1024];
+            char target_title[256];
+            strcpy(target_url, win_ctx->tabs[found_idx].url);
+            strcpy(target_title, win_ctx->tabs[found_idx].title);
+
+            browser_window_t* new_win = create_browser_window_for_detached(
+                detached_browser, detached_hwnd, target_url, target_title, CW_USEDEFAULT, CW_USEDEFAULT);
+
+            if (new_win) {
+              int old_active = win_ctx->active_tab_index;
+              int new_active = old_active;
+              if (old_active == found_idx) {
+                new_active = (found_idx == win_ctx->tab_count - 1) ? found_idx - 1 : found_idx;
+                if (win_ctx->tabs[new_active].hwnd) {
+                  ShowWindow(win_ctx->tabs[new_active].hwnd, SW_SHOW);
+                  RECT rect;
+                  GetClientRect(win_ctx->main_hwnd, &rect);
+                  MoveWindow(win_ctx->tabs[new_active].hwnd, 1, 101, rect.right - 2, rect.bottom - 102, TRUE);
+                  cef_browser_host_t* host = win_ctx->tabs[new_active].browser->get_host(win_ctx->tabs[new_active].browser);
+                  if (host) {
+                    host->was_resized(host);
+                    host->set_focus(host, 1);
+                    host->base.release(&host->base);
+                  }
+                }
+              } else if (old_active > found_idx) {
+                new_active = old_active - 1;
+              }
+
+              for (int i = found_idx; i < win_ctx->tab_count - 1; i++) {
+                win_ctx->tabs[i] = win_ctx->tabs[i + 1];
+              }
+              win_ctx->tab_count--;
+              win_ctx->active_tab_index = new_active;
+
+              cef_browser_host_t* host = detached_browser->get_host(detached_browser);
+              cef_client_t* client = host->get_client(host);
+              if (client) {
+                simple_handler_t* detached_handler = (simple_handler_t*)client;
+                detached_handler->window_ctx = new_win;
+              }
+              host->base.release(&host->base);
+
+              update_ui_tabs(win_ctx);
+              update_ui_nav_state(win_ctx);
+            }
+          }
+        } else if (strncmp(action, "drag-end?id=", 12) == 0) {
+          int target_id = atoi(action + 12);
+          POINT pt;
+          GetCursorPos(&pt);
+          RECT rect;
+          GetWindowRect(win_ctx->main_hwnd, &rect);
+          if (!PtInRect(&rect, pt)) {
+            int found_idx = -1;
+            for (int i = 0; i < win_ctx->tab_count; i++) {
+              if (win_ctx->tabs[i].tab_id == target_id) {
+                found_idx = i;
+                break;
+              }
+            }
+            if (found_idx != -1 && win_ctx->tab_count > 1) {
+              cef_browser_t* detached_browser = win_ctx->tabs[found_idx].browser;
+              HWND detached_hwnd = win_ctx->tabs[found_idx].hwnd;
+              char target_url[1024];
+              char target_title[256];
+              strcpy(target_url, win_ctx->tabs[found_idx].url);
+              strcpy(target_title, win_ctx->tabs[found_idx].title);
+
+              browser_window_t* new_win = create_browser_window_for_detached(
+                  detached_browser, detached_hwnd, target_url, target_title, pt.x - 100, pt.y - 10);
+
+              if (new_win) {
+                int old_active = win_ctx->active_tab_index;
+                int new_active = old_active;
+                if (old_active == found_idx) {
+                  new_active = (found_idx == win_ctx->tab_count - 1) ? found_idx - 1 : found_idx;
+                  if (win_ctx->tabs[new_active].hwnd) {
+                    ShowWindow(win_ctx->tabs[new_active].hwnd, SW_SHOW);
+                    RECT r;
+                    GetClientRect(win_ctx->main_hwnd, &r);
+                    MoveWindow(win_ctx->tabs[new_active].hwnd, 1, 101, r.right - 2, r.bottom - 102, TRUE);
+                    cef_browser_host_t* host = win_ctx->tabs[new_active].browser->get_host(win_ctx->tabs[new_active].browser);
+                    if (host) {
+                      host->was_resized(host);
+                      host->set_focus(host, 1);
+                      host->base.release(&host->base);
+                    }
+                  }
+                } else if (old_active > found_idx) {
+                  new_active = old_active - 1;
+                }
+
+                for (int i = found_idx; i < win_ctx->tab_count - 1; i++) {
+                  win_ctx->tabs[i] = win_ctx->tabs[i + 1];
+                }
+                win_ctx->tab_count--;
+                win_ctx->active_tab_index = new_active;
+
+                cef_browser_host_t* host = detached_browser->get_host(detached_browser);
+                cef_client_t* client = host->get_client(host);
+                if (client) {
+                  simple_handler_t* detached_handler = (simple_handler_t*)client;
+                  detached_handler->window_ctx = new_win;
+                }
+                host->base.release(&host->base);
+
+                update_ui_tabs(win_ctx);
+                update_ui_nav_state(win_ctx);
+              }
+            }
           }
         }
       }
@@ -360,7 +669,7 @@ int CEF_CALLBACK request_handler_on_before_browse(
       frame->base.release(&frame->base);
       request->base.release(&request->base);
 
-      return 1; // Cancel navigation
+      return 1;
     }
 
     cef_string_utf8_clear(&url_utf8);
@@ -371,7 +680,7 @@ int CEF_CALLBACK request_handler_on_before_browse(
   frame->base.release(&frame->base);
   request->base.release(&request->base);
 
-  return 0; // Allow navigation
+  return 0;
 }
 
 simple_request_handler_t *request_handler_create(simple_handler_t *parent) {

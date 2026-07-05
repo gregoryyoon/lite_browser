@@ -93,41 +93,20 @@ load_handler_on_loading_state_change(cef_load_handler_t* self,
                                      int isLoading,
                                      int canGoBack,
                                      int canGoForward) {
+  simple_load_handler_t* handler = (simple_load_handler_t*)self;
   LogMsg("load_handler_on_loading_state_change: isLoading=%d, canGoBack=%d, canGoForward=%d\n", isLoading, canGoBack, canGoForward);
 
-  if (g_content_browser &&
-      browser->get_identifier(browser) ==
-          g_content_browser->get_identifier(
-              g_content_browser)) {
-    LogMsg("load_handler_on_loading_state_change: checkpoint 1\n");
-    if (g_ui_browser) {
-      LogMsg("load_handler_on_loading_state_change: checkpoint 2\n");
-      cef_browser_t* ui_b = g_ui_browser;
-      cef_frame_t* frame = ui_b->get_main_frame(ui_b);
-      if (frame) {
-        LogMsg("load_handler_on_loading_state_change: checkpoint 3\n");
-        char js_code[256];
-        snprintf(js_code, sizeof(js_code), "updateNavState(%d, %d, %d);",
-                 canGoBack ? 1 : 0, canGoForward ? 1 : 0, isLoading ? 1 : 0);
-
-        cef_string_t js_str = {};
-        cef_string_from_ascii(js_code, strlen(js_code), &js_str);
-
-        cef_string_t script_url = {};
-
-        LogMsg("load_handler_on_loading_state_change: calling execute_java_script\n");
-        frame->execute_java_script(frame, &js_str, &script_url, 0);
-        LogMsg("load_handler_on_loading_state_change: execute_java_script returned\n");
-        cef_string_clear(&js_str);
-
-        // frame->base.release(&frame->base); (removed to test ref count crash)
+  browser_window_t *win_ctx = handler->parent->window_ctx;
+  if (win_ctx) {
+    if (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+      cef_browser_t* active_cb = win_ctx->tabs[win_ctx->active_tab_index].browser;
+      if (active_cb && browser->get_identifier(browser) == active_cb->get_identifier(active_cb)) {
+        update_ui_nav_state(win_ctx);
       }
     }
   }
 
-  LogMsg("load_handler_on_loading_state_change: releasing browser\n");
   browser->base.release(&browser->base);
-  LogMsg("load_handler_on_loading_state_change: done\n");
 }
 
 simple_load_handler_t* load_handler_create(simple_handler_t* parent) {

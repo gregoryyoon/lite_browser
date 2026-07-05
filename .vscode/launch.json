@@ -7,7 +7,7 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Launch",
+            "name": "cefsimple_capi",
             "program": "${workspaceFolder}/cef_binary_149.0.6/build/tests/cefsimple_capi/Debug/cefsimple_capi.exe",
             "args": [
                 // "--no-sandbox"

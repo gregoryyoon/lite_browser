@@ -7,7 +7,17 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="navbar">
+  <div class="browser-ui">
+    <div class="tabs-bar">
+      <div id="tabs" class="tabs-container"></div>
+      <button class="tab-btn add-tab" onclick="newTab()" title="새 탭">
+        <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+      </button>
+      <button class="tab-btn new-window" onclick="newWindow()" title="새 창">
+        <svg viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12z"/></svg>
+      </button>
+    </div>
+    <div class="navbar">
     <div class="nav-buttons">
       <button id="back" class="nav-btn" onclick="goBack()" disabled title="뒤로 가기">
         <svg viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
@@ -27,6 +37,7 @@
       <input type="text" id="address-bar" placeholder="검색어 또는 웹사이트 주소 입력" onkeydown="handleKey(event)">
       <div id="loader" class="loader hide"></div>
     </div>
+  </div>
   </div>
   <script src="app.js"></script>
 </body>

@@ -8,7 +8,7 @@
 
 #include "include/capi/cef_browser_capi.h"
 
-extern HWND g_main_hwnd;
+#include "tests/cefsimple_capi/browser_context.h"
 
 void simple_handler_platform_title_change(simple_handler_t* handler,
                                           cef_browser_t* browser,
@@ -20,14 +20,22 @@ void simple_handler_platform_title_change(simple_handler_t* handler,
 
   cef_window_handle_t hwnd = host->get_window_handle(host);
   if (hwnd && title && title->str) {
-    // If this is the content browser, update the top-level main window title
-    if (g_content_browser &&
-        browser->get_identifier(browser) == g_content_browser->get_identifier(g_content_browser)) {
-      if (g_main_hwnd) {
-        SetWindowTextW(g_main_hwnd, title->str);
+    browser_window_t *win_ctx = handler->window_ctx;
+    if (win_ctx) {
+      int is_active_content = 0;
+      if (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+        cef_browser_t* active_cb = win_ctx->tabs[win_ctx->active_tab_index].browser;
+        if (active_cb && browser->get_identifier(browser) == active_cb->get_identifier(active_cb)) {
+          is_active_content = 1;
+        }
+      }
+
+      if (is_active_content) {
+        SetWindowTextW(win_ctx->main_hwnd, title->str);
+      } else {
+        SetWindowTextW(hwnd, title->str);
       }
     } else {
-      // Otherwise, update the browser child window title
       SetWindowTextW(hwnd, title->str);
     }
   }

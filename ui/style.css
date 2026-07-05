@@ -6,24 +6,135 @@
 
 body {
   font-family: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  background-color: #121214;
-  color: #e4e4e7;
+  background-color: #f4f4f5;
+  color: #18181b;
   overflow: hidden;
   height: 80px;
+}
+
+.browser-ui {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+}
+
+.tabs-bar {
+  display: flex;
+  align-items: flex-end;
+  height: 38px;
+  background: #e4e4e7;
+  padding: 0 12px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  gap: 8px;
+}
+
+.tabs-container {
+  display: flex;
+  align-items: flex-end;
+  flex: 1;
+  overflow-x: auto;
+  gap: 4px;
+  scrollbar-width: none;
+}
+
+.tabs-container::-webkit-scrollbar {
+  display: none;
+}
+
+.tab {
   display: flex;
   align-items: center;
+  height: 32px;
+  min-width: 120px;
+  max-width: 180px;
+  background: rgba(0, 0, 0, 0.03);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  padding: 0 12px;
+  gap: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+  user-select: none;
+}
+
+.tab:hover {
+  background: rgba(0, 0, 0, 0.07);
+}
+
+.tab.active {
+  background: #ffffff;
+  border-color: rgba(0, 0, 0, 0.1);
+  color: #18181b;
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.tab-title {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+
+.tab-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: transparent;
+  color: #71717a;
+  font-size: 10px;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.tab-close:hover {
+  background: rgba(0, 0, 0, 0.08);
+  color: #18181b;
+}
+
+.tab-btn {
+  background: transparent;
+  border: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #71717a;
+  transition: all 0.2s ease;
+  margin-bottom: 2px;
+}
+
+.tab-btn svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
+
+.tab-btn:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: #18181b;
 }
 
 .navbar {
   display: flex;
   align-items: center;
   width: 100%;
-  height: 100%;
+  height: 42px;
   padding: 0 16px;
-  background: rgba(20, 20, 22, 0.85);
+  background: rgba(255, 255, 255, 0.9);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
   gap: 12px;
 }
 
@@ -44,7 +155,7 @@ body {
   justify-content: center;
   cursor: pointer;
   transition: all 0.2s ease;
-  color: #a1a1aa;
+  color: #71717a;
 }
 
 .nav-btn svg {
@@ -55,8 +166,8 @@ body {
 }
 
 .nav-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.08);
-  color: #f4f4f5;
+  background: rgba(0, 0, 0, 0.06);
+  color: #18181b;
 }
 
 .nav-btn:hover:not(:disabled) svg {
@@ -64,12 +175,12 @@ body {
 }
 
 .nav-btn:active:not(:disabled) {
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.1);
   transform: scale(0.95);
 }
 
 .nav-btn:disabled {
-  color: #52525b;
+  color: #d4d4d8;
   cursor: not-allowed;
   opacity: 0.5;
 }
@@ -78,8 +189,8 @@ body {
   display: flex;
   align-items: center;
   flex: 1;
-  background: rgba(0, 0, 0, 0.4);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(0, 0, 0, 0.15);
   border-radius: 20px;
   height: 38px;
   padding: 0 14px;
@@ -90,14 +201,14 @@ body {
 
 .address-container:focus-within {
   border-color: rgba(99, 102, 241, 0.6);
-  background: rgba(0, 0, 0, 0.6);
+  background: #ffffff;
   box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
 }
 
 .ssl-icon {
   display: flex;
   align-items: center;
-  color: #10b981; /* Green color for SSL */
+  color: #059669; /* Green color for SSL */
   flex-shrink: 0;
 }
 
@@ -112,19 +223,19 @@ body {
   background: transparent;
   border: none;
   outline: none;
-  color: #f4f4f5;
+  color: #18181b;
   font-size: 13.5px;
   width: 100%;
 }
 
 #address-bar::placeholder {
-  color: #71717a;
+  color: #a1a1aa;
 }
 
 .loader {
   width: 16px;
   height: 16px;
-  border: 2px solid rgba(255, 255, 255, 0.1);
+  border: 2px solid rgba(0, 0, 0, 0.05);
   border-top-color: #6366f1;
   border-radius: 50%;
   animation: spin 0.8s linear infinite;

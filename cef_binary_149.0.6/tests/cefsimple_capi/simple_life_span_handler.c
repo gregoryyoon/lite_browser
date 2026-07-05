@@ -17,6 +17,7 @@
 #include "tests/cefsimple_capi/simple_browser_list.h"
 #include "tests/cefsimple_capi/simple_handler.h"
 #include "tests/cefsimple_capi/simple_utils.h"
+#include "tests/cefsimple_capi/browser_context.h"
 
 static void LogMsg(const char *format, ...) {
   FILE *f = fopen("C:\\projects\\lite_browser\\debug_c.txt", "a");
@@ -42,51 +43,61 @@ void CEF_CALLBACK life_span_handler_on_after_created(
 
   LogMsg("life_span_handler_on_after_created: browser=%p\n", browser);
 
-  // Add to the list of existing browsers.
-  // browser_list_add adds its own reference, so we can release the parameter.
   browser_list_add(&handler->parent->browser_list, browser);
 
-  extern HWND g_main_hwnd;
+  browser_window_t *win_ctx = handler->parent->window_ctx;
 
-  if (!g_ui_browser) {
-    g_ui_browser = browser;
-    browser->base.add_ref(&browser->base);
-    LogMsg("Set g_ui_browser = %p in on_after_created\n", browser);
-  } else if (!g_content_browser) {
-    g_content_browser = browser;
-    browser->base.add_ref(&browser->base);
-    LogMsg("Set g_content_browser = %p in on_after_created\n", browser);
-  }
+  if (win_ctx) {
+    cef_browser_host_t *host = browser->get_host(browser);
+    HWND hwnd = host->get_window_handle(host);
+    host->base.release(&host->base);
 
-#if defined(OS_WIN)
-  if (g_main_hwnd) {
+    if (!win_ctx->ui_browser) {
+      win_ctx->ui_browser = browser;
+      browser->base.add_ref(&browser->base);
+      win_ctx->ui_hwnd = hwnd;
+      LogMsg("Set win_ctx->ui_browser = %p, hwnd = %p\n", browser, hwnd);
+    } else {
+      // Find empty slot in tabs
+      for (int i = 0; i < win_ctx->tab_count; i++) {
+        if (win_ctx->tabs[i].browser == NULL) {
+          win_ctx->tabs[i].browser = browser;
+          browser->base.add_ref(&browser->base);
+          win_ctx->tabs[i].hwnd = hwnd;
+          LogMsg("Assigned browser %p to tab %d\n", browser, win_ctx->tabs[i].tab_id);
+
+          // Hide other tabs and show this one
+          int old_idx = win_ctx->active_tab_index;
+          if (old_idx >= 0 && old_idx < win_ctx->tab_count && old_idx != i && win_ctx->tabs[old_idx].hwnd) {
+            ShowWindow(win_ctx->tabs[old_idx].hwnd, SW_HIDE);
+          }
+          win_ctx->active_tab_index = i;
+          ShowWindow(hwnd, SW_SHOW);
+          break;
+        }
+      }
+      // Notify UI about new tabs
+      update_ui_tabs(win_ctx);
+      update_ui_nav_state(win_ctx);
+    }
+
     RECT r;
-    GetClientRect(g_main_hwnd, &r);
-    LogMsg(
-        "life_span_handler_on_after_created: posting WM_SIZE to g_main_hwnd\n");
-    PostMessage(g_main_hwnd, WM_SIZE, 0, MAKELPARAM(r.right, r.bottom));
+    GetClientRect(win_ctx->main_hwnd, &r);
+    PostMessage(win_ctx->main_hwnd, WM_SIZE, 0, MAKELPARAM(r.right, r.bottom));
   }
-#endif
 
-  // Release the browser callback parameter.
-  // The list has its own reference now.
   browser->base.release(&browser->base);
 }
 
 int CEF_CALLBACK life_span_handler_do_close(cef_life_span_handler_t *self,
-                                            cef_browser_t *browser) {
+                                             cef_browser_t *browser) {
   simple_life_span_handler_t *handler = (simple_life_span_handler_t *)self;
 
-  // Closing the main window requires special handling.
   if (browser_list_count(&handler->parent->browser_list) == 1) {
-    // Set a flag to indicate that the window close should be allowed.
     handler->parent->is_closing = 1;
   }
 
-  // Release the browser callback parameter before returning.
   browser->base.release(&browser->base);
-
-  // Allow the close. Return false to proceed with closing.
   return 0;
 }
 
@@ -94,29 +105,59 @@ void CEF_CALLBACK life_span_handler_on_before_close(
     cef_life_span_handler_t *self, cef_browser_t *browser) {
   simple_life_span_handler_t *handler = (simple_life_span_handler_t *)self;
 
-  // Remove from the list of existing browsers.
-  // This releases the list's reference to the browser.
+  LogMsg("life_span_handler_on_before_close: browser=%p, g_window_count=%d, list_count=%zu\n",
+         browser, g_window_count, browser_list_count(&handler->parent->browser_list));
+
   browser_list_remove(&handler->parent->browser_list, browser);
 
-  if (g_ui_browser && browser->get_identifier(browser) ==
-                          g_ui_browser->get_identifier(g_ui_browser)) {
-    g_ui_browser->base.release(&g_ui_browser->base);
-    g_ui_browser = NULL;
+  browser_window_t *win_ctx = handler->parent->window_ctx;
+
+  if (win_ctx) {
+    if (win_ctx->ui_browser && browser->get_identifier(browser) ==
+                            win_ctx->ui_browser->get_identifier(win_ctx->ui_browser)) {
+      win_ctx->ui_browser->base.release(&win_ctx->ui_browser->base);
+      win_ctx->ui_browser = NULL;
+      LogMsg("on_before_close: cleared ui_browser\n");
+    } else {
+      for (int i = 0; i < win_ctx->tab_count; i++) {
+        if (win_ctx->tabs[i].browser &&
+            browser->get_identifier(browser) ==
+                win_ctx->tabs[i].browser->get_identifier(win_ctx->tabs[i].browser)) {
+          win_ctx->tabs[i].browser->base.release(&win_ctx->tabs[i].browser->base);
+          win_ctx->tabs[i].browser = NULL;
+          LogMsg("on_before_close: cleared content_browser tab %d\n", i);
+          break;
+        }
+      }
+    }
+
+    int any_active = 0;
+    if (win_ctx->ui_browser != NULL) {
+      any_active = 1;
+    }
+    for (int i = 0; i < win_ctx->tab_count; i++) {
+      if (win_ctx->tabs[i].browser != NULL) {
+        any_active = 1;
+        break;
+      }
+    }
+
+    if (!any_active) {
+      LogMsg("on_before_close: all browsers closed for win_ctx %p, freeing context\n", win_ctx);
+      free(win_ctx);
+    }
   }
 
-  if (g_content_browser &&
-      browser->get_identifier(browser) ==
-          g_content_browser->get_identifier(g_content_browser)) {
-    g_content_browser->base.release(&g_content_browser->base);
-    g_content_browser = NULL;
-  }
-
-  if (browser_list_count(&handler->parent->browser_list) == 0) {
-    // All browser windows have closed. Quit the application message loop.
+#if defined(_WIN32)
+  if (g_window_count == 0) {
     cef_quit_message_loop();
   }
+#else
+  if (browser_list_count(&handler->parent->browser_list) == 0) {
+    cef_quit_message_loop();
+  }
+#endif
 
-  // Release the browser callback parameter before returning.
   browser->base.release(&browser->base);
 }
 
