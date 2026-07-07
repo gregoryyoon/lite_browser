@@ -20,6 +20,12 @@ typedef struct _simple_load_handler_t simple_load_handler_t;
 typedef struct _simple_request_handler_t simple_request_handler_t;
 typedef struct _simple_context_menu_handler_t simple_context_menu_handler_t;
 
+typedef enum {
+  BROWSER_TYPE_CONTENT = 0,
+  BROWSER_TYPE_UI = 1,
+  BROWSER_TYPE_EDITOR = 2
+} browser_type_t;
+
 // Client handler structure.
 // Implements cef_client_t interface.
 typedef struct _simple_handler_t {
@@ -38,6 +44,9 @@ typedef struct _simple_handler_t {
 
   // Pointer to the browser window context this handler belongs to.
   browser_window_t *window_ctx;
+
+  // Browser role/type.
+  browser_type_t type;
 
   // True if this client is Alloy style, otherwise Chrome style.
   int is_alloy_style;

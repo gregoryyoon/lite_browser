@@ -205,3 +205,7 @@ window.updateMaximizeState = function(isMaximized) {
     }
   }
 };
+
+function toggleEditor() {
+  window.location.href = 'http://ui-action/toggle-editor';
+}

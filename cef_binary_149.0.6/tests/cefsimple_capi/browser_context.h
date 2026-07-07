@@ -21,6 +21,9 @@ typedef struct _browser_window_t {
   tab_info_t tabs[MAX_TABS];
   int active_tab_index;
   int tab_count;
+  cef_browser_t* editor_browser;
+  HWND editor_hwnd;
+  int show_editor;
 } browser_window_t;
 
 #if defined(OS_WIN)

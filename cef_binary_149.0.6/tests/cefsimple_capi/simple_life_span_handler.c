@@ -52,11 +52,17 @@ void CEF_CALLBACK life_span_handler_on_after_created(
     HWND hwnd = host->get_window_handle(host);
     host->base.release(&host->base);
 
-    if (!win_ctx->ui_browser) {
+    if (handler->parent->type == BROWSER_TYPE_UI) {
       win_ctx->ui_browser = browser;
       browser->base.add_ref(&browser->base);
       win_ctx->ui_hwnd = hwnd;
       LogMsg("Set win_ctx->ui_browser = %p, hwnd = %p\n", browser, hwnd);
+    } else if (handler->parent->type == BROWSER_TYPE_EDITOR) {
+      win_ctx->editor_browser = browser;
+      browser->base.add_ref(&browser->base);
+      win_ctx->editor_hwnd = hwnd;
+      ShowWindow(hwnd, SW_HIDE);
+      LogMsg("Set win_ctx->editor_browser = %p, hwnd = %p\n", browser, hwnd);
     } else {
       // Find empty slot in tabs
       for (int i = 0; i < win_ctx->tab_count; i++) {
@@ -118,6 +124,11 @@ void CEF_CALLBACK life_span_handler_on_before_close(
       win_ctx->ui_browser->base.release(&win_ctx->ui_browser->base);
       win_ctx->ui_browser = NULL;
       LogMsg("on_before_close: cleared ui_browser\n");
+    } else if (win_ctx->editor_browser && browser->get_identifier(browser) ==
+                            win_ctx->editor_browser->get_identifier(win_ctx->editor_browser)) {
+      win_ctx->editor_browser->base.release(&win_ctx->editor_browser->base);
+      win_ctx->editor_browser = NULL;
+      LogMsg("on_before_close: cleared editor_browser\n");
     } else {
       for (int i = 0; i < win_ctx->tab_count; i++) {
         if (win_ctx->tabs[i].browser &&
@@ -133,6 +144,9 @@ void CEF_CALLBACK life_span_handler_on_before_close(
 
     int any_active = 0;
     if (win_ctx->ui_browser != NULL) {
+      any_active = 1;
+    }
+    if (win_ctx->editor_browser != NULL) {
       any_active = 1;
     }
     for (int i = 0; i < win_ctx->tab_count; i++) {

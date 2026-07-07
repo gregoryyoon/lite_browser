@@ -27,7 +27,7 @@ CEF Views 프레임워크의 다중 브라우저 뷰 바인딩 한계와 초기 
 - **타이틀 바 동기화**: 콘텐츠 브라우저 로딩 중 타이틀 변경 이벤트(`display_handler_on_title_change` -> `simple_handler_platform_title_change`)가 오면, 상위 윈도우인 `g_main_hwnd`에 `SetWindowTextW`를 호출하여 실시간 동기화합니다.
 - **C API 메모리 참조 관리 (중요)**: `cef_browser_view_get_for_browser`와 같은 CEF 전역 함수에 포인터를 인자로 전달할 경우 API 마샬링에 의해 소유권이 회수되므로, 전달 전 반드시 `browser->base.add_ref`를 호출하여 레퍼런스 카운트 붕괴(Access Violation)를 막아야 합니다.
 
-# 추가 확장 기능 (다중 탭, 드래그앤드롭 새 창 분리 및 메모리 안정화)
+# 브라우저 기능 관련 추가 확장 기능 (다중 탭, 드래그앤드롭 새 창 분리 및 메모리 안정화)
 
 ### 1. 다중 탭(Multi-Tab) 및 멀티 윈도우 동적 컨텍스트
 - **동적 창 컨텍스트 (`browser_window_t`)**: 싱글 윈도우 전역 변수를 완전히 걷어내고, 창 생성 시마다 독립적인 `win_ctx` 구조체를 동적 할당하여 Win32 `GWLP_USERDATA` 및 전역 추적 배열(`g_windows`)에 바인딩했습니다.
@@ -62,3 +62,36 @@ CEF Views 프레임워크의 다중 브라우저 뷰 바인딩 한계와 초기 
 ### 8. 새 탭 단추 우측 밀착 정렬 및 닫기 버튼 버블링 차단
 - **새 탭 단추 우측 밀착**: 새 탭 추가(`+`) 버튼이 열려 있는 마지막 탭 우측에 자연스럽게 동행하도록 flex 레이아웃 구조를 리팩토링했습니다. 탭 컨테이너의 가로 확장 방식(`flex: 1`) 대신 **`flex: 0 1 auto`**로 탭 개수만큼 수축하도록 수정하고, 그 뒤에 남는 여백 공간을 채우며 창 드래그 영역 기능도 함께 하는 **`.tabs-spacer` (flex: 1)** 영역을 덧대어 반응형 정렬 미학을 구현했습니다.
 - **닫기 단추 이벤트 버블링 차단**: 탭의 개별 닫기 버튼(`.tab-close`, `&times;`)을 누를 때 포인터 이벤트가 부모인 탭 엘리먼트(`.tab`)로 그대로 버블링되어 마우스 포인터 캡처 루프에 잡히거나 탭 전환/드래그가 일어나는 오작동을 해결하기 위해, `x` 버튼의 `pointerdown` 이벤트 발생 즉시 **`e.stopPropagation()` (이벤트 버블링 차단)**을 걸어 닫기 기능만 정확히 단독 트리거되도록 예외 격리 조치를 적용했습니다.
+
+
+
+# MD파일 에디터 기능 구현 완료
+
+LLM 서비스(Gemini, ChatGPT, Claude 등)의 입력창에 에디터에서 작성한 Markdown 프롬프트 콘텐츠를 버튼 하나로 자동 주입하기 위해, 순수 Win32 C CAPI 아키텍처 및 HTML5 기술을 결합하여 고품질의 MD 파일 에디터 및 분할 레이아웃 시스템을 완벽하게 구현했습니다.
+
+### 1. MD 에디터 브라우저 및 기동 생명 주기
+- **비가시 상태 프리로딩(Pre-loading)**: 에디터 기동 시의 네트워크 딜레이(StackEdit CDN js 로딩 지연 등) 및 화면 깜빡임을 방지하여 네이티브 앱 수준의 스냅 UX를 보장하고자, 메인 윈도우 생성(`create_browser_window`) 및 새 창 팝업(`create_browser_window_for_detached`) 시점에 MD 에디터 브라우저(`editor_browser`)를 비가시 상태(`SW_HIDE`)로 백그라운드에 미리 만들어 둡니다.
+- **초기 오버랩(잔상) 방지**: 기동 시 에디터 브라우저의 초기 bounds를 `(0, 0, 0, 0)`으로 초기화하고, `life_span_handler_on_after_created` 시점에 `ShowWindow(hwnd, SW_HIDE)`를 강제 호출하여 렌더링 동기화 중 발생할 수 있는 미세한 화면 겹침 현상을 원천 방지했습니다.
+
+### 2. 가로 분할(50/50 Split) 화면 및 토글 처리
+- **가로 분할 레이아웃**: `LiteBrowserMainWndProc`의 `WM_SIZE` 프로시저 내에서 `show_editor` 플래그가 활성화되어 있고 에디터 HWND가 존재할 때, 하단 클라이언트 영역을 정밀하게 50%씩 가로로 분할 배분하여 좌측은 콘텐츠 브라우저, 우측은 에디터 브라우저를 배치합니다.
+- **비활성 상태 격리**: 에디터 비활성화 상태(`show_editor` 가 거짓)일 때는 `WM_SIZE` 계산 루프에서 에디터 HWND 크기를 즉시 `(0, 0, 0, 0)`으로 축소하고 `SW_HIDE` 처리하여 웹 화면 렌더링에 간섭을 미치지 못하도록 완벽하게 격리했습니다.
+- **다중 인터셉트 레이아웃 동기화**: 탭 전환(`switch-tab`), 탭 삭제(`close-tab`), 탭 분리(`detach-tab`) 시 하드코딩된 위치 대신 `PostMessage(main_hwnd, WM_SIZE)`를 전송하여 화면 비율 동기화 로직을 일원화했습니다.
+- **토글 경로 다각화**: 주소창 UI 버튼(`.nav-btn` 형태의 마크다운 아이콘), 페이지 우클릭 컨텍스트 메뉴(`1007` 커맨드), 상단 3점 드롭다운 네이티브 메뉴 등을 통해 에디터를 유연하게 여닫을 수 있습니다.
+
+### 3. StackEdit 연동 및 Glassmorphism 플로팅 제어판 (`ui/editor.html`)
+- **StackEdit 임베딩**: 외부 CDN으로부터 공식 `stackedit.js` 라이브러리를 안전하게 로드하고, 에디터 비활성화(close) 이벤트 발생 시 자동으로 재개설(`openFile`)되도록 처리하여 에디터 영역이 늘 우측 분할 화면에 고정되어 있도록 설계했습니다.
+- **플로팅 제어판**: 에디터 편집 화면 하단 중앙에 높은 `z-index`와 투명 블러 스타일(Glassmorphism)을 적용한 슬림 제어 카드(Floating Card)를 배치했습니다.
+  - **새 파일**: 에디터 초기화 및 새 문서 작성 준비. 기존 인스턴스 중복 호출 크래시를 우회하기 위해 `stackedit.close()`를 이용해 안전하게 에디터를 리셋하고 새 문서를 불러옵니다.
+  - **저장**: UTF-8 및 한글 깨짐 방지를 위해 마크다운 텍스트를 base64 마샬링하여 C 백엔드(`editor-save-file?name=...&content=...`)로 전송, `C:\projects\lite_browser\documents` 특정 지정 폴더에 안전하게 저장합니다.
+  - **불러오기**: 실시간으로 백엔드의 documents 폴더 내 `*.md` 파일 목록을 조회(`editor-list-files`)하여 제어판의 드롭다운 선택 상자에 실시간 갱신하고, 파일을 선택하면 그 즉시 데이터를 백엔드에서 읽어와(`editor-load-file`) 에디터 화면에 동적으로 주입합니다.
+
+### 4. 크로스 오리진 메시지 보안 우회 (`--disable-web-security`)
+- 로컬 파일 스키마(`file:///`)로 실행되는 호스트 페이지와 StackEdit 외부 클라우드 서비스 iframe(`https://stackedit.io`) 간의 `window.postMessage` 통신이 크롬 보안 장벽에 막혀 실시간 편집 이벤트(`fileChange`)를 수집하지 못하고 기본 문서로만 저장되는 버그를 해결했습니다.
+- `simple_app.c`의 `simple_app_on_before_command_line_processing` 콜백을 활성화하여 기동 명령줄에 `--disable-web-security` 및 `--allow-file-access-from-files` 플래그를 자동 주입함으로써 도메인 간 교차 영역 포스트 메시지가 막힘 없이 원활하게 작동하도록 설계했습니다.
+
+### 5. LLM 서비스 프롬프트 원클릭 주입 시스템
+- 작성된 에디터의 마크다운 콘텐츠를 base64 인코딩하여 백엔드의 `send-prompt` 명령으로 발송합니다.
+- C 백엔드는 전달받은 프롬프트 데이터를 복원한 뒤, 현재 활성화된 좌측 콘텐츠 브라우저의 메인 프레임에 자바스크립트를 주입(`execute_java_script`)합니다.
+- **범용 LLM 타겟팅 인젝터**: ChatGPT(`#prompt-textarea`), Claude & Gemini(`div[contenteditable="true"]` 또는 `[contenteditable="true"]`), 그리고 일반 웹 표준 `textarea` 및 `input`을 포괄적으로 자동 스캔하여 텍스트를 채우고, 웹앱 상태 갱신을 위해 브라우저 가상 이벤트(`input` 및 `change` 이벤트 버블링)를 트리거하여 완벽하게 프롬프트가 주입 및 전송 대기 상태에 도달하도록 구현했습니다.
+

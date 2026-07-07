@@ -26,12 +26,116 @@ static void LogMsg(const char *format, ...) {
   }
 }
 
+static const char base64_table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+static char* base64_encode(const unsigned char* data, size_t input_length) {
+  size_t output_length = 4 * ((input_length + 2) / 3);
+  char* encoded_data = (char*)malloc(output_length + 1);
+  if (encoded_data == NULL) return NULL;
+
+  for (size_t i = 0, j = 0; i < input_length;) {
+    size_t remaining = input_length - i;
+    uint32_t octet_a = (unsigned char)data[i++];
+    uint32_t octet_b = (remaining > 1) ? (unsigned char)data[i++] : 0;
+    uint32_t octet_c = (remaining > 2) ? (unsigned char)data[i++] : 0;
+
+    uint32_t triple = (octet_a << 0x10) + (octet_b << 0x08) + octet_c;
+
+    encoded_data[j++] = base64_table[(triple >> 18) & 0x3F];
+    encoded_data[j++] = base64_table[(triple >> 12) & 0x3F];
+    encoded_data[j++] = (remaining > 1) ? base64_table[(triple >> 6) & 0x3F] : '=';
+    encoded_data[j++] = (remaining > 2) ? base64_table[triple & 0x3F] : '=';
+  }
+  encoded_data[output_length] = '\0';
+  return encoded_data;
+}
+
+static int get_base64_value(char c) {
+  if (c >= 'A' && c <= 'Z') return c - 'A';
+  if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+  if (c >= '0' && c <= '9') return c - '0' + 52;
+  if (c == '+') return 62;
+  if (c == '/') return 63;
+  return -1;
+}
+
+static unsigned char* base64_decode(const char* src, size_t* out_len) {
+  size_t len = strlen(src);
+  if (len % 4 != 0) return NULL;
+
+  size_t padding = 0;
+  if (len > 0 && src[len - 1] == '=') padding++;
+  if (len > 1 && src[len - 2] == '=') padding++;
+
+  size_t decoded_len = (len / 4) * 3 - padding;
+  unsigned char* out = (unsigned char*)malloc(decoded_len + 1);
+  if (!out) return NULL;
+
+  size_t i = 0, j = 0;
+  while (i < len) {
+    int a = get_base64_value(src[i++]);
+    int b = get_base64_value(src[i++]);
+    int c = get_base64_value(src[i++]);
+    int d = get_base64_value(src[i++]);
+
+    if (a < 0 || b < 0 || (c < 0 && src[i - 2] != '=') || (d < 0 && src[i - 1] != '=')) {
+      free(out);
+      return NULL;
+    }
+
+    uint32_t triple = (a << 18) + (b << 12) + ((c >= 0 ? c : 0) << 6) + (d >= 0 ? d : 0);
+
+    if (j < decoded_len) out[j++] = (triple >> 16) & 0xFF;
+    if (j < decoded_len) out[j++] = (triple >> 8) & 0xFF;
+    if (j < decoded_len) out[j++] = triple & 0xFF;
+  }
+
+  out[decoded_len] = '\0';
+  *out_len = decoded_len;
+  return out;
+}
+
+static char* get_query_param(const char* query, const char* param_name) {
+  size_t name_len = strlen(param_name);
+  const char* p = query;
+  while (p) {
+    if (strncmp(p, param_name, name_len) == 0 && p[name_len] == '=') {
+      const char* val_start = p + name_len + 1;
+      const char* val_end = strchr(val_start, '&');
+      size_t val_len = val_end ? (size_t)(val_end - val_start) : strlen(val_start);
+
+      char* decoded = (char*)malloc(val_len + 1);
+      if (!decoded) return NULL;
+
+      size_t i = 0, j = 0;
+      while (i < val_len) {
+        if (val_start[i] == '%' && i + 2 < val_len) {
+          char hex[3] = {val_start[i + 1], val_start[i + 2], '\0'};
+          decoded[j++] = (char)strtol(hex, NULL, 16);
+          i += 3;
+        } else if (val_start[i] == '+') {
+          decoded[j++] = ' ';
+          i++;
+        } else {
+          decoded[j++] = val_start[i];
+          i++;
+        }
+      }
+      decoded[j] = '\0';
+      return decoded;
+    }
+    p = strchr(p, '&');
+    if (p) p++;
+  }
+  return NULL;
+}
+
 // Global instance pointer.
 static simple_handler_t *g_instance = NULL;
 
 // cef_browser_t *g_ui_browser = NULL;
 // cef_browser_t *g_content_browser = NULL;
-char g_startup_url[1024] = "https://www.google.com";
+char g_startup_url[1024] = "https://gemini.google.com";
 
 // Forward declarations for handler create functions.
 simple_display_handler_t *display_handler_create(simple_handler_t *parent);
@@ -187,6 +291,7 @@ simple_handler_t *simple_handler_create(int is_alloy_style) {
   handler->is_alloy_style = is_alloy_style;
   browser_list_init(&handler->browser_list);
   handler->is_closing = 0;
+  handler->type = BROWSER_TYPE_CONTENT;
  
 
   // Initialize with ref count of 1.
@@ -401,6 +506,7 @@ int CEF_CALLBACK request_handler_on_before_browse(
             HMENU hMenu = CreatePopupMenu();
             AppendMenuW(hMenu, MF_STRING, 1001, L"새 탭");
             AppendMenuW(hMenu, MF_STRING, 1002, L"새 창");
+            AppendMenuW(hMenu, MF_STRING, 1007, L"마크다운 에디터 토글");
             AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
             AppendMenuW(hMenu, MF_STRING, 1003, L"인쇄...");
             AppendMenuW(hMenu, MF_STRING, 1004, L"개발자 도구 (Inspect)");
@@ -432,7 +538,7 @@ int CEF_CALLBACK request_handler_on_before_browse(
                 content_window_info.runtime_style = CEF_RUNTIME_STYLE_DEFAULT;
 
                 cef_string_t content_url = {};
-                cef_string_from_ascii("https://www.google.com", 22, &content_url);
+                cef_string_from_ascii("https://gemini.google.com", 25, &content_url);
 
                 simple_handler_t *content_handler = simple_handler_create(0);
                 content_handler->window_ctx = win_ctx;
@@ -446,7 +552,7 @@ int CEF_CALLBACK request_handler_on_before_browse(
                 win_ctx->tabs[next_idx].browser = NULL;
                 win_ctx->tabs[next_idx].hwnd = NULL;
                 strcpy(win_ctx->tabs[next_idx].title, "새 탭");
-                strcpy(win_ctx->tabs[next_idx].url, "https://www.google.com");
+                strcpy(win_ctx->tabs[next_idx].url, "https://gemini.google.com");
                 win_ctx->tab_count++;
 
                 cef_browser_host_create_browser(
@@ -455,7 +561,7 @@ int CEF_CALLBACK request_handler_on_before_browse(
                 cef_string_clear(&content_url);
               }
             } else if (cmd == 1002) {
-              create_browser_window("https://www.google.com");
+              create_browser_window("https://gemini.google.com");
             } else if (cmd == 1003) {
               if (cb) {
                 cef_browser_host_t* host = cb->get_host(cb);
@@ -529,6 +635,16 @@ int CEF_CALLBACK request_handler_on_before_browse(
               }
             } else if (cmd == 1006) {
               PostMessage(win_ctx->main_hwnd, WM_CLOSE, 0, 0);
+            } else if (cmd == 1007) {
+              if (win_ctx) {
+                win_ctx->show_editor = !win_ctx->show_editor;
+                if (win_ctx->editor_hwnd) {
+                  ShowWindow(win_ctx->editor_hwnd, win_ctx->show_editor ? SW_SHOW : SW_HIDE);
+                }
+                RECT rect;
+                GetClientRect(win_ctx->main_hwnd, &rect);
+                PostMessage(win_ctx->main_hwnd, WM_SIZE, 0, MAKELPARAM(rect.right, rect.bottom));
+              }
             }
           }
         } else if (strcmp(action, "print") == 0) {
@@ -650,6 +766,240 @@ int CEF_CALLBACK request_handler_on_before_browse(
               free(decoded);
             }
           }
+        } else if (strcmp(action, "toggle-editor") == 0) {
+          if (win_ctx) {
+            win_ctx->show_editor = !win_ctx->show_editor;
+            if (win_ctx->editor_hwnd) {
+              ShowWindow(win_ctx->editor_hwnd, win_ctx->show_editor ? SW_SHOW : SW_HIDE);
+            }
+            RECT rect;
+            GetClientRect(win_ctx->main_hwnd, &rect);
+            PostMessage(win_ctx->main_hwnd, WM_SIZE, 0, MAKELPARAM(rect.right, rect.bottom));
+          }
+        } else if (strncmp(action, "editor-save-file?", 17) == 0) {
+          const char* query = action + 17;
+          char* name = get_query_param(query, "name");
+          char* content_base64 = get_query_param(query, "content");
+          int success = 0;
+          
+          if (name && content_base64) {
+            char* p = name;
+            while (*p) {
+              if (*p == '/' || *p == '\\' || *p == ':') {
+                *p = '_';
+              }
+              p++;
+            }
+            
+            CreateDirectoryA("C:\\projects\\lite_browser\\documents", NULL);
+            
+            size_t decoded_len = 0;
+            unsigned char* decoded = base64_decode(content_base64, &decoded_len);
+            if (decoded) {
+              char filepath[MAX_PATH];
+              snprintf(filepath, sizeof(filepath), "C:\\projects\\lite_browser\\documents\\%s", name);
+              
+              FILE* f = fopen(filepath, "wb");
+              if (f) {
+                fwrite(decoded, 1, decoded_len, f);
+                fclose(f);
+                success = 1;
+              }
+              free(decoded);
+            }
+          }
+          
+          if (win_ctx && win_ctx->editor_browser) {
+            char js_callback[512];
+            snprintf(js_callback, sizeof(js_callback), 
+                     "if (window.onFileSaved) { window.onFileSaved(%d, '%s'); }", 
+                     success, name ? name : "");
+                     
+            cef_frame_t* e_frame = win_ctx->editor_browser->get_main_frame(win_ctx->editor_browser);
+            if (e_frame) {
+              cef_string_t js_str = {};
+              cef_string_from_utf8(js_callback, strlen(js_callback), &js_str);
+              e_frame->execute_java_script(e_frame, &js_str, NULL, 0);
+              cef_string_clear(&js_str);
+              e_frame->base.release(&e_frame->base);
+            }
+          }
+          
+          if (name) free(name);
+          if (content_base64) free(content_base64);
+        } else if (strncmp(action, "editor-load-file?", 17) == 0) {
+          const char* query = action + 17;
+          char* name = get_query_param(query, "name");
+          
+          if (name) {
+            char* p = name;
+            while (*p) {
+              if (*p == '/' || *p == '\\' || *p == ':') {
+                *p = '_';
+              }
+              p++;
+            }
+            
+            char filepath[MAX_PATH];
+            snprintf(filepath, sizeof(filepath), "C:\\projects\\lite_browser\\documents\\%s", name);
+            
+            FILE* f = fopen(filepath, "rb");
+            if (f) {
+              fseek(f, 0, SEEK_END);
+              long file_size = ftell(f);
+              fseek(f, 0, SEEK_SET);
+              
+              unsigned char* buf = (unsigned char*)malloc(file_size + 1);
+              if (buf) {
+                fread(buf, 1, file_size, f);
+                buf[file_size] = '\0';
+                
+                char* base64_content = base64_encode(buf, file_size);
+                if (base64_content) {
+                  if (win_ctx && win_ctx->editor_browser) {
+                    size_t js_len = strlen(base64_content) + 256;
+                    char* js_callback = (char*)malloc(js_len);
+                    if (js_callback) {
+                      snprintf(js_callback, js_len, 
+                               "if (window.onFileLoaded) { window.onFileLoaded('%s', '%s'); }", 
+                               name, base64_content);
+                               
+                      cef_frame_t* e_frame = win_ctx->editor_browser->get_main_frame(win_ctx->editor_browser);
+                      if (e_frame) {
+                        cef_string_t js_str = {};
+                        cef_string_from_utf8(js_callback, strlen(js_callback), &js_str);
+                        e_frame->execute_java_script(e_frame, &js_str, NULL, 0);
+                        cef_string_clear(&js_str);
+                        e_frame->base.release(&e_frame->base);
+                      }
+                      free(js_callback);
+                    }
+                    free(base64_content);
+                  }
+                }
+                free(buf);
+              }
+              fclose(f);
+            }
+            free(name);
+          }
+        } else if (strcmp(action, "editor-list-files") == 0) {
+          CreateDirectoryA("C:\\projects\\lite_browser\\documents", NULL);
+          
+          char search_path[MAX_PATH];
+          snprintf(search_path, sizeof(search_path), "C:\\projects\\lite_browser\\documents\\*.md");
+          
+          WIN32_FIND_DATAA find_data;
+          HANDLE hFind = FindFirstFileA(search_path, &find_data);
+          
+          size_t json_cap = 4096;
+          char* json = (char*)malloc(json_cap);
+          if (json) {
+            strcpy(json, "[");
+            int first = 1;
+            
+            if (hFind != INVALID_HANDLE_VALUE) {
+              do {
+                if (!(find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+                  size_t needed = strlen(find_data.cFileName) + 5;
+                  if (strlen(json) + needed >= json_cap) {
+                    json_cap *= 2;
+                    char* temp = (char*)realloc(json, json_cap);
+                    if (!temp) break;
+                    json = temp;
+                  }
+                  
+                  if (!first) strcat(json, ",");
+                  strcat(json, "\"");
+                  strcat(json, find_data.cFileName);
+                  strcat(json, "\"");
+                  first = 0;
+                }
+              } while (FindNextFileA(hFind, &find_data));
+              FindClose(hFind);
+            }
+            strcat(json, "]");
+            
+            if (win_ctx && win_ctx->editor_browser) {
+              size_t js_len = strlen(json) + 256;
+              char* js_callback = (char*)malloc(js_len);
+              if (js_callback) {
+                snprintf(js_callback, js_len, 
+                         "if (window.onFilesListed) { window.onFilesListed(%s); }", 
+                         json);
+                         
+                cef_frame_t* e_frame = win_ctx->editor_browser->get_main_frame(win_ctx->editor_browser);
+                if (e_frame) {
+                  cef_string_t js_str = {};
+                  cef_string_from_utf8(js_callback, strlen(js_callback), &js_str);
+                  e_frame->execute_java_script(e_frame, &js_str, NULL, 0);
+                  cef_string_clear(&js_str);
+                  e_frame->base.release(&e_frame->base);
+                }
+                free(js_callback);
+              }
+            }
+            free(json);
+          }
+        } else if (strncmp(action, "send-prompt?", 12) == 0) {
+          const char* query = action + 12;
+          char* text_base64 = get_query_param(query, "text");
+          
+          if (text_base64) {
+            if (win_ctx && win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+              cef_browser_t* content_browser = win_ctx->tabs[win_ctx->active_tab_index].browser;
+              if (content_browser) {
+                size_t js_len = strlen(text_base64) + 1024;
+                char* js_code = (char*)malloc(js_len);
+                if (js_code) {
+                  snprintf(js_code, js_len,
+                    "(function() {"
+                    "  const base64 = '%s';"
+                    "  const binary = atob(base64);"
+                    "  const len = binary.length;"
+                    "  const bytes = new Uint8Array(len);"
+                    "  for (let i = 0; i < len; i++) {"
+                    "    bytes[i] = binary.charCodeAt(i);"
+                    "  }"
+                    "  const text = new TextDecoder().decode(bytes);"
+                    "  let el = document.querySelector('#prompt-textarea');"
+                    "  if (!el) {"
+                    "    el = document.querySelector('div[contenteditable=\"true\"]') || document.querySelector('[contenteditable=\"true\"]');"
+                    "  }"
+                    "  if (!el) {"
+                    "    el = document.querySelector('textarea') || document.querySelector('input[type=\"text\"]');"
+                    "  }"
+                    "  if (el) {"
+                    "    el.focus();"
+                    "    if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {"
+                    "      el.value = text;"
+                    "    } else {"
+                    "      el.innerText = text;"
+                    "    }"
+                    "    const inputEvent = new Event('input', { bubbles: true });"
+                    "    el.dispatchEvent(inputEvent);"
+                    "    const changeEvent = new Event('change', { bubbles: true });"
+                    "    el.dispatchEvent(changeEvent);"
+                    "    el.focus();"
+                    "  }"
+                    "})();",
+                    text_base64
+                  );
+                  
+                  cef_frame_t* c_frame = content_browser->get_main_frame(content_browser);
+                  if (c_frame) {
+                    cef_string_t js_str = {};
+                    cef_string_from_utf8(js_code, strlen(js_code), &js_str);
+                    c_frame->execute_java_script(c_frame, &js_str, NULL, 0);
+                    cef_string_clear(&js_str);
+                    c_frame->base.release(&c_frame->base);
+                  }
+                  free(js_code);
+                }
+              }
+            }
+            free(text_base64);
+          }
         } else if (strcmp(action, "new-tab") == 0) {
           if (win_ctx->tab_count < MAX_TABS) {
             RECT rect;
@@ -671,7 +1021,7 @@ int CEF_CALLBACK request_handler_on_before_browse(
             content_window_info.runtime_style = CEF_RUNTIME_STYLE_DEFAULT;
 
             cef_string_t content_url = {};
-            cef_string_from_ascii("https://www.google.com", 22, &content_url);
+            cef_string_from_ascii("https://gemini.google.com", 25, &content_url);
 
             simple_handler_t *content_handler = simple_handler_create(0);
             content_handler->window_ctx = win_ctx;
@@ -685,7 +1035,7 @@ int CEF_CALLBACK request_handler_on_before_browse(
             win_ctx->tabs[next_idx].browser = NULL;
             win_ctx->tabs[next_idx].hwnd = NULL;
             strcpy(win_ctx->tabs[next_idx].title, "새 탭");
-            strcpy(win_ctx->tabs[next_idx].url, "https://www.google.com");
+            strcpy(win_ctx->tabs[next_idx].url, "https://gemini.google.com");
             win_ctx->tab_count++;
 
             cef_browser_host_create_browser(
@@ -714,7 +1064,7 @@ int CEF_CALLBACK request_handler_on_before_browse(
               
               RECT rect;
               GetClientRect(win_ctx->main_hwnd, &rect);
-              MoveWindow(win_ctx->tabs[found_idx].hwnd, 1, 101, rect.right - 2, rect.bottom - 102, TRUE);
+              PostMessage(win_ctx->main_hwnd, WM_SIZE, 0, MAKELPARAM(rect.right, rect.bottom));
 
               cef_browser_host_t* host = win_ctx->tabs[found_idx].browser->get_host(win_ctx->tabs[found_idx].browser);
               if (host) {
@@ -756,7 +1106,7 @@ int CEF_CALLBACK request_handler_on_before_browse(
                   ShowWindow(win_ctx->tabs[new_active].hwnd, SW_SHOW);
                   RECT rect;
                   GetClientRect(win_ctx->main_hwnd, &rect);
-                  MoveWindow(win_ctx->tabs[new_active].hwnd, 1, 101, rect.right - 2, rect.bottom - 102, TRUE);
+                  PostMessage(win_ctx->main_hwnd, WM_SIZE, 0, MAKELPARAM(rect.right, rect.bottom));
                   cef_browser_host_t* host = win_ctx->tabs[new_active].browser->get_host(win_ctx->tabs[new_active].browser);
                   if (host) {
                     host->was_resized(host);
@@ -779,7 +1129,7 @@ int CEF_CALLBACK request_handler_on_before_browse(
             }
           }
         } else if (strcmp(action, "new-window") == 0) {
-          create_browser_window("https://www.google.com");
+          create_browser_window("https://gemini.google.com");
         } else if (strncmp(action, "detach-tab?id=", 14) == 0) {
           int target_id = atoi(action + 14);
           int found_idx = -1;
@@ -869,18 +1219,16 @@ int CEF_CALLBACK request_handler_on_before_browse(
                 int new_active = old_active;
                 if (old_active == found_idx) {
                   new_active = (found_idx == win_ctx->tab_count - 1) ? found_idx - 1 : found_idx;
-                  if (win_ctx->tabs[new_active].hwnd) {
                     ShowWindow(win_ctx->tabs[new_active].hwnd, SW_SHOW);
                     RECT r;
                     GetClientRect(win_ctx->main_hwnd, &r);
-                    MoveWindow(win_ctx->tabs[new_active].hwnd, 1, 101, r.right - 2, r.bottom - 102, TRUE);
+                    PostMessage(win_ctx->main_hwnd, WM_SIZE, 0, MAKELPARAM(r.right, r.bottom));
                     cef_browser_host_t* host = win_ctx->tabs[new_active].browser->get_host(win_ctx->tabs[new_active].browser);
                     if (host) {
                       host->was_resized(host);
                       host->set_focus(host, 1);
                       host->base.release(&host->base);
                     }
-                  }
                 } else if (old_active > found_idx) {
                   new_active = old_active - 1;
                 }
@@ -984,6 +1332,7 @@ void CEF_CALLBACK context_menu_on_before_context_menu(
     AppendMenuW(hMenu, MF_STRING, MENU_ID_VIEW_SOURCE, L"페이지 소스 보기");
     AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
     AppendMenuW(hMenu, MF_STRING, MENU_ID_USER_FIRST, L"검사 (Inspect)");
+    AppendMenuW(hMenu, MF_STRING, 1007, L"마크다운 에디터 토글");
     
     LogMsg("on_before_context_menu: calling TrackPopupMenu (blocking)\n");
     int cmd = TrackPopupMenu(hMenu, TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN, pt.x, pt.y, 0, hwnd, NULL);
@@ -991,7 +1340,19 @@ void CEF_CALLBACK context_menu_on_before_context_menu(
     DestroyMenu(hMenu);
     
     if (cmd > 0) {
-      if (cmd == MENU_ID_USER_FIRST) {
+      if (cmd == 1007) {
+        simple_context_menu_handler_t* ctx_handler = (simple_context_menu_handler_t*)self;
+        browser_window_t* win_ctx = ctx_handler->parent->window_ctx;
+        if (win_ctx) {
+          win_ctx->show_editor = !win_ctx->show_editor;
+          if (win_ctx->editor_hwnd) {
+            ShowWindow(win_ctx->editor_hwnd, win_ctx->show_editor ? SW_SHOW : SW_HIDE);
+          }
+          RECT rect;
+          GetClientRect(win_ctx->main_hwnd, &rect);
+          PostMessage(win_ctx->main_hwnd, WM_SIZE, 0, MAKELPARAM(rect.right, rect.bottom));
+        }
+      } else if (cmd == MENU_ID_USER_FIRST) {
         LogMsg("on_before_context_menu: show dev tools\n");
         cef_window_info_t windowInfo = {};
         windowInfo.size = sizeof(cef_window_info_t);

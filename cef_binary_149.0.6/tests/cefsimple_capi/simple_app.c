@@ -78,6 +78,51 @@ static void ResolveUIPath(cef_string_t *out_url) {
 #endif
 }
 
+// Resolves local path to ui/editor.html
+static void ResolveEditorPath(cef_string_t *out_url) {
+#if defined(OS_WIN)
+  char exe_path[MAX_PATH];
+  GetModuleFileNameA(NULL, exe_path, MAX_PATH);
+
+  char path[MAX_PATH];
+  strcpy(path, exe_path);
+
+  int found = 0;
+  for (int i = 0; i < 8; i++) {
+    char *last_backslash = strrchr(path, '\\');
+    if (!last_backslash)
+      break;
+    *last_backslash = '\0';
+
+    char test_path[MAX_PATH];
+    snprintf(test_path, sizeof(test_path), "%s\\ui\\editor.html", path);
+    DWORD attrib = GetFileAttributesA(test_path);
+    if (attrib != INVALID_FILE_ATTRIBUTES &&
+        !(attrib & FILE_ATTRIBUTE_DIRECTORY)) {
+      char file_url[MAX_PATH + 16];
+      snprintf(file_url, sizeof(file_url), "file:///%s/ui/editor.html", path);
+      for (size_t j = 8; file_url[j]; j++) {
+        if (file_url[j] == '\\') {
+          file_url[j] = '/';
+        }
+      }
+      cef_string_from_ascii(file_url, strlen(file_url), out_url);
+      found = 1;
+      break;
+    }
+  }
+
+  if (!found) {
+    cef_string_from_ascii("file:///C:/projects/lite_browser/ui/editor.html", 47,
+                          out_url);
+  }
+#else
+  // Fallback for non-Windows (e.g. Linux/Mac)
+  cef_string_from_ascii("file:///projects/lite_browser/ui/editor.html", 44,
+                        out_url);
+#endif
+}
+
 // Implement reference counting functions for simple_app_t.
 IMPLEMENT_REFCOUNTING_MANUAL(simple_app_t, simple_app, ref_count)
 
@@ -95,6 +140,21 @@ int CEF_CALLBACK simple_app_release(cef_base_ref_counted_t *self) {
     return 1;
   }
   return 0;
+}
+
+void CEF_CALLBACK simple_app_on_before_command_line_processing(
+    cef_app_t* self,
+    const cef_string_t* process_type,
+    cef_command_line_t* command_line) {
+  cef_string_t switch1 = {};
+  cef_string_from_ascii("disable-web-security", 20, &switch1);
+  command_line->append_switch(command_line, &switch1);
+  cef_string_clear(&switch1);
+
+  cef_string_t switch2 = {};
+  cef_string_from_ascii("allow-file-access-from-files", 28, &switch2);
+  command_line->append_switch(command_line, &switch2);
+  cef_string_clear(&switch2);
 }
 
 // Returns the browser process handler.
@@ -154,6 +214,22 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
         host->base.release(&host->base);
       }
     }
+
+    int content_w = width - 2;
+    int editor_w = 0;
+
+    if (win_ctx->show_editor && win_ctx->editor_hwnd)
+    {
+      content_w = (width - 3) / 2;
+      editor_w = width - 3 - content_w;
+      MoveWindow(win_ctx->editor_hwnd, content_w + 2, 101, editor_w, height - 102, TRUE);
+    }
+    else if (win_ctx->editor_hwnd)
+    {
+      MoveWindow(win_ctx->editor_hwnd, 0, 0, 0, 0, FALSE);
+      ShowWindow(win_ctx->editor_hwnd, SW_HIDE);
+    }
+
     if (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count)
     {
       cef_browser_t* content_browser = win_ctx->tabs[win_ctx->active_tab_index].browser;
@@ -165,7 +241,7 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
           HWND content_hwnd = host->get_window_handle(host);
           if (content_hwnd)
           {
-            MoveWindow(content_hwnd, 1, 101, width - 2, height - 102, TRUE);
+            MoveWindow(content_hwnd, 1, 101, content_w, height - 102, TRUE);
           }
           host->base.release(&host->base);
         }
@@ -214,6 +290,15 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
       if (win_ctx->ui_browser)
       {
         cef_browser_host_t* host = win_ctx->ui_browser->get_host(win_ctx->ui_browser);
+        if (host)
+        {
+          host->close_browser(host, 1);
+          host->base.release(&host->base);
+        }
+      }
+      if (win_ctx->editor_browser)
+      {
+        cef_browser_host_t* host = win_ctx->editor_browser->get_host(win_ctx->editor_browser);
         if (host)
         {
           host->close_browser(host, 1);
@@ -317,6 +402,7 @@ browser_window_t* create_browser_window(const char* startup_url) {
 
   simple_handler_t *ui_handler = simple_handler_create(0);
   ui_handler->window_ctx = win_ctx;
+  ui_handler->type = BROWSER_TYPE_UI;
 
   cef_browser_host_create_browser(&ui_window_info, &ui_handler->client,
                                   &ui_url, &browser_settings, NULL, NULL);
@@ -339,6 +425,7 @@ browser_window_t* create_browser_window(const char* startup_url) {
 
   simple_handler_t *content_handler = simple_handler_create(0);
   content_handler->window_ctx = win_ctx;
+  content_handler->type = BROWSER_TYPE_CONTENT;
 
   win_ctx->tabs[0].tab_id = 1;
   win_ctx->tabs[0].browser = NULL;
@@ -352,6 +439,33 @@ browser_window_t* create_browser_window(const char* startup_url) {
       &content_window_info, &content_handler->client, &content_url,
       &browser_settings, NULL, NULL);
   cef_string_clear(&content_url);
+
+  // 3. Create MD Editor child browser
+  cef_window_info_t editor_window_info = {};
+  editor_window_info.size = sizeof(cef_window_info_t);
+  // Initially hidden (do not specify WS_VISIBLE)
+  editor_window_info.style = WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
+  editor_window_info.parent_window = main_hwnd;
+  editor_window_info.bounds.x = 0;
+  editor_window_info.bounds.y = 0;
+  editor_window_info.bounds.width = 0;
+  editor_window_info.bounds.height = 0;
+  editor_window_info.runtime_style = CEF_RUNTIME_STYLE_DEFAULT;
+
+  cef_string_t editor_url = {};
+  ResolveEditorPath(&editor_url);
+
+  simple_handler_t *editor_handler = simple_handler_create(0);
+  editor_handler->window_ctx = win_ctx;
+  editor_handler->type = BROWSER_TYPE_EDITOR;
+
+  win_ctx->editor_browser = NULL;
+  win_ctx->editor_hwnd = NULL;
+  win_ctx->show_editor = 0;
+
+  cef_browser_host_create_browser(&editor_window_info, &editor_handler->client,
+                                  &editor_url, &browser_settings, NULL, NULL);
+  cef_string_clear(&editor_url);
 
   return win_ctx;
 }
@@ -412,6 +526,7 @@ browser_window_t* create_browser_window_for_detached(cef_browser_t* detached_bro
 
   simple_handler_t *ui_handler = simple_handler_create(0);
   ui_handler->window_ctx = win_ctx;
+  ui_handler->type = BROWSER_TYPE_UI;
 
   cef_browser_host_create_browser(&ui_window_info, &ui_handler->client,
                                   &ui_url, &browser_settings, NULL, NULL);
@@ -446,6 +561,33 @@ browser_window_t* create_browser_window_for_detached(cef_browser_t* detached_bro
     host->base.release(&host->base);
   }
 
+  // 3. Create MD Editor child browser
+  cef_window_info_t editor_window_info = {};
+  editor_window_info.size = sizeof(cef_window_info_t);
+  // Initially hidden (do not specify WS_VISIBLE)
+  editor_window_info.style = WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
+  editor_window_info.parent_window = main_hwnd;
+  editor_window_info.bounds.x = 0;
+  editor_window_info.bounds.y = 0;
+  editor_window_info.bounds.width = 0;
+  editor_window_info.bounds.height = 0;
+  editor_window_info.runtime_style = CEF_RUNTIME_STYLE_DEFAULT;
+
+  cef_string_t editor_url = {};
+  ResolveEditorPath(&editor_url);
+
+  simple_handler_t *editor_handler = simple_handler_create(0);
+  editor_handler->window_ctx = win_ctx;
+  editor_handler->type = BROWSER_TYPE_EDITOR;
+
+  win_ctx->editor_browser = NULL;
+  win_ctx->editor_hwnd = NULL;
+  win_ctx->show_editor = 0;
+
+  cef_browser_host_create_browser(&editor_window_info, &editor_handler->client,
+                                  &editor_url, &browser_settings, NULL, NULL);
+  cef_string_clear(&editor_url);
+
   return win_ctx;
 }
 #endif
@@ -476,7 +618,7 @@ void CEF_CALLBACK browser_process_handler_on_context_initialized(
   }
   else
   {
-    cef_string_from_ascii("https://www.google.com", 22, &url);
+    cef_string_from_ascii("https://gemini.google.com", 25, &url);
   }
 
   cef_string_utf8_t url_utf8 = {};
@@ -559,6 +701,7 @@ simple_app_t *simple_app_create(void) {
 
   // Set callbacks.
   app->app.get_browser_process_handler = simple_app_get_browser_process_handler;
+  app->app.on_before_command_line_processing = simple_app_on_before_command_line_processing;
 
   // Create the browser process handler.
   app->browser_process_handler = browser_process_handler_create();
