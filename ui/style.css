@@ -32,7 +32,7 @@ body {
 .tabs-container {
   display: flex;
   align-items: flex-end;
-  flex: 1;
+  flex: 0 1 auto;
   overflow-x: auto;
   gap: 4px;
   scrollbar-width: none;
@@ -248,4 +248,54 @@ body {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+.menu-container {
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+/* 윈도우 제어 버튼 컨테이너 */
+.window-controls {
+  display: flex;
+  align-self: flex-start;
+  margin-top: 0;
+  margin-left: auto;
+  gap: 0;
+  height: 100%;
+}
+
+.win-control-btn {
+  background: transparent;
+  border: none;
+  width: 46px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #52525b;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.win-control-btn svg {
+  width: 10px;
+  height: 10px;
+  fill: currentColor;
+}
+
+.win-control-btn:hover {
+  background: rgba(0, 0, 0, 0.08);
+  color: #18181b;
+}
+
+.win-control-btn.win-close-btn:hover {
+  background: #e81123;
+  color: #ffffff;
+}
+
+.tabs-spacer {
+  flex: 1;
+  height: 100%;
 }

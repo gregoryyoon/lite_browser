@@ -38,6 +38,7 @@ simple_display_handler_t *display_handler_create(simple_handler_t *parent);
 simple_life_span_handler_t *life_span_handler_create(simple_handler_t *parent);
 simple_load_handler_t *load_handler_create(simple_handler_t *parent);
 simple_request_handler_t *request_handler_create(simple_handler_t *parent);
+simple_context_menu_handler_t *context_menu_handler_create(simple_handler_t *parent);
 
 //
 // Client handler implementation.
@@ -66,6 +67,10 @@ int CEF_CALLBACK simple_handler_release(cef_base_ref_counted_t *self) {
       handler->request_handler->handler.base.release(
           &handler->request_handler->handler.base);
     }
+    if (handler->context_menu_handler) {
+      handler->context_menu_handler->handler.base.release(
+          &handler->context_menu_handler->handler.base);
+    }
 
     
 
@@ -86,6 +91,18 @@ int CEF_CALLBACK simple_handler_release(cef_base_ref_counted_t *self) {
 //
 // Client handler getter implementations.
 //
+
+cef_context_menu_handler_t *CEF_CALLBACK
+simple_handler_get_context_menu_handler(cef_client_t *self) {
+  simple_handler_t *handler = (simple_handler_t *)self;
+  if (handler->context_menu_handler) {
+    // Add reference before returning.
+    handler->context_menu_handler->handler.base.add_ref(
+        &handler->context_menu_handler->handler.base);
+    return &handler->context_menu_handler->handler;
+  }
+  return NULL;
+}
 
 cef_display_handler_t *CEF_CALLBACK
 simple_handler_get_display_handler(cef_client_t *self) {
@@ -152,6 +169,7 @@ simple_handler_t *simple_handler_create(int is_alloy_style) {
   handler->client.get_life_span_handler = simple_handler_get_life_span_handler;
   handler->client.get_load_handler = simple_handler_get_load_handler;
   handler->client.get_request_handler = simple_handler_get_request_handler;
+  handler->client.get_context_menu_handler = simple_handler_get_context_menu_handler;
 
   // Create sub-handlers.
   handler->display_handler = display_handler_create(handler);
@@ -162,6 +180,8 @@ simple_handler_t *simple_handler_create(int is_alloy_style) {
   CHECK(handler->load_handler);
   handler->request_handler = request_handler_create(handler);
   CHECK(handler->request_handler);
+  handler->context_menu_handler = context_menu_handler_create(handler);
+  CHECK(handler->context_menu_handler);
 
   // Initialize other fields.
   handler->is_alloy_style = is_alloy_style;
@@ -372,6 +392,231 @@ int CEF_CALLBACK request_handler_on_before_browse(
           if (cb) cb->go_forward(cb);
         } else if (strcmp(action, "reload") == 0) {
           if (cb) cb->reload(cb);
+        } else if (strncmp(action, "show-menu?", 10) == 0) {
+          int click_x = 0, click_y = 0;
+          if (sscanf(action + 10, "x=%d&y=%d", &click_x, &click_y) == 2) {
+            POINT pt = {click_x, click_y};
+            ClientToScreen(win_ctx->ui_hwnd, &pt);
+
+            HMENU hMenu = CreatePopupMenu();
+            AppendMenuW(hMenu, MF_STRING, 1001, L"새 탭");
+            AppendMenuW(hMenu, MF_STRING, 1002, L"새 창");
+            AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+            AppendMenuW(hMenu, MF_STRING, 1003, L"인쇄...");
+            AppendMenuW(hMenu, MF_STRING, 1004, L"개발자 도구 (Inspect)");
+            AppendMenuW(hMenu, MF_STRING, 1005, L"페이지 소스 보기");
+            AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+            AppendMenuW(hMenu, MF_STRING, 1006, L"종료");
+
+            int cmd = TrackPopupMenu(hMenu, TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN, pt.x, pt.y, 0, win_ctx->main_hwnd, NULL);
+            DestroyMenu(hMenu);
+
+            if (cmd == 1001) {
+              if (win_ctx->tab_count < MAX_TABS) {
+                RECT rect;
+                GetClientRect(win_ctx->main_hwnd, &rect);
+                int width = rect.right;
+                int height = rect.bottom;
+
+                cef_browser_settings_t browser_settings = {};
+                browser_settings.size = sizeof(cef_browser_settings_t);
+
+                cef_window_info_t content_window_info = {};
+                content_window_info.size = sizeof(cef_window_info_t);
+                content_window_info.style = WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
+                content_window_info.parent_window = win_ctx->main_hwnd;
+                content_window_info.bounds.x = 1;
+                content_window_info.bounds.y = 101;
+                content_window_info.bounds.width = width - 2;
+                content_window_info.bounds.height = height - 102;
+                content_window_info.runtime_style = CEF_RUNTIME_STYLE_DEFAULT;
+
+                cef_string_t content_url = {};
+                cef_string_from_ascii("https://www.google.com", 22, &content_url);
+
+                simple_handler_t *content_handler = simple_handler_create(0);
+                content_handler->window_ctx = win_ctx;
+
+                int next_idx = win_ctx->tab_count;
+                int max_id = 0;
+                for(int k=0; k<win_ctx->tab_count; k++) {
+                  if (win_ctx->tabs[k].tab_id > max_id) max_id = win_ctx->tabs[k].tab_id;
+                }
+                win_ctx->tabs[next_idx].tab_id = max_id + 1;
+                win_ctx->tabs[next_idx].browser = NULL;
+                win_ctx->tabs[next_idx].hwnd = NULL;
+                strcpy(win_ctx->tabs[next_idx].title, "새 탭");
+                strcpy(win_ctx->tabs[next_idx].url, "https://www.google.com");
+                win_ctx->tab_count++;
+
+                cef_browser_host_create_browser(
+                    &content_window_info, &content_handler->client, &content_url,
+                    &browser_settings, NULL, NULL);
+                cef_string_clear(&content_url);
+              }
+            } else if (cmd == 1002) {
+              create_browser_window("https://www.google.com");
+            } else if (cmd == 1003) {
+              if (cb) {
+                cef_browser_host_t* host = cb->get_host(cb);
+                if (host) {
+                  host->print(host);
+                  host->base.release(&host->base);
+                }
+              }
+            } else if (cmd == 1004) {
+              if (cb) {
+                cef_window_info_t windowInfo = {};
+                windowInfo.size = sizeof(cef_window_info_t);
+                windowInfo.style = WS_OVERLAPPEDWINDOW | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
+                windowInfo.parent_window = NULL;
+                windowInfo.runtime_style = CEF_RUNTIME_STYLE_DEFAULT;
+
+                cef_browser_settings_t settings = {};
+                settings.size = sizeof(cef_browser_settings_t);
+
+                cef_browser_host_t* host = cb->get_host(cb);
+                if (host) {
+                  host->show_dev_tools(host, &windowInfo, NULL, &settings, NULL);
+                  host->base.release(&host->base);
+                }
+              }
+            } else if (cmd == 1005) {
+              if (win_ctx && win_ctx->tab_count < MAX_TABS && win_ctx->active_tab_index >= 0) {
+                char vs_url[1200] = "view-source:";
+                strncat(vs_url, win_ctx->tabs[win_ctx->active_tab_index].url, sizeof(vs_url) - 13);
+
+                RECT rect;
+                GetClientRect(win_ctx->main_hwnd, &rect);
+                int width = rect.right;
+                int height = rect.bottom;
+
+                cef_browser_settings_t browser_settings = {};
+                browser_settings.size = sizeof(cef_browser_settings_t);
+
+                cef_window_info_t content_window_info = {};
+                content_window_info.size = sizeof(cef_window_info_t);
+                content_window_info.style = WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
+                content_window_info.parent_window = win_ctx->main_hwnd;
+                content_window_info.bounds.x = 1;
+                content_window_info.bounds.y = 101;
+                content_window_info.bounds.width = width - 2;
+                content_window_info.bounds.height = height - 102;
+                content_window_info.runtime_style = CEF_RUNTIME_STYLE_DEFAULT;
+
+                cef_string_t content_url = {};
+                cef_string_from_utf8(vs_url, strlen(vs_url), &content_url);
+
+                simple_handler_t *content_handler = simple_handler_create(0);
+                content_handler->window_ctx = win_ctx;
+
+                int next_idx = win_ctx->tab_count;
+                int max_id = 0;
+                for(int k=0; k<win_ctx->tab_count; k++) {
+                  if (win_ctx->tabs[k].tab_id > max_id) max_id = win_ctx->tabs[k].tab_id;
+                }
+                win_ctx->tabs[next_idx].tab_id = max_id + 1;
+                win_ctx->tabs[next_idx].browser = NULL;
+                win_ctx->tabs[next_idx].hwnd = NULL;
+                strcpy(win_ctx->tabs[next_idx].title, "소스 보기");
+                strcpy(win_ctx->tabs[next_idx].url, vs_url);
+                win_ctx->tab_count++;
+
+                cef_browser_host_create_browser(
+                    &content_window_info, &content_handler->client, &content_url,
+                    &browser_settings, NULL, NULL);
+                cef_string_clear(&content_url);
+              }
+            } else if (cmd == 1006) {
+              PostMessage(win_ctx->main_hwnd, WM_CLOSE, 0, 0);
+            }
+          }
+        } else if (strcmp(action, "print") == 0) {
+          if (cb) {
+            cef_browser_host_t* host = cb->get_host(cb);
+            if (host) {
+              host->print(host);
+              host->base.release(&host->base);
+            }
+          }
+        } else if (strcmp(action, "devtools") == 0) {
+          if (cb) {
+            cef_window_info_t windowInfo = {};
+            windowInfo.size = sizeof(cef_window_info_t);
+            windowInfo.style = WS_OVERLAPPEDWINDOW | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
+            windowInfo.parent_window = NULL;
+            windowInfo.runtime_style = CEF_RUNTIME_STYLE_DEFAULT;
+
+            cef_browser_settings_t settings = {};
+            settings.size = sizeof(cef_browser_settings_t);
+
+            cef_browser_host_t* host = cb->get_host(cb);
+            if (host) {
+              host->show_dev_tools(host, &windowInfo, NULL, &settings, NULL);
+              host->base.release(&host->base);
+            }
+          }
+        } else if (strcmp(action, "view-source") == 0) {
+          if (win_ctx && win_ctx->tab_count < MAX_TABS && win_ctx->active_tab_index >= 0) {
+            char vs_url[1200] = "view-source:";
+            strncat(vs_url, win_ctx->tabs[win_ctx->active_tab_index].url, sizeof(vs_url) - 13);
+
+            RECT rect;
+            GetClientRect(win_ctx->main_hwnd, &rect);
+            int width = rect.right;
+            int height = rect.bottom;
+
+            cef_browser_settings_t browser_settings = {};
+            browser_settings.size = sizeof(cef_browser_settings_t);
+
+            cef_window_info_t content_window_info = {};
+            content_window_info.size = sizeof(cef_window_info_t);
+            content_window_info.style = WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
+            content_window_info.parent_window = win_ctx->main_hwnd;
+            content_window_info.bounds.x = 1;
+            content_window_info.bounds.y = 101;
+            content_window_info.bounds.width = width - 2;
+            content_window_info.bounds.height = height - 102;
+            content_window_info.runtime_style = CEF_RUNTIME_STYLE_DEFAULT;
+
+            cef_string_t content_url = {};
+            cef_string_from_utf8(vs_url, strlen(vs_url), &content_url);
+
+            simple_handler_t *content_handler = simple_handler_create(0);
+            content_handler->window_ctx = win_ctx;
+
+            int next_idx = win_ctx->tab_count;
+            int max_id = 0;
+            for(int k=0; k<win_ctx->tab_count; k++) {
+              if (win_ctx->tabs[k].tab_id > max_id) max_id = win_ctx->tabs[k].tab_id;
+            }
+            win_ctx->tabs[next_idx].tab_id = max_id + 1;
+            win_ctx->tabs[next_idx].browser = NULL;
+            win_ctx->tabs[next_idx].hwnd = NULL;
+            strcpy(win_ctx->tabs[next_idx].title, "소스 보기");
+            strcpy(win_ctx->tabs[next_idx].url, vs_url);
+            win_ctx->tab_count++;
+
+            cef_browser_host_create_browser(
+                &content_window_info, &content_handler->client, &content_url,
+                &browser_settings, NULL, NULL);
+            cef_string_clear(&content_url);
+          }
+        } else if (strcmp(action, "exit") == 0) {
+          PostMessage(win_ctx->main_hwnd, WM_CLOSE, 0, 0);
+        } else if (strcmp(action, "drag-window") == 0) {
+          ReleaseCapture();
+          SendMessage(win_ctx->main_hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0);
+        } else if (strcmp(action, "window-minimize") == 0) {
+          ShowWindow(win_ctx->main_hwnd, SW_MINIMIZE);
+        } else if (strcmp(action, "window-maximize") == 0) {
+          if (IsZoomed(win_ctx->main_hwnd)) {
+            ShowWindow(win_ctx->main_hwnd, SW_RESTORE);
+          } else {
+            ShowWindow(win_ctx->main_hwnd, SW_MAXIMIZE);
+          }
+        } else if (strcmp(action, "window-close") == 0) {
+          PostMessage(win_ctx->main_hwnd, WM_CLOSE, 0, 0);
         } else if (strncmp(action, "load?url=", 9) == 0) {
           if (cb) {
             const char *encoded_url = action + 9;
@@ -692,6 +937,150 @@ simple_request_handler_t *request_handler_create(simple_handler_t *parent) {
                            request_handler);
 
   handler->handler.on_before_browse = request_handler_on_before_browse;
+  handler->parent = parent;
+
+  atomic_store(&handler->ref_count, 1);
+
+  return handler;
+}
+
+//
+// Context menu handler implementation.
+//
+
+IMPLEMENT_REFCOUNTING_SIMPLE(simple_context_menu_handler_t, context_menu_handler,
+                             ref_count)
+
+void CEF_CALLBACK context_menu_on_before_context_menu(
+    cef_context_menu_handler_t* self,
+    cef_browser_t* browser,
+    cef_frame_t* frame,
+    cef_context_menu_params_t* params,
+    cef_menu_model_t* model) {
+  
+  LogMsg("on_before_context_menu: start\n");
+  
+  // Clear default items to prevent CEF from displaying anything.
+  model->clear(model);
+  
+  int click_x = params->get_xcoord(params);
+  int click_y = params->get_ycoord(params);
+  POINT pt = {click_x, click_y};
+  
+  cef_browser_host_t* host = browser->get_host(browser);
+  if (host) {
+    HWND hwnd = host->get_window_handle(host);
+    ClientToScreen(hwnd, &pt);
+    
+    HMENU hMenu = CreatePopupMenu();
+    int can_back = browser->can_go_back(browser);
+    int can_forward = browser->can_go_forward(browser);
+    
+    AppendMenuW(hMenu, MF_STRING | (can_back ? 0 : MF_GRAYED), MENU_ID_BACK, L"뒤로 가기");
+    AppendMenuW(hMenu, MF_STRING | (can_forward ? 0 : MF_GRAYED), MENU_ID_FORWARD, L"앞으로 가기");
+    AppendMenuW(hMenu, MF_STRING, MENU_ID_RELOAD, L"새로고침");
+    AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+    AppendMenuW(hMenu, MF_STRING, MENU_ID_PRINT, L"인쇄...");
+    AppendMenuW(hMenu, MF_STRING, MENU_ID_VIEW_SOURCE, L"페이지 소스 보기");
+    AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+    AppendMenuW(hMenu, MF_STRING, MENU_ID_USER_FIRST, L"검사 (Inspect)");
+    
+    LogMsg("on_before_context_menu: calling TrackPopupMenu (blocking)\n");
+    int cmd = TrackPopupMenu(hMenu, TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN, pt.x, pt.y, 0, hwnd, NULL);
+    LogMsg("on_before_context_menu: TrackPopupMenu returned cmd=%d\n", cmd);
+    DestroyMenu(hMenu);
+    
+    if (cmd > 0) {
+      if (cmd == MENU_ID_USER_FIRST) {
+        LogMsg("on_before_context_menu: show dev tools\n");
+        cef_window_info_t windowInfo = {};
+        windowInfo.size = sizeof(cef_window_info_t);
+        windowInfo.style = WS_OVERLAPPEDWINDOW | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
+        windowInfo.parent_window = NULL;
+        windowInfo.runtime_style = CEF_RUNTIME_STYLE_DEFAULT;
+        
+        cef_browser_settings_t settings = {};
+        settings.size = sizeof(cef_browser_settings_t);
+        
+        cef_point_t inspect_at = { click_x, click_y };
+        host->show_dev_tools(host, &windowInfo, NULL, &settings, &inspect_at);
+      } else if (cmd == MENU_ID_BACK) {
+        browser->go_back(browser);
+      } else if (cmd == MENU_ID_FORWARD) {
+        browser->go_forward(browser);
+      } else if (cmd == MENU_ID_RELOAD) {
+        browser->reload(browser);
+      } else if (cmd == MENU_ID_PRINT) {
+        host->print(host);
+      } else if (cmd == MENU_ID_VIEW_SOURCE) {
+        LogMsg("on_before_context_menu: view source trigger\n");
+        simple_context_menu_handler_t* ctx_handler = (simple_context_menu_handler_t*)self;
+        browser_window_t* win_ctx = ctx_handler->parent->window_ctx;
+        if (win_ctx && win_ctx->active_tab_index >= 0) {
+          char vs_url[1200] = "view-source:";
+          strncat(vs_url, win_ctx->tabs[win_ctx->active_tab_index].url, sizeof(vs_url) - 13);
+          
+          RECT rect;
+          GetClientRect(win_ctx->main_hwnd, &rect);
+          int width = rect.right;
+          int height = rect.bottom;
+          
+          cef_browser_settings_t browser_settings = {};
+          browser_settings.size = sizeof(cef_browser_settings_t);
+          
+          cef_window_info_t content_window_info = {};
+          content_window_info.size = sizeof(cef_window_info_t);
+          content_window_info.style = WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
+          content_window_info.parent_window = win_ctx->main_hwnd;
+          content_window_info.bounds.x = 1;
+          content_window_info.bounds.y = 101;
+          content_window_info.bounds.width = width - 2;
+          content_window_info.bounds.height = height - 102;
+          content_window_info.runtime_style = CEF_RUNTIME_STYLE_DEFAULT;
+          
+          cef_string_t content_url = {};
+          cef_string_from_utf8(vs_url, strlen(vs_url), &content_url);
+          
+          simple_handler_t *content_handler = simple_handler_create(0);
+          content_handler->window_ctx = win_ctx;
+          
+          int next_idx = win_ctx->tab_count;
+          int max_id = 0;
+          for(int k=0; k<win_ctx->tab_count; k++) {
+            if (win_ctx->tabs[k].tab_id > max_id) max_id = win_ctx->tabs[k].tab_id;
+          }
+          win_ctx->tabs[next_idx].tab_id = max_id + 1;
+          win_ctx->tabs[next_idx].browser = NULL;
+          win_ctx->tabs[next_idx].hwnd = NULL;
+          strcpy(win_ctx->tabs[next_idx].title, "소스 보기");
+          strcpy(win_ctx->tabs[next_idx].url, vs_url);
+          win_ctx->tab_count++;
+          
+          cef_browser_host_create_browser(
+              &content_window_info, &content_handler->client, &content_url,
+              &browser_settings, NULL, NULL);
+          cef_string_clear(&content_url);
+        }
+      }
+    }
+    
+    host->base.release(&host->base);
+  }
+  
+  LogMsg("on_before_context_menu: end\n");
+}
+
+simple_context_menu_handler_t *context_menu_handler_create(simple_handler_t *parent) {
+  simple_context_menu_handler_t *handler =
+      (simple_context_menu_handler_t *)calloc(1, sizeof(simple_context_menu_handler_t));
+  CHECK(handler);
+
+  INIT_CEF_BASE_REFCOUNTED(&handler->handler.base, cef_context_menu_handler_t,
+                           context_menu_handler);
+
+  handler->handler.on_before_context_menu = context_menu_on_before_context_menu;
+  handler->handler.on_context_menu_command = NULL;
+  handler->handler.run_context_menu = NULL;
   handler->parent = parent;
 
   atomic_store(&handler->ref_count, 1);

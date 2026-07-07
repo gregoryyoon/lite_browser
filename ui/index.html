@@ -13,9 +13,18 @@
       <button class="tab-btn add-tab" onclick="newTab()" title="새 탭">
         <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
       </button>
-      <button class="tab-btn new-window" onclick="newWindow()" title="새 창">
-        <svg viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12z"/></svg>
-      </button>
+      <div class="tabs-spacer"></div>
+      <div class="window-controls">
+        <button class="win-control-btn" onclick="minimizeWindow()" title="최소화">
+          <svg viewBox="0 0 10.2 1"><rect x="0" y="0" width="10.2" height="1"/></svg>
+        </button>
+        <button id="win-max" class="win-control-btn" onclick="maximizeWindow()" title="최대화">
+          <svg viewBox="0 0 10 10"><path d="M0,0v10h10V0H0z M9,9H1V1h8V9z"/></svg>
+        </button>
+        <button class="win-control-btn win-close-btn" onclick="closeWindow()" title="닫기">
+          <svg viewBox="0 0 10 10"><path d="M10,0.9L9.1,0L5,4.1L0.9,0L0,0.9L4.1,5L0,9.1L0.9,10L5,5.9L9.1,10L10,9.1L5.9,5L10,0.9z"/></svg>
+        </button>
+      </div>
     </div>
     <div class="navbar">
     <div class="nav-buttons">
@@ -36,6 +45,11 @@
       </div>
       <input type="text" id="address-bar" placeholder="검색어 또는 웹사이트 주소 입력" onkeydown="handleKey(event)">
       <div id="loader" class="loader hide"></div>
+    </div>
+    <div class="menu-container">
+      <button id="menu-btn" class="nav-btn" onclick="toggleMenu(event)" title="메뉴">
+        <svg viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
+      </button>
     </div>
   </div>
   </div>

@@ -7,6 +7,8 @@
 
 #if defined(OS_WIN)
 #include <windows.h>
+#include <dwmapi.h>
+#pragma comment(lib, "dwmapi.lib")
 #endif
 #include <stdarg.h>
 #include <stdio.h>
@@ -169,6 +171,21 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
         }
       }
     }
+
+    // Send maximize state to UI browser
+    if (win_ctx->ui_browser) {
+      char js_cmd[100];
+      sprintf(js_cmd, "if (window.updateMaximizeState) { window.updateMaximizeState(%d); }", IsZoomed(hwnd));
+      cef_frame_t *frame = win_ctx->ui_browser->get_main_frame(win_ctx->ui_browser);
+      if (frame) {
+        cef_string_t js_str = {};
+        cef_string_from_utf8(js_cmd, strlen(js_cmd), &js_str);
+        frame->execute_java_script(frame, &js_str, NULL, 0);
+        cef_string_clear(&js_str);
+        frame->base.release(&frame->base);
+      }
+    }
+
     return 0;
   }
   case WM_CLOSE:
@@ -252,13 +269,17 @@ browser_window_t* create_browser_window(const char* startup_url) {
 
   HWND main_hwnd = CreateWindowEx(
       0, L"LiteBrowserMainWindowClass", L"Lite Browser",
-      WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | WS_VISIBLE,
+      WS_POPUP | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | WS_VISIBLE,
       CW_USEDEFAULT, CW_USEDEFAULT, 1024, 768, NULL, NULL, hInstance, NULL);
 
   if (!main_hwnd) {
     free(win_ctx);
     return NULL;
   }
+
+  // DWM Shadow Effect
+  MARGINS margins = { 1, 1, 1, 1 };
+  DwmExtendFrameIntoClientArea(main_hwnd, &margins);
 
   win_ctx->main_hwnd = main_hwnd;
   SetWindowLongPtr(main_hwnd, GWLP_USERDATA, (LONG_PTR)win_ctx);
@@ -343,13 +364,17 @@ browser_window_t* create_browser_window_for_detached(cef_browser_t* detached_bro
 
   HWND main_hwnd = CreateWindowEx(
       0, L"LiteBrowserMainWindowClass", L"Lite Browser",
-      WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | WS_VISIBLE,
+      WS_POPUP | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | WS_VISIBLE,
       x, y, 1024, 768, NULL, NULL, hInstance, NULL);
 
   if (!main_hwnd) {
     free(win_ctx);
     return NULL;
   }
+
+  // DWM Shadow Effect
+  MARGINS margins = { 1, 1, 1, 1 };
+  DwmExtendFrameIntoClientArea(main_hwnd, &margins);
 
   win_ctx->main_hwnd = main_hwnd;
   SetWindowLongPtr(main_hwnd, GWLP_USERDATA, (LONG_PTR)win_ctx);

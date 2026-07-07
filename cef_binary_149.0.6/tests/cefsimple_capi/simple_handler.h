@@ -18,6 +18,7 @@ typedef struct _simple_display_handler_t simple_display_handler_t;
 typedef struct _simple_life_span_handler_t simple_life_span_handler_t;
 typedef struct _simple_load_handler_t simple_load_handler_t;
 typedef struct _simple_request_handler_t simple_request_handler_t;
+typedef struct _simple_context_menu_handler_t simple_context_menu_handler_t;
 
 // Client handler structure.
 // Implements cef_client_t interface.
@@ -33,6 +34,7 @@ typedef struct _simple_handler_t {
   simple_life_span_handler_t *life_span_handler;
   simple_load_handler_t *load_handler;
   simple_request_handler_t *request_handler;
+  simple_context_menu_handler_t *context_menu_handler;
 
   // Pointer to the browser window context this handler belongs to.
   browser_window_t *window_ctx;
@@ -46,6 +48,19 @@ typedef struct _simple_handler_t {
   // Set to true when browsers are closing.
   int is_closing;
 } simple_handler_t;
+
+// Context menu handler structure.
+// Implements cef_context_menu_handler_t interface.
+typedef struct _simple_context_menu_handler_t {
+  // MUST be first member - CEF base structure.
+  cef_context_menu_handler_t handler;
+
+  // Reference count for this object.
+  atomic_int ref_count;
+
+  // Back reference to parent handler.
+  simple_handler_t *parent;
+} simple_context_menu_handler_t;
 
 // Request handler structure.
 // Implements cef_request_handler_t interface.

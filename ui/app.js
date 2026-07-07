@@ -14,10 +14,6 @@ function newTab() {
   window.location.href = 'http://ui-action/new-tab';
 }
 
-function newWindow() {
-  window.location.href = 'http://ui-action/new-window';
-}
-
 function switchTab(id) {
   window.location.href = 'http://ui-action/switch-tab?id=' + id;
 }
@@ -92,6 +88,9 @@ window.updateTabsList = function(tabs, activeId) {
     closeEl.className = 'tab-close';
     closeEl.innerHTML = '&times;';
     closeEl.onclick = (e) => closeTab(tab.id, e);
+    closeEl.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+    });
     tabEl.appendChild(closeEl);
 
     let isDragging = false;
@@ -150,4 +149,59 @@ window.updateTabsList = function(tabs, activeId) {
 
     container.appendChild(tabEl);
   });
+};
+
+function toggleMenu(event) {
+  event.stopPropagation();
+  const btn = document.getElementById('menu-btn');
+  if (btn) {
+    const rect = btn.getBoundingClientRect();
+    const x = Math.round(rect.left);
+    const y = Math.round(rect.bottom);
+    window.location.href = 'http://ui-action/show-menu?x=' + x + '&y=' + y;
+  }
+}
+
+// 창 드래그 이동을 위한 마우스 리스너
+document.addEventListener('DOMContentLoaded', () => {
+  const tabsBar = document.querySelector('.tabs-bar');
+  if (tabsBar) {
+    tabsBar.addEventListener('mousedown', (e) => {
+      const target = e.target;
+      // .tab, .tab-btn, .win-control-btn 자식 요소를 클릭한 경우 드래그하지 않음
+      if (target.closest('.tab') || target.closest('.tab-btn') || target.closest('.win-control-btn')) {
+        return;
+      }
+      window.location.href = 'http://ui-action/drag-window';
+    });
+  }
+});
+
+// 최소화, 최대화, 닫기 액션 디스패치 함수
+function minimizeWindow() {
+  window.location.href = 'http://ui-action/window-minimize';
+}
+
+function maximizeWindow() {
+  window.location.href = 'http://ui-action/window-maximize';
+}
+
+function closeWindow() {
+  window.location.href = 'http://ui-action/window-close';
+}
+
+// 최대화 상태에 따른 아이콘 갱신 함수 (백엔드 C 코드에서 호출)
+window.updateMaximizeState = function(isMaximized) {
+  const maxBtn = document.getElementById('win-max');
+  if (maxBtn) {
+    if (isMaximized) {
+      // 겹쳐진 두 개의 사각형 (이전 크기로 복원 - 일반 메모장 스타일)
+      maxBtn.innerHTML = '<svg viewBox="0 0 10 10"><path d="M2,0v2H0v8h8V8h2V0H2z M7,9H1V3h6V9z M9,7H8V2H3V1h6V7z"/></svg>';
+      maxBtn.title = "이전 크기로 복원";
+    } else {
+      // 하나의 사각형 (최대화)
+      maxBtn.innerHTML = '<svg viewBox="0 0 10 10"><path d="M0,0v10h10V0H0z M9,9H1V1h8V9z"/></svg>';
+      maxBtn.title = "최대화";
+    }
+  }
 };
