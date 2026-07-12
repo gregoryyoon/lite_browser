@@ -4,14 +4,49 @@
   <meta charset="UTF-8">
   <title>Markdown Editor</title>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <!-- TOAST UI Editor CSS -->
+  <link rel="stylesheet" href="https://uicdn.toast.com/editor/latest/toastui-editor.min.css" />
   <style>
+    * {
+      box-sizing: border-box;
+    }
     body {
       font-family: 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       margin: 0;
       padding: 0;
-      background-color: #f4f4f5;
+      background-color: #ffffff;
       overflow: hidden;
       height: 100vh;
+      width: 100vw;
+    }
+    #editor-container {
+      height: 100vh;
+      width: 100vw;
+      position: absolute;
+      top: 0;
+      left: 0;
+      overflow: hidden;
+    }
+    /* Customize TOAST UI Editor style to fit nicely with our premium layout */
+    .toastui-editor-defaultUI {
+      border: none !important;
+    }
+    /* Float the mode switch bar above the floating card to prevent click interception */
+    .toastui-editor-mode-switch {
+      bottom: 80px !important;
+      right: 20px !important;
+      left: auto !important;
+      width: auto !important;
+      background: rgba(255, 255, 255, 0.9) !important;
+      border: 1px solid rgba(0, 0, 0, 0.1) !important;
+      border-radius: 10px !important;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05) !important;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+    }
+    /* Add extra padding at the bottom of the editor pane so the floating card doesn't cover text */
+    .toastui-editor-main-container {
+      padding-bottom: 80px;
     }
     .floating-card {
       position: fixed;
@@ -19,7 +54,7 @@
       left: 50%;
       transform: translateX(-50%);
       z-index: 100000;
-      display: flex;
+      display: none; /* Hidden by default */
       align-items: center;
       gap: 8px;
       background: rgba(255, 255, 255, 0.85);
@@ -30,6 +65,9 @@
       border-radius: 14px;
       padding: 10px 16px;
       transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .floating-card.visible {
+      display: flex;
     }
     .floating-card:hover {
       box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12);
@@ -117,6 +155,8 @@
   </style>
 </head>
 <body>
+  <div id="editor-container"></div>
+
   <div class="floating-card">
     <button class="btn btn-secondary" onclick="newFile()">새 파일</button>
     <input type="text" id="filename-input" class="input-field" placeholder="파일명.md" value="untitled.md">
@@ -128,9 +168,29 @@
   </div>
   <div id="toast" class="toast">저장 완료</div>
 
-  <script src="https://unpkg.com/stackedit-js@1.0.7/docs/lib/stackedit.min.js"></script>
+  <!-- TOAST UI Editor JS -->
+  <script src="https://uicdn.toast.com/editor/latest/toastui-editor-all.min.js"></script>
   <script>
-    let stackedit;
+    // Global error logger to capture any JS errors in backend logs
+    window.onerror = function(message, source, lineno, colno, error) {
+      const errStr = `[JS Error] ${message} at ${source}:${lineno}:${colno}`;
+      window.location.href = 'http://ui-action/log?msg=' + encodeURIComponent(errStr);
+      return false;
+    };
+    window.onunhandledrejection = function(event) {
+      const errStr = `[JS Unhandled Rejection] ${event.reason}`;
+      window.location.href = 'http://ui-action/log?msg=' + encodeURIComponent(errStr);
+    };
+
+    // Prevent any browser scroll-into-view jumps when editor elements are focused
+    window.addEventListener('scroll', () => {
+      window.scrollTo(0, 0);
+    });
+    document.addEventListener('scroll', () => {
+      window.scrollTo(0, 0);
+    });
+
+    let editor;
     const DEFAULT_TEMPLATE = `# [역할 정의] 당신은 전문 [직업/역할]입니다.
 
 ## 1. 개요 (Context)
@@ -165,29 +225,60 @@
 
     let currentContent = DEFAULT_TEMPLATE;
 
-    window.onload = function() {
-      stackedit = new Stackedit();
+    function createCustomButton() {
+      const button = document.createElement('button');
+      button.className = 'toastui-editor-toolbar-icons';
+      button.style.backgroundImage = 'none';
+      button.style.margin = '0';
+      button.style.display = 'flex';
+      button.style.alignItems = 'center';
+      button.style.justifyContent = 'center';
+      button.style.border = 'none';
+      button.style.background = 'none';
+      button.style.cursor = 'pointer';
+      button.style.width = '32px';
+      button.style.height = '32px';
+      // Folder icon for file/document management control panel toggle
+      button.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-folder" style="color: #475569;"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`;
       
-      stackedit.on('fileChange', (file) => {
-        currentContent = file.content.text;
+      button.addEventListener('click', () => {
+        const card = document.querySelector('.floating-card');
+        card.classList.toggle('visible');
       });
-      
-      stackedit.on('close', () => {
-        openStackEdit();
+      return button;
+    }
+
+    window.onload = function() {
+      // Initialize TOAST UI Editor
+      editor = new toastui.Editor({
+        el: document.querySelector('#editor-container'),
+        height: '100%',
+        initialEditType: 'wysiwyg', // Default to WYSIWYG mode
+        previewStyle: 'vertical',
+        initialValue: currentContent,
+        toolbarItems: [
+          [
+            {
+              name: 'controlToggle',
+              tooltip: '파일 관리',
+              el: createCustomButton()
+            }
+          ],
+          ['heading', 'bold', 'italic', 'strike'],
+          ['hr', 'quote'],
+          ['ul', 'ol', 'task', 'indent', 'outdent'],
+          ['table', 'image', 'link'],
+          ['code', 'codeblock']
+        ]
       });
 
-      openStackEdit();
+      // Synchronize editor changes back to currentContent variable
+      editor.on('change', () => {
+        currentContent = editor.getMarkdown();
+      });
+
       refreshFileList();
     };
-
-    function openStackEdit() {
-      stackedit.openFile({
-        name: document.getElementById('filename-input').value,
-        content: {
-          text: currentContent
-        }
-      });
-    }
 
     function showToast(message) {
       const toast = document.getElementById('toast');
@@ -201,7 +292,7 @@
     function newFile() {
       document.getElementById('filename-input').value = 'untitled.md';
       currentContent = DEFAULT_TEMPLATE;
-      stackedit.close();
+      editor.setMarkdown(currentContent);
       showToast('새 파일이 생성되었습니다.');
     }
 
@@ -269,7 +360,7 @@
       }
       currentContent = new TextDecoder().decode(bytes);
       
-      stackedit.close();
+      editor.setMarkdown(currentContent);
       showToast('파일을 불러왔습니다: ' + name);
       document.getElementById('file-select').value = '';
     };
