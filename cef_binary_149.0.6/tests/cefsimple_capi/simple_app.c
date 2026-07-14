@@ -8,10 +8,26 @@
 #if defined(OS_WIN)
 #include <windows.h>
 #include <dwmapi.h>
+#include <shlobj.h>
+#include <shellapi.h>
 #pragma comment(lib, "dwmapi.lib")
+#pragma comment(lib, "shell32.lib")
 #endif
 #include <stdarg.h>
 #include <stdio.h>
+
+#if defined(OS_WIN)
+static void GetConfigFilePath(char* out_path, size_t max_len) {
+  char user_profile[MAX_PATH];
+  if (SHGetSpecialFolderPathA(NULL, user_profile, CSIDL_PROFILE, FALSE)) {
+    snprintf(out_path, max_len, "%s\\.lite-browser", user_profile);
+    CreateDirectoryA(out_path, NULL);
+    snprintf(out_path, max_len, "%s\\.lite-browser\\window_config.txt", user_profile);
+  } else {
+    snprintf(out_path, max_len, "C:\\projects\\lite_browser\\window_config.txt");
+  }
+}
+#endif
 
 #include "include/capi/cef_browser_capi.h"
 #include "include/capi/cef_command_line_capi.h"
@@ -195,6 +211,45 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
 
   switch (message)
   {
+  case WM_GETMINMAXINFO:
+  {
+    MINMAXINFO* mmi = (MINMAXINFO*)lParam;
+    HMONITOR hMonitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi = {0};
+    mi.cbSize = sizeof(MONITORINFO);
+    if (GetMonitorInfo(hMonitor, &mi)) {
+      APPBARDATA abd = {sizeof(APPBARDATA)};
+      UINT state = SHAppBarMessage(ABM_GETSTATE, &abd);
+      int is_autohide = (state & ABS_AUTOHIDE);
+
+      if (is_autohide) {
+        SHAppBarMessage(ABM_GETTASKBARPOS, &abd);
+        
+        mmi->ptMaxSize.x = mi.rcMonitor.right - mi.rcMonitor.left;
+        mmi->ptMaxSize.y = mi.rcMonitor.bottom - mi.rcMonitor.top;
+        mmi->ptMaxPosition.x = mi.rcMonitor.left;
+        mmi->ptMaxPosition.y = mi.rcMonitor.top;
+
+        if (abd.uEdge == ABE_BOTTOM) {
+          mmi->ptMaxSize.y -= 1;
+        } else if (abd.uEdge == ABE_TOP) {
+          mmi->ptMaxSize.y -= 1;
+          mmi->ptMaxPosition.y += 1;
+        } else if (abd.uEdge == ABE_LEFT) {
+          mmi->ptMaxSize.x -= 1;
+          mmi->ptMaxPosition.x += 1;
+        } else if (abd.uEdge == ABE_RIGHT) {
+          mmi->ptMaxSize.x -= 1;
+        }
+      } else {
+        mmi->ptMaxSize.x = mi.rcWork.right - mi.rcWork.left;
+        mmi->ptMaxSize.y = mi.rcWork.bottom - mi.rcWork.top;
+        mmi->ptMaxPosition.x = mi.rcWork.left;
+        mmi->ptMaxPosition.y = mi.rcWork.top;
+      }
+    }
+    return 0;
+  }
   case WM_SIZE:
   {
     if (!win_ctx) return 0;
@@ -271,6 +326,32 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
   case WM_DESTROY:
   {
     LogMsg("WM_DESTROY: start. hwnd = %p, win_ctx = %p, current g_window_count = %d\n", hwnd, win_ctx, g_window_count);
+    
+    WINDOWPLACEMENT wp = {0};
+    wp.length = sizeof(WINDOWPLACEMENT);
+    if (GetWindowPlacement(hwnd, &wp)) {
+      char config_path[MAX_PATH];
+      GetConfigFilePath(config_path, sizeof(config_path));
+      FILE* f = fopen(config_path, "w");
+      if (f) {
+        int saveCmd = wp.showCmd;
+        if (saveCmd == SW_SHOWMINIMIZED || saveCmd == SW_MINIMIZE || saveCmd == SW_SHOWMINNOACTIVE) {
+          saveCmd = SW_SHOWNORMAL;
+        }
+        fprintf(f, "%d %d %d %d %d\n",
+                wp.rcNormalPosition.left,
+                wp.rcNormalPosition.top,
+                wp.rcNormalPosition.right,
+                wp.rcNormalPosition.bottom,
+                saveCmd);
+        fclose(f);
+        LogMsg("WM_DESTROY: Saved placement: left=%d, top=%d, right=%d, bottom=%d, showCmd=%d to %s\n",
+               wp.rcNormalPosition.left, wp.rcNormalPosition.top,
+               wp.rcNormalPosition.right, wp.rcNormalPosition.bottom,
+               saveCmd, config_path);
+      }
+    }
+
     if (win_ctx)
     {
       // Remove from global tracker
@@ -354,7 +435,7 @@ browser_window_t* create_browser_window(const char* startup_url) {
 
   HWND main_hwnd = CreateWindowEx(
       0, L"LiteBrowserMainWindowClass", L"Lite Browser",
-      WS_POPUP | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | WS_VISIBLE,
+      WS_POPUP | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
       CW_USEDEFAULT, CW_USEDEFAULT, 1024, 768, NULL, NULL, hInstance, NULL);
 
   if (!main_hwnd) {
@@ -368,6 +449,34 @@ browser_window_t* create_browser_window(const char* startup_url) {
 
   win_ctx->main_hwnd = main_hwnd;
   SetWindowLongPtr(main_hwnd, GWLP_USERDATA, (LONG_PTR)win_ctx);
+
+  // Load and apply window placement
+  int loaded = 0;
+  WINDOWPLACEMENT wp = {0};
+  wp.length = sizeof(WINDOWPLACEMENT);
+
+  char config_path[MAX_PATH];
+  GetConfigFilePath(config_path, sizeof(config_path));
+  FILE* f = fopen(config_path, "r");
+  if (f) {
+    int left = 0, top = 0, right = 0, bottom = 0, showCmd = 0;
+    if (fscanf(f, "%d %d %d %d %d", &left, &top, &right, &bottom, &showCmd) == 5) {
+      wp.showCmd = showCmd;
+      wp.rcNormalPosition.left = left;
+      wp.rcNormalPosition.top = top;
+      wp.rcNormalPosition.right = right;
+      wp.rcNormalPosition.bottom = bottom;
+      loaded = 1;
+    }
+    fclose(f);
+  }
+
+  if (loaded) {
+    SetWindowPlacement(main_hwnd, &wp);
+  } else {
+    ShowWindow(main_hwnd, SW_SHOWMAXIMIZED);
+  }
+  UpdateWindow(main_hwnd);
 
   for (int i = 0; i < MAX_WINDOWS; i++) {
     if (g_windows[i] == NULL) {
@@ -478,7 +587,7 @@ browser_window_t* create_browser_window_for_detached(cef_browser_t* detached_bro
 
   HWND main_hwnd = CreateWindowEx(
       0, L"LiteBrowserMainWindowClass", L"Lite Browser",
-      WS_POPUP | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | WS_VISIBLE,
+      WS_POPUP | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
       x, y, 1024, 768, NULL, NULL, hInstance, NULL);
 
   if (!main_hwnd) {
@@ -587,6 +696,9 @@ browser_window_t* create_browser_window_for_detached(cef_browser_t* detached_bro
   cef_browser_host_create_browser(&editor_window_info, &editor_handler->client,
                                   &editor_url, &browser_settings, NULL, NULL);
   cef_string_clear(&editor_url);
+
+  ShowWindow(main_hwnd, SW_SHOW);
+  UpdateWindow(main_hwnd);
 
   return win_ctx;
 }
