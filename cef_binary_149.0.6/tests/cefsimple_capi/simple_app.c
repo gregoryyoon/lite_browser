@@ -27,6 +27,12 @@ static void GetConfigFilePath(char* out_path, size_t max_len) {
     snprintf(out_path, max_len, "C:\\projects\\lite_browser\\window_config.txt");
   }
 }
+
+int GetUIHeightForWindow(HWND hwnd) {
+  UINT dpi = GetDpiForWindow(hwnd);
+  double scale = (double)dpi / 96.0;
+  return (int)(72.0 * scale);
+}
 #endif
 
 #include "include/capi/cef_browser_capi.h"
@@ -256,6 +262,10 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
     int width = LOWORD(lParam);
     int height = HIWORD(lParam);
 
+    int ui_height = GetUIHeightForWindow(hwnd);
+    int content_y = ui_height + 1;
+    int content_h = height - content_y - 1;
+
     if (win_ctx->ui_browser)
     {
       cef_browser_host_t *host = win_ctx->ui_browser->get_host(win_ctx->ui_browser);
@@ -264,7 +274,7 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
         HWND ui_hwnd = host->get_window_handle(host);
         if (ui_hwnd)
         {
-          MoveWindow(ui_hwnd, 0, 0, width, 100, TRUE);
+          MoveWindow(ui_hwnd, 0, 0, width, ui_height, TRUE);
         }
         host->base.release(&host->base);
       }
@@ -277,7 +287,7 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
     {
       content_w = (width - 3) / 2;
       editor_w = width - 3 - content_w;
-      MoveWindow(win_ctx->editor_hwnd, content_w + 2, 101, editor_w, height - 102, TRUE);
+      MoveWindow(win_ctx->editor_hwnd, content_w + 2, content_y, editor_w, content_h, TRUE);
     }
     else if (win_ctx->editor_hwnd)
     {
@@ -296,7 +306,7 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
           HWND content_hwnd = host->get_window_handle(host);
           if (content_hwnd)
           {
-            MoveWindow(content_hwnd, 1, 101, content_w, height - 102, TRUE);
+            MoveWindow(content_hwnd, 1, content_y, content_w, content_h, TRUE);
           }
           host->base.release(&host->base);
         }
@@ -494,6 +504,10 @@ browser_window_t* create_browser_window(const char* startup_url) {
   cef_browser_settings_t browser_settings = {};
   browser_settings.size = sizeof(cef_browser_settings_t);
 
+  int ui_height = GetUIHeightForWindow(main_hwnd);
+  int content_y = ui_height + 1;
+  int content_h = height - content_y - 1;
+
   // 1. Create UI child browser
   cef_window_info_t ui_window_info = {};
   ui_window_info.size = sizeof(cef_window_info_t);
@@ -503,7 +517,7 @@ browser_window_t* create_browser_window(const char* startup_url) {
   ui_window_info.bounds.x = 0;
   ui_window_info.bounds.y = 0;
   ui_window_info.bounds.width = width;
-  ui_window_info.bounds.height = 100;
+  ui_window_info.bounds.height = ui_height;
   ui_window_info.runtime_style = CEF_RUNTIME_STYLE_DEFAULT;
 
   cef_string_t ui_url = {};
@@ -524,9 +538,9 @@ browser_window_t* create_browser_window(const char* startup_url) {
       WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
   content_window_info.parent_window = main_hwnd;
   content_window_info.bounds.x = 1;
-  content_window_info.bounds.y = 101;
+  content_window_info.bounds.y = content_y;
   content_window_info.bounds.width = width - 2;
-  content_window_info.bounds.height = height - 102;
+  content_window_info.bounds.height = content_h;
   content_window_info.runtime_style = CEF_RUNTIME_STYLE_DEFAULT;
 
   cef_string_t content_url = {};
@@ -618,6 +632,10 @@ browser_window_t* create_browser_window_for_detached(cef_browser_t* detached_bro
   cef_browser_settings_t browser_settings = {};
   browser_settings.size = sizeof(cef_browser_settings_t);
 
+  int ui_height = GetUIHeightForWindow(main_hwnd);
+  int content_y = ui_height + 1;
+  int content_h = height - content_y - 1;
+
   // 1. Create UI child browser
   cef_window_info_t ui_window_info = {};
   ui_window_info.size = sizeof(cef_window_info_t);
@@ -627,7 +645,7 @@ browser_window_t* create_browser_window_for_detached(cef_browser_t* detached_bro
   ui_window_info.bounds.x = 0;
   ui_window_info.bounds.y = 0;
   ui_window_info.bounds.width = width;
-  ui_window_info.bounds.height = 100;
+  ui_window_info.bounds.height = ui_height;
   ui_window_info.runtime_style = CEF_RUNTIME_STYLE_DEFAULT;
 
   cef_string_t ui_url = {};
@@ -651,7 +669,7 @@ browser_window_t* create_browser_window_for_detached(cef_browser_t* detached_bro
   SetWindowLong(detached_hwnd, GWL_STYLE, style);
 
   // Update bounds
-  MoveWindow(detached_hwnd, 1, 101, width - 2, height - 102, TRUE);
+  MoveWindow(detached_hwnd, 1, content_y, width - 2, content_h, TRUE);
 
   // Assign to tabs
   win_ctx->tabs[0].tab_id = 1;

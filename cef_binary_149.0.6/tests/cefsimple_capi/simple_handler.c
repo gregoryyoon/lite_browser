@@ -15,6 +15,11 @@
 #include "tests/cefsimple_capi/simple_browser_list.h"
 #include "tests/cefsimple_capi/simple_utils.h"
 
+#if defined(OS_WIN)
+#include <windows.h>
+extern int GetUIHeightForWindow(HWND hwnd);
+#endif
+
 static void LogMsg(const char *format, ...) {
   FILE *f = fopen("C:\\projects\\lite_browser\\debug_c.txt", "a");
   if (f) {
@@ -524,6 +529,10 @@ int CEF_CALLBACK request_handler_on_before_browse(
                 int width = rect.right;
                 int height = rect.bottom;
 
+                int ui_height = GetUIHeightForWindow(win_ctx->main_hwnd);
+                int content_y = ui_height + 1;
+                int content_h = height - content_y - 1;
+
                 cef_browser_settings_t browser_settings = {};
                 browser_settings.size = sizeof(cef_browser_settings_t);
 
@@ -532,9 +541,9 @@ int CEF_CALLBACK request_handler_on_before_browse(
                 content_window_info.style = WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
                 content_window_info.parent_window = win_ctx->main_hwnd;
                 content_window_info.bounds.x = 1;
-                content_window_info.bounds.y = 101;
+                content_window_info.bounds.y = content_y;
                 content_window_info.bounds.width = width - 2;
-                content_window_info.bounds.height = height - 102;
+                content_window_info.bounds.height = content_h;
                 content_window_info.runtime_style = CEF_RUNTIME_STYLE_DEFAULT;
 
                 cef_string_t content_url = {};
@@ -597,6 +606,10 @@ int CEF_CALLBACK request_handler_on_before_browse(
                 int width = rect.right;
                 int height = rect.bottom;
 
+                int ui_height = GetUIHeightForWindow(win_ctx->main_hwnd);
+                int content_y = ui_height + 1;
+                int content_h = height - content_y - 1;
+
                 cef_browser_settings_t browser_settings = {};
                 browser_settings.size = sizeof(cef_browser_settings_t);
 
@@ -605,9 +618,9 @@ int CEF_CALLBACK request_handler_on_before_browse(
                 content_window_info.style = WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
                 content_window_info.parent_window = win_ctx->main_hwnd;
                 content_window_info.bounds.x = 1;
-                content_window_info.bounds.y = 101;
+                content_window_info.bounds.y = content_y;
                 content_window_info.bounds.width = width - 2;
-                content_window_info.bounds.height = height - 102;
+                content_window_info.bounds.height = content_h;
                 content_window_info.runtime_style = CEF_RUNTIME_STYLE_DEFAULT;
 
                 cef_string_t content_url = {};
@@ -682,6 +695,10 @@ int CEF_CALLBACK request_handler_on_before_browse(
             int width = rect.right;
             int height = rect.bottom;
 
+            int ui_height = GetUIHeightForWindow(win_ctx->main_hwnd);
+            int content_y = ui_height + 1;
+            int content_h = height - content_y - 1;
+
             cef_browser_settings_t browser_settings = {};
             browser_settings.size = sizeof(cef_browser_settings_t);
 
@@ -690,9 +707,9 @@ int CEF_CALLBACK request_handler_on_before_browse(
             content_window_info.style = WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
             content_window_info.parent_window = win_ctx->main_hwnd;
             content_window_info.bounds.x = 1;
-            content_window_info.bounds.y = 101;
+            content_window_info.bounds.y = content_y;
             content_window_info.bounds.width = width - 2;
-            content_window_info.bounds.height = height - 102;
+            content_window_info.bounds.height = content_h;
             content_window_info.runtime_style = CEF_RUNTIME_STYLE_DEFAULT;
 
             cef_string_t content_url = {};
@@ -1007,6 +1024,10 @@ int CEF_CALLBACK request_handler_on_before_browse(
             int width = rect.right;
             int height = rect.bottom;
 
+            int ui_height = GetUIHeightForWindow(win_ctx->main_hwnd);
+            int content_y = ui_height + 1;
+            int content_h = height - content_y - 1;
+
             cef_browser_settings_t browser_settings = {};
             browser_settings.size = sizeof(cef_browser_settings_t);
 
@@ -1015,9 +1036,9 @@ int CEF_CALLBACK request_handler_on_before_browse(
             content_window_info.style = WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
             content_window_info.parent_window = win_ctx->main_hwnd;
             content_window_info.bounds.x = 1;
-            content_window_info.bounds.y = 101;
+            content_window_info.bounds.y = content_y;
             content_window_info.bounds.width = width - 2;
-            content_window_info.bounds.height = height - 102;
+            content_window_info.bounds.height = content_h;
             content_window_info.runtime_style = CEF_RUNTIME_STYLE_DEFAULT;
 
             cef_string_t content_url = {};
@@ -1159,7 +1180,10 @@ int CEF_CALLBACK request_handler_on_before_browse(
                   ShowWindow(win_ctx->tabs[new_active].hwnd, SW_SHOW);
                   RECT rect;
                   GetClientRect(win_ctx->main_hwnd, &rect);
-                  MoveWindow(win_ctx->tabs[new_active].hwnd, 1, 101, rect.right - 2, rect.bottom - 102, TRUE);
+                  int ui_height = GetUIHeightForWindow(win_ctx->main_hwnd);
+                  int content_y = ui_height + 1;
+                  int content_h = rect.bottom - content_y - 1;
+                  MoveWindow(win_ctx->tabs[new_active].hwnd, 1, content_y, rect.right - 2, content_h, TRUE);
                   cef_browser_host_t* host = win_ctx->tabs[new_active].browser->get_host(win_ctx->tabs[new_active].browser);
                   if (host) {
                     host->was_resized(host);

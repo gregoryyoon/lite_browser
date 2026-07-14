@@ -5,6 +5,9 @@
 #ifndef CEF_TESTS_CEFSIMPLE_CAPI_SIMPLE_APP_H_
 #define CEF_TESTS_CEFSIMPLE_CAPI_SIMPLE_APP_H_
 
+#if defined(OS_WIN)
+#include <windows.h>
+#endif
 #include <stdatomic.h>
 
 #include "include/capi/cef_app_capi.h"
@@ -46,5 +49,9 @@ typedef struct _simple_browser_process_handler_t {
 // Returns a pointer with ref count of 1.
 // Caller is responsible for releasing the reference when done.
 simple_app_t* simple_app_create(void);
+
+#if defined(OS_WIN)
+int GetUIHeightForWindow(HWND hwnd);
+#endif
 
 #endif  // CEF_TESTS_CEFSIMPLE_CAPI_SIMPLE_APP_H_
