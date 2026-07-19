@@ -175,6 +175,25 @@ document.addEventListener('DOMContentLoaded', () => {
       window.location.href = 'http://ui-action/drag-window';
     });
   }
+
+  // 주소창 미포커스 시 클릭했을 때 전체 선택 동작 구현
+  const addressBar = document.getElementById('address-bar');
+  if (addressBar) {
+    let isSelectAllOnFocus = false;
+    addressBar.addEventListener('focus', () => {
+      addressBar.select();
+      isSelectAllOnFocus = true;
+    });
+    addressBar.addEventListener('mouseup', (e) => {
+      if (isSelectAllOnFocus) {
+        e.preventDefault();
+        isSelectAllOnFocus = false;
+      }
+    });
+    addressBar.addEventListener('blur', () => {
+      isSelectAllOnFocus = false;
+    });
+  }
 });
 
 // 최소화, 최대화, 닫기 액션 디스패치 함수
