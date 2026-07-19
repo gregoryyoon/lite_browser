@@ -155,6 +155,7 @@ void simple_handler_platform_show_window(simple_handler_t *handler,
 
 void update_ui_tabs(browser_window_t* win_ctx);
 void update_ui_nav_state(browser_window_t* win_ctx);
+void CreateNewTab(browser_window_t* win_ctx, const char* url);
 
 // extern cef_browser_t *g_ui_browser;
 // extern cef_browser_t *g_content_browser;

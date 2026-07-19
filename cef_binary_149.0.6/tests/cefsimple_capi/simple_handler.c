@@ -408,19 +408,52 @@ void simple_handler_platform_show_window(simple_handler_t *handler,
 }
 #endif
 
+static void EscapeJsonString(const char* src, char* dest, size_t dest_len) {
+  size_t j = 0;
+  for (size_t i = 0; src[i] != '\0' && j < dest_len - 3; i++) {
+    if (src[i] == '"') {
+      dest[j++] = '\\';
+      dest[j++] = '"';
+    } else if (src[i] == '\\') {
+      dest[j++] = '\\';
+      dest[j++] = '\\';
+    } else if (src[i] == '\n') {
+      dest[j++] = '\\';
+      dest[j++] = 'n';
+    } else if (src[i] == '\r') {
+      dest[j++] = '\\';
+      dest[j++] = 'r';
+    } else if (src[i] == '\t') {
+      dest[j++] = '\\';
+      dest[j++] = 't';
+    } else {
+      dest[j++] = src[i];
+    }
+  }
+  dest[j] = '\0';
+}
+
 void update_ui_tabs(browser_window_t* win_ctx) {
   if (!win_ctx || !win_ctx->ui_browser) return;
 
   char json[4096] = "[";
   for (int i = 0; i < win_ctx->tab_count; i++) {
-    char tab_str[512];
+    char escaped_title[512] = {0};
+    char escaped_url[1536] = {0};
+    EscapeJsonString(win_ctx->tabs[i].title, escaped_title, sizeof(escaped_title));
+    EscapeJsonString(win_ctx->tabs[i].url, escaped_url, sizeof(escaped_url));
+
+    char tab_str[2100];
     snprintf(tab_str, sizeof(tab_str), 
              "{\"id\":%d,\"title\":\"%s\",\"url\":\"%s\"}%s", 
              win_ctx->tabs[i].tab_id, 
-             win_ctx->tabs[i].title, 
-             win_ctx->tabs[i].url,
+             escaped_title, 
+             escaped_url,
              (i == win_ctx->tab_count - 1) ? "" : ",");
-    strcat(json, tab_str);
+    
+    if (strlen(json) + strlen(tab_str) < sizeof(json) - 5) {
+      strcat(json, tab_str);
+    }
   }
   strcat(json, "]");
 
@@ -450,11 +483,14 @@ void update_ui_nav_state(browser_window_t* win_ctx) {
   int can_go_forward = cb->can_go_forward(cb);
   int is_loading = cb->is_loading(cb);
 
-  char js_code[1536];
+  char escaped_url[1536] = {0};
+  EscapeJsonString(win_ctx->tabs[win_ctx->active_tab_index].url, escaped_url, sizeof(escaped_url));
+
+  char js_code[2048];
   snprintf(js_code, sizeof(js_code), 
            "if (window.updateNavState) { window.updateNavState(%d, %d, %d); } "
-           "if (window.updateAddress) { window.updateAddress('%s'); }", 
-           can_go_back, can_go_forward, is_loading, win_ctx->tabs[win_ctx->active_tab_index].url);
+           "if (window.updateAddress) { window.updateAddress(\"%s\"); }", 
+           can_go_back, can_go_forward, is_loading, escaped_url);
 
   cef_frame_t* frame = win_ctx->ui_browser->get_main_frame(win_ctx->ui_browser);
   if (frame) {
@@ -523,52 +559,7 @@ int CEF_CALLBACK request_handler_on_before_browse(
             DestroyMenu(hMenu);
 
             if (cmd == 1001) {
-              if (win_ctx->tab_count < MAX_TABS) {
-                RECT rect;
-                GetClientRect(win_ctx->main_hwnd, &rect);
-                int width = rect.right;
-                int height = rect.bottom;
-
-                int ui_height = GetUIHeightForWindow(win_ctx->main_hwnd);
-                int content_y = ui_height + 1;
-                int content_h = height - content_y - 1;
-
-                cef_browser_settings_t browser_settings = {};
-                browser_settings.size = sizeof(cef_browser_settings_t);
-
-                cef_window_info_t content_window_info = {};
-                content_window_info.size = sizeof(cef_window_info_t);
-                content_window_info.style = WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
-                content_window_info.parent_window = win_ctx->main_hwnd;
-                content_window_info.bounds.x = 1;
-                content_window_info.bounds.y = content_y;
-                content_window_info.bounds.width = width - 2;
-                content_window_info.bounds.height = content_h;
-                content_window_info.runtime_style = CEF_RUNTIME_STYLE_DEFAULT;
-
-                cef_string_t content_url = {};
-                cef_string_from_ascii("https://gemini.google.com", 25, &content_url);
-
-                simple_handler_t *content_handler = simple_handler_create(0);
-                content_handler->window_ctx = win_ctx;
-
-                int next_idx = win_ctx->tab_count;
-                int max_id = 0;
-                for(int k=0; k<win_ctx->tab_count; k++) {
-                  if (win_ctx->tabs[k].tab_id > max_id) max_id = win_ctx->tabs[k].tab_id;
-                }
-                win_ctx->tabs[next_idx].tab_id = max_id + 1;
-                win_ctx->tabs[next_idx].browser = NULL;
-                win_ctx->tabs[next_idx].hwnd = NULL;
-                strcpy(win_ctx->tabs[next_idx].title, "새 탭");
-                strcpy(win_ctx->tabs[next_idx].url, "https://gemini.google.com");
-                win_ctx->tab_count++;
-
-                cef_browser_host_create_browser(
-                    &content_window_info, &content_handler->client, &content_url,
-                    &browser_settings, NULL, NULL);
-                cef_string_clear(&content_url);
-              }
+              CreateNewTab(win_ctx, "https://gemini.google.com");
             } else if (cmd == 1002) {
               create_browser_window("https://gemini.google.com");
             } else if (cmd == 1003) {
@@ -1018,52 +1009,7 @@ int CEF_CALLBACK request_handler_on_before_browse(
             free(text_base64);
           }
         } else if (strcmp(action, "new-tab") == 0) {
-          if (win_ctx->tab_count < MAX_TABS) {
-            RECT rect;
-            GetClientRect(win_ctx->main_hwnd, &rect);
-            int width = rect.right;
-            int height = rect.bottom;
-
-            int ui_height = GetUIHeightForWindow(win_ctx->main_hwnd);
-            int content_y = ui_height + 1;
-            int content_h = height - content_y - 1;
-
-            cef_browser_settings_t browser_settings = {};
-            browser_settings.size = sizeof(cef_browser_settings_t);
-
-            cef_window_info_t content_window_info = {};
-            content_window_info.size = sizeof(cef_window_info_t);
-            content_window_info.style = WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
-            content_window_info.parent_window = win_ctx->main_hwnd;
-            content_window_info.bounds.x = 1;
-            content_window_info.bounds.y = content_y;
-            content_window_info.bounds.width = width - 2;
-            content_window_info.bounds.height = content_h;
-            content_window_info.runtime_style = CEF_RUNTIME_STYLE_DEFAULT;
-
-            cef_string_t content_url = {};
-            cef_string_from_ascii("https://gemini.google.com", 25, &content_url);
-
-            simple_handler_t *content_handler = simple_handler_create(0);
-            content_handler->window_ctx = win_ctx;
-
-            int next_idx = win_ctx->tab_count;
-            int max_id = 0;
-            for(int k=0; k<win_ctx->tab_count; k++) {
-              if (win_ctx->tabs[k].tab_id > max_id) max_id = win_ctx->tabs[k].tab_id;
-            }
-            win_ctx->tabs[next_idx].tab_id = max_id + 1;
-            win_ctx->tabs[next_idx].browser = NULL;
-            win_ctx->tabs[next_idx].hwnd = NULL;
-            strcpy(win_ctx->tabs[next_idx].title, "새 탭");
-            strcpy(win_ctx->tabs[next_idx].url, "https://gemini.google.com");
-            win_ctx->tab_count++;
-
-            cef_browser_host_create_browser(
-                &content_window_info, &content_handler->client, &content_url,
-                &browser_settings, NULL, NULL);
-            cef_string_clear(&content_url);
-          }
+          CreateNewTab(win_ctx, "https://gemini.google.com");
         } else if (strncmp(action, "switch-tab?id=", 14) == 0) {
           int target_id = atoi(action + 14);
           int found_idx = -1;
@@ -1074,12 +1020,14 @@ int CEF_CALLBACK request_handler_on_before_browse(
             }
           }
           if (found_idx != -1 && found_idx != win_ctx->active_tab_index) {
-            int old_idx = win_ctx->active_tab_index;
-            if (old_idx >= 0 && old_idx < win_ctx->tab_count && win_ctx->tabs[old_idx].hwnd) {
-              ShowWindow(win_ctx->tabs[old_idx].hwnd, SW_HIDE);
+            for (int k = 0; k < win_ctx->tab_count; k++) {
+              if (k != found_idx && win_ctx->tabs[k].hwnd) {
+                ShowWindow(win_ctx->tabs[k].hwnd, SW_HIDE);
+              }
             }
 
             win_ctx->active_tab_index = found_idx;
+            win_ctx->tabs[found_idx].is_loaded = 1;
             if (win_ctx->tabs[found_idx].hwnd) {
               ShowWindow(win_ctx->tabs[found_idx].hwnd, SW_SHOW);
               
@@ -1471,4 +1419,66 @@ simple_context_menu_handler_t *context_menu_handler_create(simple_handler_t *par
   atomic_store(&handler->ref_count, 1);
 
   return handler;
+}
+
+void CreateNewTab(browser_window_t* win_ctx, const char* url) {
+  if (!win_ctx) return;
+  if (win_ctx->tab_count >= MAX_TABS) return;
+
+  RECT rect;
+  GetClientRect(win_ctx->main_hwnd, &rect);
+  int width = rect.right;
+  int height = rect.bottom;
+
+  int ui_height = GetUIHeightForWindow(win_ctx->main_hwnd);
+  int content_y = ui_height + 1;
+  int content_h = height - content_y - 1;
+
+  cef_browser_settings_t browser_settings = {};
+  browser_settings.size = sizeof(cef_browser_settings_t);
+
+  cef_window_info_t content_window_info = {};
+  content_window_info.size = sizeof(cef_window_info_t);
+  content_window_info.style = WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
+  content_window_info.parent_window = win_ctx->main_hwnd;
+  content_window_info.bounds.x = 1;
+  content_window_info.bounds.y = content_y;
+  content_window_info.bounds.width = width - 2;
+  content_window_info.bounds.height = content_h;
+  content_window_info.runtime_style = CEF_RUNTIME_STYLE_DEFAULT;
+
+  cef_string_t content_url = {};
+  if (url && strlen(url) > 0) {
+    cef_string_from_utf8(url, strlen(url), &content_url);
+  } else {
+    cef_string_from_ascii("https://gemini.google.com", 25, &content_url);
+  }
+
+  simple_handler_t *content_handler = simple_handler_create(0);
+  content_handler->window_ctx = win_ctx;
+
+  int next_idx = win_ctx->tab_count;
+  int max_id = 0;
+  for(int k=0; k<win_ctx->tab_count; k++) {
+    if (win_ctx->tabs[k].tab_id > max_id) max_id = win_ctx->tabs[k].tab_id;
+  }
+  win_ctx->tabs[next_idx].tab_id = max_id + 1;
+  win_ctx->tabs[next_idx].browser = NULL;
+  win_ctx->tabs[next_idx].hwnd = NULL;
+  strcpy(win_ctx->tabs[next_idx].title, "새 탭");
+  if (url && strlen(url) > 0) {
+    strncpy(win_ctx->tabs[next_idx].url, url, sizeof(win_ctx->tabs[next_idx].url) - 1);
+  } else {
+    strcpy(win_ctx->tabs[next_idx].url, "https://gemini.google.com");
+  }
+  win_ctx->tabs[next_idx].is_loaded = 0;
+  win_ctx->tabs[next_idx].tab_handler = content_handler;
+  win_ctx->active_tab_index = next_idx;
+  win_ctx->tab_count++;
+  update_ui_tabs(win_ctx);
+
+  cef_browser_host_create_browser(
+      &content_window_info, &content_handler->client, &content_url,
+      &browser_settings, NULL, NULL);
+  cef_string_clear(&content_url);
 }

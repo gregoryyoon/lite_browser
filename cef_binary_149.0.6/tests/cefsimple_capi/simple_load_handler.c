@@ -98,6 +98,33 @@ load_handler_on_loading_state_change(cef_load_handler_t* self,
 
   browser_window_t *win_ctx = handler->parent->window_ctx;
   if (win_ctx) {
+    int found_idx = -1;
+    for (int i = 0; i < win_ctx->tab_count; i++) {
+      if (win_ctx->tabs[i].browser &&
+          browser->get_identifier(browser) ==
+              win_ctx->tabs[i].browser->get_identifier(win_ctx->tabs[i].browser)) {
+        found_idx = i;
+        break;
+      }
+    }
+
+    if (found_idx != -1) {
+      win_ctx->tabs[found_idx].is_loaded = 1;
+      if (win_ctx->active_tab_index == found_idx && win_ctx->tabs[found_idx].hwnd) {
+        // Hide all other tabs and show this newly active tab immediately on load start/change
+        for (int k = 0; k < win_ctx->tab_count; k++) {
+          if (k != found_idx && win_ctx->tabs[k].hwnd) {
+            ShowWindow(win_ctx->tabs[k].hwnd, SW_HIDE);
+          }
+        }
+        ShowWindow(win_ctx->tabs[found_idx].hwnd, SW_SHOW);
+
+        RECT rect;
+        GetClientRect(win_ctx->main_hwnd, &rect);
+        PostMessage(win_ctx->main_hwnd, WM_SIZE, 0, MAKELPARAM(rect.right, rect.bottom));
+      }
+    }
+
     if (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
       cef_browser_t* active_cb = win_ctx->tabs[win_ctx->active_tab_index].browser;
       if (active_cb && browser->get_identifier(browser) == active_cb->get_identifier(active_cb)) {

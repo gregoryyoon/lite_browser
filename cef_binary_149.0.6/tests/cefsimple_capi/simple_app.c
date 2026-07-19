@@ -555,6 +555,8 @@ browser_window_t* create_browser_window(const char* startup_url) {
   win_ctx->tabs[0].hwnd = NULL;
   strncpy(win_ctx->tabs[0].url, startup_url, sizeof(win_ctx->tabs[0].url) - 1);
   strcpy(win_ctx->tabs[0].title, "로딩 중...");
+  win_ctx->tabs[0].is_loaded = 1;
+  win_ctx->tabs[0].tab_handler = content_handler;
   win_ctx->active_tab_index = 0;
   win_ctx->tab_count = 1;
 
@@ -677,6 +679,7 @@ browser_window_t* create_browser_window_for_detached(cef_browser_t* detached_bro
   win_ctx->tabs[0].hwnd = detached_hwnd;
   strncpy(win_ctx->tabs[0].url, url, sizeof(win_ctx->tabs[0].url) - 1);
   strncpy(win_ctx->tabs[0].title, title, sizeof(win_ctx->tabs[0].title) - 1);
+  win_ctx->tabs[0].is_loaded = 1;
   win_ctx->active_tab_index = 0;
   win_ctx->tab_count = 1;
 
