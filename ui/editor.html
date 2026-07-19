@@ -19,19 +19,205 @@
       height: 100vh;
       width: 100vw;
     }
-    #editor-container {
-      height: 100vh;
+    
+    /* Layout Container */
+    #app-container {
+      display: flex;
       width: 100vw;
-      position: absolute;
-      top: 0;
-      left: 0;
+      height: 100vh;
       overflow: hidden;
     }
-    /* Customize TOAST UI Editor style to fit nicely with our premium layout */
+    
+    /* Sidebar styling */
+    #sidebar {
+      width: 25vw;
+      min-width: 220px;
+      max-width: 320px;
+      height: 100%;
+      border-right: 1px solid #e2e8f0;
+      background-color: #f8fafc;
+      display: none; /* Toggled by the toolbar button */
+      flex-direction: column;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+    
+    .sidebar-section {
+      padding: 12px;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    
+    .header-section {
+      background-color: #f1f5f9;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    
+    .workspace-title {
+      font-size: 11px;
+      font-weight: 600;
+      color: #64748b;
+      letter-spacing: 0.05em;
+    }
+    
+    .root-folder-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    
+    .path-display {
+      font-size: 12px;
+      font-weight: 500;
+      color: #1e293b;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+    }
+    
+    .small-icon-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 14px;
+      padding: 4px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.15s;
+    }
+    
+    .small-icon-btn:hover {
+      background-color: #cbd5e1;
+    }
+    
+    .action-section {
+      display: flex;
+      gap: 6px;
+      padding: 8px 12px;
+      background-color: #f8fafc;
+    }
+    
+    .list-section {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px 6px;
+    }
+    
+    /* Tree view styling */
+    .tree-list {
+      list-style: none;
+      padding-left: 14px;
+      margin: 0;
+    }
+    #file-tree > .tree-list {
+      padding-left: 0;
+    }
+    
+    .tree-item {
+      margin: 2px 0;
+      position: relative;
+    }
+    
+    .tree-row {
+      display: flex;
+      align-items: center;
+      padding: 6px 8px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background-color 0.15s, color 0.15s;
+      font-size: 12px;
+      color: #475569;
+      user-select: none;
+    }
+    
+    .tree-row:hover {
+      background-color: #f1f5f9;
+      color: #0f172a;
+    }
+    
+    .tree-row.selected {
+      background-color: #e0e7ff;
+      color: #4f46e5;
+      font-weight: 600;
+    }
+    
+    .tree-row .chevron {
+      font-size: 9px;
+      width: 12px;
+      display: inline-block;
+      transition: transform 0.15s;
+      color: #94a3b8;
+      margin-right: 2px;
+    }
+    
+    .tree-row .chevron.expanded {
+      transform: rotate(90deg);
+    }
+    
+    .tree-row .icon {
+      margin-right: 6px;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+    }
+    
+    .tree-row .name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+    }
+    
+    /* VS Code style hover action buttons */
+    .tree-row .row-actions {
+      display: none;
+      gap: 4px;
+      margin-left: 6px;
+    }
+    
+    .tree-row:hover .row-actions {
+      display: flex;
+    }
+    
+    .row-actions button {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 11px;
+      padding: 2px 4px;
+      border-radius: 4px;
+      color: #64748b;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    .row-actions button:hover {
+      background-color: #cbd5e1;
+      color: #0f172a;
+    }
+    
+    .tree-children {
+      margin-top: 2px;
+    }
+    
+    /* Editor styling */
+    #editor-container {
+      flex: 1;
+      height: 100%;
+      position: relative;
+      overflow: hidden;
+    }
+    
     .toastui-editor-defaultUI {
       border: none !important;
     }
-    /* Float the mode switch bar above the floating card to prevent click interception */
+    
     .toastui-editor-mode-switch {
       bottom: 80px !important;
       right: 20px !important;
@@ -44,65 +230,37 @@
       backdrop-filter: blur(8px);
       -webkit-backdrop-filter: blur(8px);
     }
-    /* Add extra padding at the bottom of the editor pane so the floating card doesn't cover text */
+    
     .toastui-editor-main-container {
       padding-bottom: 80px;
     }
+    
+    /* Floating control panel (Glassmorphism) */
     .floating-card {
-      position: fixed;
+      position: absolute;
       bottom: 20px;
       left: 50%;
       transform: translateX(-50%);
       z-index: 100000;
-      display: none; /* Hidden by default */
+      display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 10px;
       background: rgba(255, 255, 255, 0.85);
       backdrop-filter: blur(16px);
       -webkit-backdrop-filter: blur(16px);
       border: 1px solid rgba(255, 255, 255, 0.6);
       box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
       border-radius: 14px;
-      padding: 10px 16px;
+      padding: 10px 18px;
       transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
     }
-    .floating-card.visible {
-      display: flex;
-    }
+    
     .floating-card:hover {
       box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12);
       background: rgba(255, 255, 255, 0.95);
       border-color: rgba(99, 102, 241, 0.3);
     }
-    .input-field {
-      border: 1px solid rgba(0, 0, 0, 0.12);
-      border-radius: 8px;
-      padding: 7px 10px;
-      font-size: 13px;
-      outline: none;
-      font-family: inherit;
-      width: 130px;
-      background: white;
-      transition: border-color 0.15s ease;
-    }
-    .input-field:focus {
-      border-color: #6366f1;
-    }
-    .select-field {
-      border: 1px solid rgba(0, 0, 0, 0.12);
-      border-radius: 8px;
-      padding: 7px 10px;
-      font-size: 13px;
-      outline: none;
-      font-family: inherit;
-      width: 150px;
-      background: white;
-      cursor: pointer;
-      transition: border-color 0.15s ease;
-    }
-    .select-field:focus {
-      border-color: #6366f1;
-    }
+    
     .btn {
       border: none;
       border-radius: 8px;
@@ -116,22 +274,32 @@
       align-items: center;
       justify-content: center;
     }
+    
     .btn-primary {
       background: linear-gradient(135deg, #6366f1, #4f46e5);
       color: white;
     }
+    
     .btn-primary:hover {
       transform: translateY(-1px);
       box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
     }
+    
     .btn-secondary {
       background: #f1f5f9;
       color: #334155;
       border: 1px solid rgba(0, 0, 0, 0.05);
     }
+    
     .btn-secondary:hover {
       background: #e2e8f0;
     }
+    
+    .btn-sm {
+      padding: 6px 12px;
+      font-size: 12px;
+    }
+    
     .toast {
       position: fixed;
       top: 24px;
@@ -148,6 +316,7 @@
       transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
       box-shadow: 0 10px 25px rgba(0,0,0,0.2);
     }
+    
     .toast.show {
       transform: translateX(-50%) translateY(0);
       opacity: 1;
@@ -155,23 +324,48 @@
   </style>
 </head>
 <body>
-  <div id="editor-container"></div>
-
-  <div class="floating-card">
-    <button class="btn btn-secondary" onclick="newFile()">새 파일</button>
-    <input type="text" id="filename-input" class="input-field" placeholder="파일명.md" value="untitled.md">
-    <button class="btn btn-primary" onclick="saveFile()">저장</button>
-    <select id="file-select" class="select-field" onfocus="refreshFileList()" onchange="onFileSelected(this.value)">
-      <option value="">-- 파일 불러오기 --</option>
-    </select>
-    <button class="btn btn-primary" onclick="sendPrompt()" style="background: linear-gradient(135deg, #10b981, #059669);">프롬프트 입력</button>
+  <div id="app-container">
+    <!-- Left Workspace Sidebar -->
+    <div id="sidebar">
+      <div class="sidebar-section header-section">
+        <div class="workspace-title">WORKSPACE</div>
+        <div class="root-folder-row">
+          <span id="root-path-display" class="path-display" title="기본 경로">Documents</span>
+          <button class="small-icon-btn" onclick="selectRootFolder()" title="작업 폴더 선택">📂</button>
+        </div>
+      </div>
+      
+      <div class="sidebar-section action-section">
+        <button class="btn btn-secondary btn-sm" onclick="promptCreateFile(event, '')" style="flex: 1;">
+          📄 + 파일
+        </button>
+        <button class="btn btn-secondary btn-sm" onclick="promptCreateFolder(event, '')" style="flex: 1;">
+          📁 + 폴더
+        </button>
+      </div>
+      
+      <div class="sidebar-section list-section" id="file-tree">
+        <!-- Recursively built file tree goes here -->
+      </div>
+    </div>
+    
+    <!-- Editor Frame -->
+    <div id="editor-container">
+      <!-- Floating Indicator & Action bar inside editor container -->
+      <div class="floating-card visible">
+        <span id="current-file-display" style="font-size: 12px; font-weight: 500; color: #475569; margin-right: 8px; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="선택된 파일 없음">선택된 파일 없음</span>
+        <button class="btn btn-primary" onclick="saveFile()">저장</button>
+        <button class="btn btn-primary" onclick="sendPrompt()" style="background: linear-gradient(135deg, #10b981, #059669);">프롬프트 입력</button>
+      </div>
+    </div>
   </div>
+
   <div id="toast" class="toast">저장 완료</div>
 
   <!-- TOAST UI Editor JS -->
   <script src="https://uicdn.toast.com/editor/latest/toastui-editor-all.min.js"></script>
   <script>
-    // Global error logger to capture any JS errors in backend logs
+    // Global error handler
     window.onerror = function(message, source, lineno, colno, error) {
       const errStr = `[JS Error] ${message} at ${source}:${lineno}:${colno}`;
       window.location.href = 'http://ui-action/log?msg=' + encodeURIComponent(errStr);
@@ -182,15 +376,15 @@
       window.location.href = 'http://ui-action/log?msg=' + encodeURIComponent(errStr);
     };
 
-    // Prevent any browser scroll-into-view jumps when editor elements are focused
-    window.addEventListener('scroll', () => {
-      window.scrollTo(0, 0);
-    });
-    document.addEventListener('scroll', () => {
-      window.scrollTo(0, 0);
-    });
+    // Scroll blocker
+    window.addEventListener('scroll', () => window.scrollTo(0, 0));
+    document.addEventListener('scroll', () => window.scrollTo(0, 0));
 
     let editor;
+    let rootPath = '';
+    let activeFilePath = '';
+    let expandedDirs = new Set(); // Stores expanded directory paths
+    
     const DEFAULT_TEMPLATE = `# [역할 정의] 당신은 전문 [직업/역할]입니다.
 
 ## 1. 개요 (Context)
@@ -238,12 +432,15 @@
       button.style.cursor = 'pointer';
       button.style.width = '32px';
       button.style.height = '32px';
-      // Folder icon for file/document management control panel toggle
       button.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-folder" style="color: #475569;"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`;
       
       button.addEventListener('click', () => {
-        const card = document.querySelector('.floating-card');
-        card.classList.toggle('visible');
+        const sidebar = document.getElementById('sidebar');
+        if (sidebar.style.display === 'none' || sidebar.style.display === '') {
+          sidebar.style.display = 'flex';
+        } else {
+          sidebar.style.display = 'none';
+        }
       });
       return button;
     }
@@ -253,7 +450,7 @@
       editor = new toastui.Editor({
         el: document.querySelector('#editor-container'),
         height: '100%',
-        initialEditType: 'wysiwyg', // Default to WYSIWYG mode
+        initialEditType: 'wysiwyg',
         previewStyle: 'vertical',
         initialValue: currentContent,
         toolbarItems: [
@@ -272,12 +469,12 @@
         ]
       });
 
-      // Synchronize editor changes back to currentContent variable
       editor.on('change', () => {
         currentContent = editor.getMarkdown();
       });
 
-      refreshFileList();
+      // Load root folder config on startup
+      window.location.href = 'http://ui-action/editor-get-root';
     };
 
     function showToast(message) {
@@ -289,17 +486,205 @@
       }, 2000);
     }
 
-    function newFile() {
-      document.getElementById('filename-input').value = 'untitled.md';
-      currentContent = DEFAULT_TEMPLATE;
+    // Callbacks from native backend
+    window.onRootFolderLoaded = function(path) {
+      rootPath = path;
+      const display = document.getElementById('root-path-display');
+      display.innerText = getPathTail(path);
+      display.title = path;
+      refreshFileList();
+    };
+
+    window.onRootFolderSelected = function(path) {
+      rootPath = path;
+      const display = document.getElementById('root-path-display');
+      display.innerText = getPathTail(path);
+      display.title = path;
+      refreshFileList();
+      showToast('작업 폴더가 변경되었습니다.');
+    };
+
+    window.onFolderCreated = function(success) {
+      if (success) {
+        showToast('폴더가 생성되었습니다.');
+        refreshFileList();
+      } else {
+        showToast('폴더 생성에 실패했습니다.');
+      }
+    };
+
+    window.onFolderDeleted = function(success, deletedPath) {
+      if (success) {
+        showToast('폴더가 삭제되었습니다.');
+        if (deletedPath && activeFilePath && (activeFilePath === deletedPath || activeFilePath.startsWith(deletedPath + '/'))) {
+          activeFilePath = '';
+          currentContent = DEFAULT_TEMPLATE;
+          editor.setMarkdown(currentContent);
+          document.getElementById('current-file-display').innerText = '선택된 파일 없음';
+          document.getElementById('current-file-display').title = '';
+        }
+        refreshFileList();
+      } else {
+        showToast('폴더 삭제에 실패했습니다.');
+      }
+    };
+
+    window.onFileCreated = function(success, cleanPath) {
+      if (success) {
+        showToast('파일이 생성되었습니다.');
+        refreshFileList();
+        loadFile(cleanPath);
+      } else {
+        showToast('파일 생성에 실패했습니다.');
+      }
+    };
+
+    window.onFileSavedV2 = function(success, path) {
+      if (success) {
+        showToast('성공적으로 저장되었습니다.');
+        refreshFileList();
+      } else {
+        showToast('저장에 실패했습니다.');
+      }
+    };
+
+    window.onFileDeleted = function(success, deletedPath) {
+      if (success) {
+        showToast('파일이 삭제되었습니다.');
+        if (activeFilePath === deletedPath) {
+          activeFilePath = '';
+          currentContent = DEFAULT_TEMPLATE;
+          editor.setMarkdown(currentContent);
+          document.getElementById('current-file-display').innerText = '선택된 파일 없음';
+          document.getElementById('current-file-display').title = '';
+        }
+        refreshFileList();
+      } else {
+        showToast('파일 삭제에 실패했습니다.');
+      }
+    };
+
+    window.onFileLoadedV2 = function(path, base64Content) {
+      activeFilePath = path;
+      
+      // Update display in floating card
+      const filename = path.substring(path.lastIndexOf('/') + 1);
+      const display = document.getElementById('current-file-display');
+      display.innerText = filename;
+      display.title = path;
+
+      const binaryString = atob(base64Content);
+      const len = binaryString.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      currentContent = new TextDecoder().decode(bytes);
+      
       editor.setMarkdown(currentContent);
-      showToast('새 파일이 생성되었습니다.');
+      showToast('파일을 불러왔습니다.');
+      
+      // Highlight selected item in tree
+      document.querySelectorAll('.tree-row').forEach(row => {
+        row.classList.remove('selected');
+        if (row.parentElement.getAttribute('data-path') === path) {
+          row.classList.add('selected');
+        }
+      });
+    };
+
+    // Actions
+    function selectRootFolder() {
+      window.location.href = 'http://ui-action/editor-select-root';
+    }
+
+    function refreshFileList() {
+      window.location.href = 'http://ui-action/editor-list-files';
+    }
+
+    window.onFilesListed = function(treeData) {
+      const container = document.getElementById('file-tree');
+      if (!treeData || treeData.length === 0) {
+        container.innerHTML = '<div style="font-size: 11px; color: #94a3b8; text-align: center; padding: 20px 0;">폴더가 비어 있습니다.</div>';
+        return;
+      }
+      container.innerHTML = buildTreeHtml(treeData);
+    };
+
+    function buildTreeHtml(items) {
+      let html = '<ul class="tree-list">';
+      items.forEach(item => {
+        const path = item.path;
+        const name = item.name;
+        
+        if (item.type === 'directory') {
+          const safeId = 'dir-' + btoa(unescape(encodeURIComponent(path))).replace(/=/g, '').replace(/\+/g, '').replace(/\//g, '');
+          const isExpanded = expandedDirs.has(path);
+          
+          html += `
+            <li class="tree-item directory-item" data-path="${path}">
+              <div class="tree-row" onclick="toggleDirectory(event, '${path}')">
+                <span class="chevron ${isExpanded ? 'expanded' : ''}">▶</span>
+                <span class="icon">📁</span>
+                <span class="name">${name}</span>
+                <span class="row-actions">
+                  <button onclick="promptCreateFile(event, '${path}')" title="새 파일">+</button>
+                  <button onclick="promptCreateFolder(event, '${path}')" title="새 폴더">📁+</button>
+                  <button onclick="promptDeleteFolder(event, '${path}')" title="폴더 삭제">🗑️</button>
+                </span>
+              </div>
+              <div class="tree-children" id="${safeId}" style="display: ${isExpanded ? 'block' : 'none'};">
+                ${item.children && item.children.length > 0 ? buildTreeHtml(item.children) : '<ul class="tree-list"><li style="font-size: 10px; color: #94a3b8; padding: 4px 6px;">(빈 폴더)</li></ul>'}
+              </div>
+            </li>
+          `;
+        } else {
+          const isSelected = (activeFilePath === path);
+          html += `
+            <li class="tree-item file-item" data-path="${path}">
+              <div class="tree-row ${isSelected ? 'selected' : ''}" onclick="loadFile('${path}')">
+                <span class="icon">📄</span>
+                <span class="name">${name}</span>
+                <span class="row-actions">
+                  <button onclick="promptDeleteFile(event, '${path}')" title="파일 삭제">🗑️</button>
+                </span>
+              </div>
+            </li>
+          `;
+        }
+      });
+      html += '</ul>';
+      return html;
+    }
+
+    function toggleDirectory(event, path) {
+      event.stopPropagation();
+      
+      const row = event.currentTarget;
+      const chevron = row.querySelector('.chevron');
+      const safeId = 'dir-' + btoa(unescape(encodeURIComponent(path))).replace(/=/g, '').replace(/\+/g, '').replace(/\//g, '');
+      const childrenDiv = document.getElementById(safeId);
+      
+      if (childrenDiv) {
+        if (childrenDiv.style.display === 'none') {
+          childrenDiv.style.display = 'block';
+          chevron.classList.add('expanded');
+          expandedDirs.add(path);
+        } else {
+          childrenDiv.style.display = 'none';
+          chevron.classList.remove('expanded');
+          expandedDirs.delete(path);
+        }
+      }
+    }
+
+    function loadFile(path) {
+      window.location.href = 'http://ui-action/editor-load-file-v2?path=' + encodeURIComponent(path);
     }
 
     function saveFile() {
-      const filename = document.getElementById('filename-input').value.trim();
-      if (!filename) {
-        showToast('파일명을 입력해주세요.');
+      if (!activeFilePath) {
+        promptCreateFile(null, '');
         return;
       }
       
@@ -310,60 +695,46 @@
       }
       const base64Content = btoa(binary);
 
-      window.location.href = 'http://ui-action/editor-save-file?name=' + encodeURIComponent(filename) + '&content=' + encodeURIComponent(base64Content);
+      window.location.href = 'http://ui-action/editor-save-file-v2?path=' + encodeURIComponent(activeFilePath) + '&content=' + encodeURIComponent(base64Content);
     }
 
-    window.onFileSaved = function(success, name) {
-      if (success) {
-        showToast('성공적으로 저장되었습니다: ' + name);
-        refreshFileList();
-      } else {
-        showToast('저장에 실패했습니다.');
-      }
-    };
-
-    function refreshFileList() {
-      window.location.href = 'http://ui-action/editor-list-files';
+    function promptCreateFile(event, parentPath) {
+      if (event) event.stopPropagation();
+      
+      const targetParent = parentPath || rootPath;
+      const name = prompt("생성할 마크다운 파일명을 입력해주세요 (예: myprompt.md):");
+      if (!name || name.trim() === '') return;
+      
+      window.location.href = 'http://ui-action/editor-create-file?parent=' + encodeURIComponent(targetParent) + '&name=' + encodeURIComponent(name.trim());
     }
 
-    window.onFilesListed = function(files) {
-      const select = document.getElementById('file-select');
-      const currentValue = select.value;
+    function promptDeleteFile(event, path) {
+      if (event) event.stopPropagation();
       
-      select.innerHTML = '<option value="">-- 파일 불러오기 --</option>';
+      const filename = path.substring(path.lastIndexOf('/') + 1);
+      if (!confirm(`정말 '${filename}' 파일을 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) return;
       
-      files.forEach(file => {
-        const opt = document.createElement('option');
-        opt.value = file;
-        opt.innerText = file;
-        select.appendChild(opt);
-      });
-      
-      if (files.includes(currentValue)) {
-        select.value = currentValue;
-      }
-    };
-
-    function onFileSelected(filename) {
-      if (!filename) return;
-      window.location.href = 'http://ui-action/editor-load-file?name=' + encodeURIComponent(filename);
+      window.location.href = 'http://ui-action/editor-delete-file?path=' + encodeURIComponent(path);
     }
 
-    window.onFileLoaded = function(name, base64Content) {
-      document.getElementById('filename-input').value = name;
+    function promptDeleteFolder(event, path) {
+      if (event) event.stopPropagation();
       
-      const binaryString = atob(base64Content);
-      const len = binaryString.length;
-      const bytes = new Uint8Array(len);
-      for (let i = 0; i < len; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
-      currentContent = new TextDecoder().decode(bytes);
+      const folderName = path.substring(path.lastIndexOf('/') + 1);
+      if (!confirm(`정말 '${folderName}' 폴더와 그 하위의 모든 파일들을 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) return;
       
-      editor.setMarkdown(currentContent);
-      showToast('파일을 불러왔습니다: ' + name);
-      document.getElementById('file-select').value = '';
-    };
+      window.location.href = 'http://ui-action/editor-delete-folder?path=' + encodeURIComponent(path);
+    }
+
+    function promptCreateFolder(event, parentPath) {
+      if (event) event.stopPropagation();
+      
+      const targetParent = parentPath || rootPath;
+      const name = prompt("생성할 폴더명을 입력해주세요:");
+      if (!name || name.trim() === '') return;
+      
+      window.location.href = 'http://ui-action/editor-create-folder?parent=' + encodeURIComponent(targetParent) + '&name=' + encodeURIComponent(name.trim());
+    }
 
     function sendPrompt() {
       const bytes = new TextEncoder().encode(currentContent);
@@ -375,6 +746,13 @@
       
       window.location.href = 'http://ui-action/send-prompt?text=' + encodeURIComponent(base64Content);
       showToast('프롬프트를 전송했습니다.');
+    }
+
+    function getPathTail(path) {
+      if (!path) return '';
+      const clean = path.replace(/\\/g, '/');
+      const idx = clean.lastIndexOf('/');
+      return idx !== -1 ? clean.substring(idx + 1) : path;
     }
   </script>
 </body>

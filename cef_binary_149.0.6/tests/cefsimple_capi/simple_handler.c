@@ -17,7 +17,133 @@
 
 #if defined(OS_WIN)
 #include <windows.h>
+#include <shlobj.h>
+#include <shellapi.h>
 extern int GetUIHeightForWindow(HWND hwnd);
+
+static void GetEditorRootConfigFilePath(char* out_path, size_t max_len) {
+  char user_profile[MAX_PATH];
+  if (SHGetSpecialFolderPathA(NULL, user_profile, CSIDL_PROFILE, FALSE)) {
+    snprintf(out_path, max_len, "%s\\.lite-browser", user_profile);
+    CreateDirectoryA(out_path, NULL);
+    snprintf(out_path, max_len, "%s\\.lite-browser\\editor_root.txt", user_profile);
+  } else {
+    snprintf(out_path, max_len, "C:\\projects\\lite_browser\\editor_root.txt");
+  }
+}
+
+static void get_editor_root_path(char* out_path, size_t max_len) {
+  char config_path[MAX_PATH];
+  GetEditorRootConfigFilePath(config_path, sizeof(config_path));
+  FILE* f = fopen(config_path, "r");
+  out_path[0] = '\0';
+  if (f) {
+    if (fgets(out_path, (int)max_len, f)) {
+      size_t len = strlen(out_path);
+      while (len > 0 && (out_path[len - 1] == '\n' || out_path[len - 1] == '\r')) {
+        out_path[len - 1] = '\0';
+        len--;
+      }
+    }
+    fclose(f);
+  }
+  
+  if (strlen(out_path) == 0) {
+    char user_profile[MAX_PATH];
+    if (SHGetSpecialFolderPathA(NULL, user_profile, CSIDL_PROFILE, FALSE)) {
+      snprintf(out_path, max_len, "%s\\.lite-browser\\documents", user_profile);
+    } else {
+      snprintf(out_path, max_len, "C:\\projects\\lite_browser\\documents");
+    }
+  }
+  
+  char parent_dir[MAX_PATH];
+  char user_profile[MAX_PATH];
+  if (SHGetSpecialFolderPathA(NULL, user_profile, CSIDL_PROFILE, FALSE)) {
+    snprintf(parent_dir, sizeof(parent_dir), "%s\\.lite-browser", user_profile);
+    CreateDirectoryA(parent_dir, NULL);
+  }
+  CreateDirectoryA(out_path, NULL);
+}
+
+static void scan_directory_recursive(const char* dir_path, char** json_ptr, size_t* len_ptr, size_t* cap_ptr, int is_first_in_level) {
+  char search_path[MAX_PATH];
+  snprintf(search_path, sizeof(search_path), "%s\\*", dir_path);
+  
+  WIN32_FIND_DATAA find_data;
+  HANDLE hFind = FindFirstFileA(search_path, &find_data);
+  if (hFind == INVALID_HANDLE_VALUE) return;
+  
+  int first_item = 1;
+  do {
+    if (strcmp(find_data.cFileName, ".") == 0 || strcmp(find_data.cFileName, "..") == 0) {
+      continue;
+    }
+    
+    char full_path[MAX_PATH];
+    snprintf(full_path, sizeof(full_path), "%s\\%s", dir_path, find_data.cFileName);
+    
+    int is_dir = (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY);
+    
+    if (!is_dir) {
+      size_t name_len = strlen(find_data.cFileName);
+      if (name_len < 3 || _stricmp(find_data.cFileName + name_len - 3, ".md") != 0) {
+        continue;
+      }
+    }
+    
+    size_t needed = strlen(find_data.cFileName) + strlen(full_path) + 256;
+    if (*len_ptr + needed >= *cap_ptr) {
+      *cap_ptr *= 2;
+      char* temp = (char*)realloc(*json_ptr, *cap_ptr);
+      if (!temp) {
+        FindClose(hFind);
+        return;
+      }
+      *json_ptr = temp;
+    }
+    
+    if (!is_first_in_level || !first_item) {
+      strcat(*json_ptr, ",");
+      *len_ptr = strlen(*json_ptr);
+    }
+    first_item = 0;
+    
+    char clean_path[MAX_PATH];
+    strcpy(clean_path, full_path);
+    for (int i = 0; clean_path[i]; i++) {
+      if (clean_path[i] == '\\') {
+        clean_path[i] = '/';
+      }
+    }
+    
+    char clean_name[MAX_PATH];
+    strcpy(clean_name, find_data.cFileName);
+    for (int i = 0; clean_name[i]; i++) {
+      if (clean_name[i] == '"') clean_name[i] = '\'';
+      if (clean_name[i] == '\\') clean_name[i] = '/';
+    }
+    
+    if (is_dir) {
+      snprintf(*json_ptr + *len_ptr, *cap_ptr - *len_ptr,
+               "{\"name\":\"%s\",\"type\":\"directory\",\"path\":\"%s\",\"children\":[",
+               clean_name, clean_path);
+      *len_ptr = strlen(*json_ptr);
+      
+      scan_directory_recursive(full_path, json_ptr, len_ptr, cap_ptr, 1);
+      
+      strcat(*json_ptr, "]}");
+      *len_ptr = strlen(*json_ptr);
+    } else {
+      snprintf(*json_ptr + *len_ptr, *cap_ptr - *len_ptr,
+               "{\"name\":\"%s\",\"type\":\"file\",\"path\":\"%s\"}",
+               clean_name, clean_path);
+      *len_ptr = strlen(*json_ptr);
+    }
+  } while (FindNextFileA(hFind, &find_data));
+  
+  FindClose(hFind);
+}
 #endif
 
 static void LogMsg(const char *format, ...) {
@@ -891,51 +1017,94 @@ int CEF_CALLBACK request_handler_on_before_browse(
             }
             free(name);
           }
+        } else if (strcmp(action, "editor-get-root") == 0) {
+          char root_path[MAX_PATH] = {0};
+          get_editor_root_path(root_path, sizeof(root_path));
+          
+          char clean_path[MAX_PATH];
+          strcpy(clean_path, root_path);
+          for (int i = 0; clean_path[i]; i++) {
+            if (clean_path[i] == '\\') clean_path[i] = '/';
+          }
+          
+          if (win_ctx && win_ctx->editor_browser) {
+            char js_callback[MAX_PATH + 128];
+            snprintf(js_callback, sizeof(js_callback),
+                     "if (window.onRootFolderLoaded) { window.onRootFolderLoaded('%s'); }",
+                     clean_path);
+            cef_frame_t* e_frame = win_ctx->editor_browser->get_main_frame(win_ctx->editor_browser);
+            if (e_frame) {
+              cef_string_t js_str = {};
+              cef_string_from_utf8(js_callback, strlen(js_callback), &js_str);
+              e_frame->execute_java_script(e_frame, &js_str, NULL, 0);
+              cef_string_clear(&js_str);
+              e_frame->base.release(&e_frame->base);
+            }
+          }
+        } else if (strcmp(action, "editor-select-root") == 0) {
+          char root_path[MAX_PATH] = {0};
+          int selected = 0;
+          
+          BROWSEINFOA bi = {0};
+          bi.hwndOwner = win_ctx ? win_ctx->main_hwnd : NULL;
+          bi.lpszTitle = "Root 폴더를 선택해주세요";
+          bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
+          LPITEMIDLIST pidl = SHBrowseForFolderA(&bi);
+          if (pidl != NULL) {
+            if (SHGetPathFromIDListA(pidl, root_path)) {
+              selected = 1;
+              char config_path[MAX_PATH];
+              GetEditorRootConfigFilePath(config_path, sizeof(config_path));
+              FILE* f = fopen(config_path, "w");
+              if (f) {
+                fprintf(f, "%s\n", root_path);
+                fclose(f);
+              }
+            }
+            CoTaskMemFree(pidl);
+          }
+          
+          if (selected) {
+            char clean_path[MAX_PATH];
+            strcpy(clean_path, root_path);
+            for (int i = 0; clean_path[i]; i++) {
+              if (clean_path[i] == '\\') clean_path[i] = '/';
+            }
+            
+            if (win_ctx && win_ctx->editor_browser) {
+              char js_callback[MAX_PATH + 128];
+              snprintf(js_callback, sizeof(js_callback),
+                       "if (window.onRootFolderSelected) { window.onRootFolderSelected('%s'); }",
+                       clean_path);
+              cef_frame_t* e_frame = win_ctx->editor_browser->get_main_frame(win_ctx->editor_browser);
+              if (e_frame) {
+                cef_string_t js_str = {};
+                cef_string_from_utf8(js_callback, strlen(js_callback), &js_str);
+                e_frame->execute_java_script(e_frame, &js_str, NULL, 0);
+                cef_string_clear(&js_str);
+                e_frame->base.release(&e_frame->base);
+              }
+            }
+          }
         } else if (strcmp(action, "editor-list-files") == 0) {
-          CreateDirectoryA("C:\\projects\\lite_browser\\documents", NULL);
+          char root_path[MAX_PATH] = {0};
+          get_editor_root_path(root_path, sizeof(root_path));
           
-          char search_path[MAX_PATH];
-          snprintf(search_path, sizeof(search_path), "C:\\projects\\lite_browser\\documents\\*.md");
-          
-          WIN32_FIND_DATAA find_data;
-          HANDLE hFind = FindFirstFileA(search_path, &find_data);
-          
-          size_t json_cap = 4096;
+          size_t json_cap = 16384;
           char* json = (char*)malloc(json_cap);
           if (json) {
             strcpy(json, "[");
-            int first = 1;
-            
-            if (hFind != INVALID_HANDLE_VALUE) {
-              do {
-                if (!(find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
-                  size_t needed = strlen(find_data.cFileName) + 5;
-                  if (strlen(json) + needed >= json_cap) {
-                    json_cap *= 2;
-                    char* temp = (char*)realloc(json, json_cap);
-                    if (!temp) break;
-                    json = temp;
-                  }
-                  
-                  if (!first) strcat(json, ",");
-                  strcat(json, "\"");
-                  strcat(json, find_data.cFileName);
-                  strcat(json, "\"");
-                  first = 0;
-                }
-              } while (FindNextFileA(hFind, &find_data));
-              FindClose(hFind);
-            }
+            size_t json_len = 1;
+            scan_directory_recursive(root_path, &json, &json_len, &json_cap, 1);
             strcat(json, "]");
             
             if (win_ctx && win_ctx->editor_browser) {
               size_t js_len = strlen(json) + 256;
               char* js_callback = (char*)malloc(js_len);
               if (js_callback) {
-                snprintf(js_callback, js_len, 
-                         "if (window.onFilesListed) { window.onFilesListed(%s); }", 
+                snprintf(js_callback, js_len,
+                         "if (window.onFilesListed) { window.onFilesListed(%s); }",
                          json);
-                         
                 cef_frame_t* e_frame = win_ctx->editor_browser->get_main_frame(win_ctx->editor_browser);
                 if (e_frame) {
                   cef_string_t js_str = {};
@@ -949,6 +1118,294 @@ int CEF_CALLBACK request_handler_on_before_browse(
             }
             free(json);
           }
+        } else if (strncmp(action, "editor-create-folder?", 21) == 0) {
+          const char* query = action + 21;
+          char* parent = get_query_param(query, "parent");
+          char* name = get_query_param(query, "name");
+          int success = 0;
+          
+          if (parent && name) {
+            for (int i = 0; parent[i]; i++) {
+              if (parent[i] == '/') parent[i] = '\\';
+            }
+            for (int i = 0; name[i]; i++) {
+              if (name[i] == '/' || name[i] == '\\' || name[i] == ':') {
+                name[i] = '_';
+              }
+            }
+            
+            char full_path[MAX_PATH];
+            snprintf(full_path, sizeof(full_path), "%s\\%s", parent, name);
+            if (CreateDirectoryA(full_path, NULL)) {
+              success = 1;
+            } else if (GetLastError() == ERROR_ALREADY_EXISTS) {
+              success = 1;
+            }
+          }
+          
+          if (win_ctx && win_ctx->editor_browser) {
+            char js_callback[256];
+            snprintf(js_callback, sizeof(js_callback),
+                     "if (window.onFolderCreated) { window.onFolderCreated(%d); }",
+                     success);
+            cef_frame_t* e_frame = win_ctx->editor_browser->get_main_frame(win_ctx->editor_browser);
+            if (e_frame) {
+              cef_string_t js_str = {};
+              cef_string_from_utf8(js_callback, strlen(js_callback), &js_str);
+              e_frame->execute_java_script(e_frame, &js_str, NULL, 0);
+              cef_string_clear(&js_str);
+              e_frame->base.release(&e_frame->base);
+            }
+          }
+          if (parent) free(parent);
+          if (name) free(name);
+        } else if (strncmp(action, "editor-create-file?", 19) == 0) {
+          const char* query = action + 19;
+          char* parent = get_query_param(query, "parent");
+          char* name = get_query_param(query, "name");
+          int success = 0;
+          char full_path[MAX_PATH] = {0};
+          
+          if (parent && name) {
+            for (int i = 0; parent[i]; i++) {
+              if (parent[i] == '/') parent[i] = '\\';
+            }
+            for (int i = 0; name[i]; i++) {
+              if (name[i] == '/' || name[i] == '\\' || name[i] == ':') {
+                name[i] = '_';
+              }
+            }
+            
+            size_t name_len = strlen(name);
+            char file_with_ext[MAX_PATH];
+            if (name_len < 3 || _stricmp(name + name_len - 3, ".md") != 0) {
+              snprintf(file_with_ext, sizeof(file_with_ext), "%s.md", name);
+            } else {
+              strcpy(file_with_ext, name);
+            }
+            
+            snprintf(full_path, sizeof(full_path), "%s\\%s", parent, file_with_ext);
+            FILE* f = fopen(full_path, "wb");
+            if (f) {
+              const char* default_template = "# [역할 정의] 당신은 전문 [직업/역할]입니다.\n\n## 1. 개요 (Context)\n- 목적: 이 작업을 수행하는 이유와 배경을 설명합니다.\n- 대상: 이 결과물을 소비할 대상(예: 개발자, 일반 대중, 경영진)을 명시합니다.\n\n## 2. 작업 지시 (Instructions)\n수행해야 할 구체적인 단계를 순서대로 작성합니다.\n1. [첫 번째 단계]\n2. [두 번째 단계]\n3. [세 번째 단계]\n\n## 3. 제약 조건 및 규칙 (Constraints)\n- 조건 1: 반드시 지켜야 할 규칙 (예: \"톤앤매너는 전문적이고 객관적으로\")\n- 조건 2: 제외해야 할 사항 (예: \"전문 용어는 지양하고 쉬운 단어로\")\n- 조건 3: 분량 제한 (예: \"3문장 이내로 요약\")\n\n## 4. 입력 데이터 (Input Data)\n<input_data>\n[여기에 분석하거나 처리할 원본 텍스트, 코드, 데이터 등을 입력하세요]\n</input_data>\n\n## 5. 출력 형식 (Output Format)\n반드시 아래 형식을 엄격히 준수하여 답변해 주세요.\n\n### [출력 제목]\n- **요약:**\n- **주요 내용:**\n  * 핵심 1\n  * 핵심 2\n- **결론 및 제언:**";
+              fwrite(default_template, 1, strlen(default_template), f);
+              fclose(f);
+              success = 1;
+            }
+          }
+          
+          if (win_ctx && win_ctx->editor_browser) {
+            char clean_path[MAX_PATH];
+            strcpy(clean_path, full_path);
+            for (int i = 0; clean_path[i]; i++) {
+              if (clean_path[i] == '\\') clean_path[i] = '/';
+            }
+            
+            char js_callback[MAX_PATH + 256];
+            snprintf(js_callback, sizeof(js_callback),
+                     "if (window.onFileCreated) { window.onFileCreated(%d, '%s'); }",
+                     success, clean_path);
+            cef_frame_t* e_frame = win_ctx->editor_browser->get_main_frame(win_ctx->editor_browser);
+            if (e_frame) {
+              cef_string_t js_str = {};
+              cef_string_from_utf8(js_callback, strlen(js_callback), &js_str);
+              e_frame->execute_java_script(e_frame, &js_str, NULL, 0);
+              cef_string_clear(&js_str);
+              e_frame->base.release(&e_frame->base);
+            }
+          }
+          if (parent) free(parent);
+          if (name) free(name);
+        } else if (strncmp(action, "editor-save-file-v2?", 20) == 0) {
+          const char* query = action + 20;
+          char* path = get_query_param(query, "path");
+          char* content_base64 = get_query_param(query, "content");
+          int success = 0;
+          
+          if (path && content_base64) {
+            for (int i = 0; path[i]; i++) {
+              if (path[i] == '/') path[i] = '\\';
+            }
+            
+            size_t decoded_len = 0;
+            unsigned char* decoded = base64_decode(content_base64, &decoded_len);
+            if (decoded) {
+              FILE* f = fopen(path, "wb");
+              if (f) {
+                fwrite(decoded, 1, decoded_len, f);
+                fclose(f);
+                success = 1;
+              }
+              free(decoded);
+            }
+          }
+          
+          if (win_ctx && win_ctx->editor_browser) {
+            char clean_path[MAX_PATH] = {0};
+            if (path) {
+              strcpy(clean_path, path);
+              for (int i = 0; clean_path[i]; i++) {
+                if (clean_path[i] == '\\') clean_path[i] = '/';
+              }
+            }
+            
+            char js_callback[MAX_PATH + 256];
+            snprintf(js_callback, sizeof(js_callback),
+                     "if (window.onFileSavedV2) { window.onFileSavedV2(%d, '%s'); }",
+                     success, clean_path);
+            cef_frame_t* e_frame = win_ctx->editor_browser->get_main_frame(win_ctx->editor_browser);
+            if (e_frame) {
+              cef_string_t js_str = {};
+              cef_string_from_utf8(js_callback, strlen(js_callback), &js_str);
+              e_frame->execute_java_script(e_frame, &js_str, NULL, 0);
+              cef_string_clear(&js_str);
+              e_frame->base.release(&e_frame->base);
+            }
+          }
+          if (path) free(path);
+          if (content_base64) free(content_base64);
+        } else if (strncmp(action, "editor-load-file-v2?", 20) == 0) {
+          const char* query = action + 20;
+          char* path = get_query_param(query, "path");
+          
+          if (path) {
+            for (int i = 0; path[i]; i++) {
+              if (path[i] == '/') path[i] = '\\';
+            }
+            
+            FILE* f = fopen(path, "rb");
+            if (f) {
+              fseek(f, 0, SEEK_END);
+              long file_size = ftell(f);
+              fseek(f, 0, SEEK_SET);
+              
+              unsigned char* buf = (unsigned char*)malloc(file_size + 1);
+              if (buf) {
+                fread(buf, 1, file_size, f);
+                buf[file_size] = '\0';
+                
+                char* base64_content = base64_encode(buf, file_size);
+                if (base64_content) {
+                  if (win_ctx && win_ctx->editor_browser) {
+                    char clean_path[MAX_PATH];
+                    strcpy(clean_path, path);
+                    for (int i = 0; clean_path[i]; i++) {
+                      if (clean_path[i] == '\\') clean_path[i] = '/';
+                    }
+                    
+                    size_t js_len = strlen(base64_content) + MAX_PATH + 256;
+                    char* js_callback = (char*)malloc(js_len);
+                    if (js_callback) {
+                      snprintf(js_callback, js_len,
+                               "if (window.onFileLoadedV2) { window.onFileLoadedV2('%s', '%s'); }",
+                               clean_path, base64_content);
+                      cef_frame_t* e_frame = win_ctx->editor_browser->get_main_frame(win_ctx->editor_browser);
+                      if (e_frame) {
+                        cef_string_t js_str = {};
+                        cef_string_from_utf8(js_callback, strlen(js_callback), &js_str);
+                        e_frame->execute_java_script(e_frame, &js_str, NULL, 0);
+                        cef_string_clear(&js_str);
+                        e_frame->base.release(&e_frame->base);
+                      }
+                      free(js_callback);
+                    }
+                    free(base64_content);
+                  }
+                }
+                free(buf);
+              }
+              fclose(f);
+            }
+            free(path);
+          }
+        } else if (strncmp(action, "editor-delete-file?", 19) == 0) {
+          const char* query = action + 19;
+          char* path = get_query_param(query, "path");
+          int success = 0;
+          
+          if (path) {
+            for (int i = 0; path[i]; i++) {
+              if (path[i] == '/') path[i] = '\\';
+            }
+            
+            if (DeleteFileA(path)) {
+              success = 1;
+            }
+          }
+          
+          if (win_ctx && win_ctx->editor_browser) {
+            char clean_path[MAX_PATH] = {0};
+            if (path) {
+              strcpy(clean_path, path);
+              for (int i = 0; clean_path[i]; i++) {
+                if (clean_path[i] == '\\') clean_path[i] = '/';
+              }
+            }
+            
+            char js_callback[MAX_PATH + 256];
+            snprintf(js_callback, sizeof(js_callback),
+                     "if (window.onFileDeleted) { window.onFileDeleted(%d, '%s'); }",
+                     success, clean_path);
+            cef_frame_t* e_frame = win_ctx->editor_browser->get_main_frame(win_ctx->editor_browser);
+            if (e_frame) {
+              cef_string_t js_str = {};
+              cef_string_from_utf8(js_callback, strlen(js_callback), &js_str);
+              e_frame->execute_java_script(e_frame, &js_str, NULL, 0);
+              cef_string_clear(&js_str);
+              e_frame->base.release(&e_frame->base);
+            }
+          }
+          if (path) free(path);
+        } else if (strncmp(action, "editor-delete-folder?", 21) == 0) {
+          const char* query = action + 21;
+          char* path = get_query_param(query, "path");
+          int success = 0;
+          
+          if (path) {
+            for (int i = 0; path[i]; i++) {
+              if (path[i] == '/') path[i] = '\\';
+            }
+            
+            char double_null_path[MAX_PATH + 2] = {0};
+            strncpy(double_null_path, path, MAX_PATH);
+            double_null_path[strlen(path)] = '\0';
+            double_null_path[strlen(path) + 1] = '\0';
+            
+            SHFILEOPSTRUCTA sf;
+            memset(&sf, 0, sizeof(sf));
+            sf.hwnd = win_ctx ? win_ctx->main_hwnd : NULL;
+            sf.wFunc = FO_DELETE;
+            sf.pFrom = double_null_path;
+            sf.fFlags = FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT;
+            
+            if (SHFileOperationA(&sf) == 0) {
+              success = 1;
+            }
+          }
+          
+          if (win_ctx && win_ctx->editor_browser) {
+            char clean_path[MAX_PATH] = {0};
+            if (path) {
+              strcpy(clean_path, path);
+              for (int i = 0; clean_path[i]; i++) {
+                if (clean_path[i] == '\\') clean_path[i] = '/';
+              }
+            }
+            
+            char js_callback[MAX_PATH + 256];
+            snprintf(js_callback, sizeof(js_callback),
+                     "if (window.onFolderDeleted) { window.onFolderDeleted(%d, '%s'); }",
+                     success, clean_path);
+            cef_frame_t* e_frame = win_ctx->editor_browser->get_main_frame(win_ctx->editor_browser);
+            if (e_frame) {
+              cef_string_t js_str = {};
+              cef_string_from_utf8(js_callback, strlen(js_callback), &js_str);
+              e_frame->execute_java_script(e_frame, &js_str, NULL, 0);
+              cef_string_clear(&js_str);
+              e_frame->base.release(&e_frame->base);
+            }
+          }
+          if (path) free(path);
         } else if (strncmp(action, "send-prompt?", 12) == 0) {
           const char* query = action + 12;
           char* text_base64 = get_query_param(query, "text");
