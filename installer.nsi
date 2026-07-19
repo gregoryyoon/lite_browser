@@ -10,6 +10,8 @@ RequestExecutionLevel admin
 
 ; Interface Settings
 !define MUI_ABORTWARNING
+!define MUI_ICON "cef_binary_149.0.6\tests\cefsimple_capi\win\cefsimple.ico"
+!define MUI_UNICON "cef_binary_149.0.6\tests\cefsimple_capi\win\cefsimple.ico"
 
 ; Pages
 !insertmacro MUI_PAGE_WELCOME
