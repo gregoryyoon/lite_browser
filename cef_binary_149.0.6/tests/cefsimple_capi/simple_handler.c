@@ -812,7 +812,12 @@ int CEF_CALLBACK request_handler_on_before_browse(
         } else if (strncmp(action, "show-menu?", 10) == 0) {
           int click_x = 0, click_y = 0;
           if (sscanf(action + 10, "x=%d&y=%d", &click_x, &click_y) == 2) {
-            POINT pt = {click_x, click_y};
+            double scale = 1.0;
+            UINT dpi = GetDpiForWindow(win_ctx->ui_hwnd);
+            if (dpi > 0) {
+              scale = (double)dpi / 96.0;
+            }
+            POINT pt = {(int)(click_x * scale), (int)(click_y * scale)};
             ClientToScreen(win_ctx->ui_hwnd, &pt);
 
             HMENU hMenu = CreatePopupMenu();
@@ -826,7 +831,7 @@ int CEF_CALLBACK request_handler_on_before_browse(
             AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
             AppendMenuW(hMenu, MF_STRING, 1006, L"종료");
 
-            int cmd = TrackPopupMenu(hMenu, TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN, pt.x, pt.y, 0, win_ctx->main_hwnd, NULL);
+            int cmd = TrackPopupMenu(hMenu, TPM_RETURNCMD | TPM_RIGHTALIGN | TPM_TOPALIGN, pt.x, pt.y, 0, win_ctx->main_hwnd, NULL);
             DestroyMenu(hMenu);
 
             if (cmd == 1001) {
@@ -1653,7 +1658,12 @@ int CEF_CALLBACK request_handler_on_before_browse(
         } else if (strncmp(action, "show-tab-menu?", 14) == 0) {
           int tab_id = 0, click_x = 0, click_y = 0;
           if (sscanf(action + 14, "id=%d&x=%d&y=%d", &tab_id, &click_x, &click_y) == 3) {
-            POINT pt = {click_x, click_y};
+            double scale = 1.0;
+            UINT dpi = GetDpiForWindow(win_ctx->ui_hwnd);
+            if (dpi > 0) {
+              scale = (double)dpi / 96.0;
+            }
+            POINT pt = {(int)(click_x * scale), (int)(click_y * scale)};
             ClientToScreen(win_ctx->ui_hwnd, &pt);
 
             HMENU hMenu = CreatePopupMenu();
@@ -1862,48 +1872,79 @@ void CEF_CALLBACK context_menu_on_before_context_menu(
   // Clear default items to prevent CEF from displaying anything.
   model->clear(model);
   
-  int click_x = params->get_xcoord(params);
-  int click_y = params->get_ycoord(params);
-  POINT pt = {click_x, click_y};
+  // Check if this right-click is on the UI browser.
+  // If so, do not display any context menu.
+  simple_context_menu_handler_t* ctx_handler = (simple_context_menu_handler_t*)self;
+  if (ctx_handler && ctx_handler->parent && ctx_handler->parent->window_ctx) {
+    browser_window_t* win_ctx = ctx_handler->parent->window_ctx;
+    if (win_ctx->ui_browser) {
+      int ui_id = win_ctx->ui_browser->get_identifier(win_ctx->ui_browser);
+      int cur_id = browser->get_identifier(browser);
+      if (ui_id == cur_id) {
+        LogMsg("on_before_context_menu: bypassed for ui_browser\n");
+        return;
+      }
+    }
+  }
+  
+  // Use GetCursorPos to get exact mouse coordinate on the screen,
+  // preventing alignment/DPI/DWM shadow margins offset mismatch.
+  POINT pt = {};
+  GetCursorPos(&pt);
+  
+  int has_link = 0;
+  char* link_url_str = NULL;
+  
+  if (params) {
+    cef_string_userfree_t link_url = params->get_link_url(params);
+    if (link_url && link_url->length > 0) {
+      cef_string_utf8_t utf8 = {};
+      cef_string_to_utf8(link_url->str, link_url->length, &utf8);
+      if (utf8.str && strlen(utf8.str) > 0) {
+        has_link = 1;
+        link_url_str = _strdup(utf8.str);
+      }
+      cef_string_utf8_clear(&utf8);
+    }
+    if (link_url) {
+      cef_string_userfree_free(link_url);
+    }
+  }
   
   cef_browser_host_t* host = browser->get_host(browser);
   if (host) {
     HWND hwnd = host->get_window_handle(host);
-    ClientToScreen(hwnd, &pt);
     
     HMENU hMenu = CreatePopupMenu();
-    int can_back = browser->can_go_back(browser);
-    int can_forward = browser->can_go_forward(browser);
     
-    AppendMenuW(hMenu, MF_STRING | (can_back ? 0 : MF_GRAYED), MENU_ID_BACK, L"뒤로 가기");
-    AppendMenuW(hMenu, MF_STRING | (can_forward ? 0 : MF_GRAYED), MENU_ID_FORWARD, L"앞으로 가기");
-    AppendMenuW(hMenu, MF_STRING, MENU_ID_RELOAD, L"새로고침");
-    AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
-    AppendMenuW(hMenu, MF_STRING, MENU_ID_PRINT, L"인쇄...");
-    AppendMenuW(hMenu, MF_STRING, MENU_ID_VIEW_SOURCE, L"페이지 소스 보기");
-    AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
-    AppendMenuW(hMenu, MF_STRING, MENU_ID_USER_FIRST, L"검사 (Inspect)");
-    AppendMenuW(hMenu, MF_STRING, 1007, L"마크다운 에디터 토글");
+    if (has_link) {
+      AppendMenuW(hMenu, MF_STRING, 3001, L"새 탭에서 링크 열기");
+      AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+      AppendMenuW(hMenu, MF_STRING, 3002, L"링크 페이지 저장");
+      AppendMenuW(hMenu, MF_STRING, 3003, L"링크 복사");
+      AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+      AppendMenuW(hMenu, MF_STRING, MENU_ID_USER_FIRST, L"검사 (Inspect)");
+    } else {
+      int can_back = browser->can_go_back(browser);
+      int can_forward = browser->can_go_forward(browser);
+      
+      AppendMenuW(hMenu, MF_STRING | (can_back ? 0 : MF_GRAYED), MENU_ID_BACK, L"뒤로 가기");
+      AppendMenuW(hMenu, MF_STRING | (can_forward ? 0 : MF_GRAYED), MENU_ID_FORWARD, L"앞으로 가기");
+      AppendMenuW(hMenu, MF_STRING, MENU_ID_RELOAD, L"새로고침");
+      AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+      AppendMenuW(hMenu, MF_STRING, MENU_ID_PRINT, L"인쇄...");
+      AppendMenuW(hMenu, MF_STRING, MENU_ID_VIEW_SOURCE, L"페이지 소스 보기");
+      AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+      AppendMenuW(hMenu, MF_STRING, MENU_ID_USER_FIRST, L"검사 (Inspect)");
+    }
     
-    LogMsg("on_before_context_menu: calling TrackPopupMenu (blocking)\n");
+    LogMsg("on_before_context_menu: calling TrackPopupMenu (blocking) at screen coords x=%d, y=%d\n", pt.x, pt.y);
     int cmd = TrackPopupMenu(hMenu, TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN, pt.x, pt.y, 0, hwnd, NULL);
     LogMsg("on_before_context_menu: TrackPopupMenu returned cmd=%d\n", cmd);
     DestroyMenu(hMenu);
     
     if (cmd > 0) {
-      if (cmd == 1007) {
-        simple_context_menu_handler_t* ctx_handler = (simple_context_menu_handler_t*)self;
-        browser_window_t* win_ctx = ctx_handler->parent->window_ctx;
-        if (win_ctx) {
-          win_ctx->show_editor = !win_ctx->show_editor;
-          if (win_ctx->editor_hwnd) {
-            ShowWindow(win_ctx->editor_hwnd, win_ctx->show_editor ? SW_SHOW : SW_HIDE);
-          }
-          RECT rect;
-          GetClientRect(win_ctx->main_hwnd, &rect);
-          PostMessage(win_ctx->main_hwnd, WM_SIZE, 0, MAKELPARAM(rect.right, rect.bottom));
-        }
-      } else if (cmd == MENU_ID_USER_FIRST) {
+      if (cmd == MENU_ID_USER_FIRST) {
         LogMsg("on_before_context_menu: show dev tools\n");
         cef_window_info_t windowInfo = {};
         windowInfo.size = sizeof(cef_window_info_t);
@@ -1914,6 +1955,8 @@ void CEF_CALLBACK context_menu_on_before_context_menu(
         cef_browser_settings_t settings = {};
         settings.size = sizeof(cef_browser_settings_t);
         
+        int click_x = params->get_xcoord(params);
+        int click_y = params->get_ycoord(params);
         cef_point_t inspect_at = { click_x, click_y };
         host->show_dev_tools(host, &windowInfo, NULL, &settings, &inspect_at);
       } else if (cmd == MENU_ID_BACK) {
@@ -1924,9 +1967,39 @@ void CEF_CALLBACK context_menu_on_before_context_menu(
         browser->reload(browser);
       } else if (cmd == MENU_ID_PRINT) {
         host->print(host);
+      } else if (cmd == 3001) {
+        if (link_url_str) {
+          browser_window_t* win_ctx = ctx_handler->parent->window_ctx;
+          if (win_ctx) {
+            CreateNewTab(win_ctx, link_url_str);
+          }
+        }
+      } else if (cmd == 3002) {
+        if (link_url_str) {
+          cef_string_t cef_url = {};
+          cef_string_from_utf8(link_url_str, strlen(link_url_str), &cef_url);
+          host->start_download(host, &cef_url);
+          cef_string_clear(&cef_url);
+        }
+      } else if (cmd == 3003) {
+        if (link_url_str) {
+          if (OpenClipboard(hwnd)) {
+            EmptyClipboard();
+            int len = MultiByteToWideChar(CP_UTF8, 0, link_url_str, -1, NULL, 0);
+            HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, len * sizeof(wchar_t));
+            if (hMem) {
+              wchar_t* pMem = (wchar_t*)GlobalLock(hMem);
+              if (pMem) {
+                MultiByteToWideChar(CP_UTF8, 0, link_url_str, -1, pMem, len);
+              }
+              GlobalUnlock(hMem);
+              SetClipboardData(CF_UNICODETEXT, hMem);
+            }
+            CloseClipboard();
+          }
+        }
       } else if (cmd == MENU_ID_VIEW_SOURCE) {
         LogMsg("on_before_context_menu: view source trigger\n");
-        simple_context_menu_handler_t* ctx_handler = (simple_context_menu_handler_t*)self;
         browser_window_t* win_ctx = ctx_handler->parent->window_ctx;
         if (win_ctx && win_ctx->active_tab_index >= 0) {
           char vs_url[1200] = "view-source:";
@@ -1977,6 +2050,10 @@ void CEF_CALLBACK context_menu_on_before_context_menu(
     }
     
     host->base.release(&host->base);
+  }
+  
+  if (link_url_str) {
+    free(link_url_str);
   }
   
   LogMsg("on_before_context_menu: end\n");

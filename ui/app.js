@@ -164,7 +164,7 @@ function toggleMenu(event) {
   const btn = document.getElementById('menu-btn');
   if (btn) {
     const rect = btn.getBoundingClientRect();
-    const x = Math.round(rect.left);
+    const x = Math.round(rect.right);
     const y = Math.round(rect.bottom);
     window.location.href = 'http://ui-action/show-menu?x=' + x + '&y=' + y;
   }
