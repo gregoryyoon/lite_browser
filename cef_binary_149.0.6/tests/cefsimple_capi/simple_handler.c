@@ -628,8 +628,153 @@ void update_ui_nav_state(browser_window_t* win_ctx) {
   }
 }
 
+static void CloseTab(browser_window_t* win_ctx, int target_id) {
+  int found_idx = -1;
+  for (int i = 0; i < win_ctx->tab_count; i++) {
+    if (win_ctx->tabs[i].tab_id == target_id) {
+      found_idx = i;
+      break;
+    }
+  }
+  if (found_idx != -1) {
+    if (win_ctx->tab_count <= 1) {
+      PostMessage(win_ctx->main_hwnd, WM_CLOSE, 0, 0);
+    } else {
+      cef_browser_t* target_browser = win_ctx->tabs[found_idx].browser;
+      if (target_browser) {
+        cef_browser_host_t* host = target_browser->get_host(target_browser);
+        if (host) {
+          host->close_browser(host, 1);
+          host->base.release(&host->base);
+        }
+      }
+
+      int old_active = win_ctx->active_tab_index;
+      int new_active = old_active;
+      if (old_active == found_idx) {
+        new_active = (found_idx == win_ctx->tab_count - 1) ? found_idx - 1 : found_idx;
+        if (win_ctx->tabs[new_active].hwnd) {
+          ShowWindow(win_ctx->tabs[new_active].hwnd, SW_SHOW);
+          RECT rect;
+          GetClientRect(win_ctx->main_hwnd, &rect);
+          PostMessage(win_ctx->main_hwnd, WM_SIZE, 0, MAKELPARAM(rect.right, rect.bottom));
+          cef_browser_host_t* host = win_ctx->tabs[new_active].browser->get_host(win_ctx->tabs[new_active].browser);
+          if (host) {
+            host->was_resized(host);
+            host->set_focus(host, 1);
+            host->base.release(&host->base);
+          }
+        }
+      } else if (old_active > found_idx) {
+        new_active = old_active - 1;
+      }
+
+      for (int i = found_idx; i < win_ctx->tab_count - 1; i++) {
+        win_ctx->tabs[i] = win_ctx->tabs[i + 1];
+      }
+      win_ctx->tab_count--;
+      win_ctx->active_tab_index = new_active;
+
+      update_ui_tabs(win_ctx);
+      update_ui_nav_state(win_ctx);
+    }
+  }
+}
+
+static void CloseOtherTabs(browser_window_t* win_ctx, int keep_id) {
+  int keep_idx = -1;
+  for (int i = 0; i < win_ctx->tab_count; i++) {
+    if (win_ctx->tabs[i].tab_id == keep_id) {
+      keep_idx = i;
+      break;
+    }
+  }
+  if (keep_idx == -1) return;
+
+  for (int i = 0; i < win_ctx->tab_count; i++) {
+    if (i != keep_idx) {
+      cef_browser_t* target_browser = win_ctx->tabs[i].browser;
+      if (target_browser) {
+        cef_browser_host_t* host = target_browser->get_host(target_browser);
+        if (host) {
+          host->close_browser(host, 1);
+          host->base.release(&host->base);
+        }
+      }
+    }
+  }
+
+  tab_info_t keep_tab = win_ctx->tabs[keep_idx];
+  win_ctx->tabs[0] = keep_tab;
+  win_ctx->tab_count = 1;
+  win_ctx->active_tab_index = 0;
+
+  if (win_ctx->tabs[0].hwnd) {
+    ShowWindow(win_ctx->tabs[0].hwnd, SW_SHOW);
+    RECT rect;
+    GetClientRect(win_ctx->main_hwnd, &rect);
+    PostMessage(win_ctx->main_hwnd, WM_SIZE, 0, MAKELPARAM(rect.right, rect.bottom));
+    cef_browser_host_t* host = win_ctx->tabs[0].browser->get_host(win_ctx->tabs[0].browser);
+    if (host) {
+      host->was_resized(host);
+      host->set_focus(host, 1);
+      host->base.release(&host->base);
+    }
+  }
+
+  update_ui_tabs(win_ctx);
+  update_ui_nav_state(win_ctx);
+}
+
+static void CloseTabsToRight(browser_window_t* win_ctx, int target_id) {
+  int target_idx = -1;
+  for (int i = 0; i < win_ctx->tab_count; i++) {
+    if (win_ctx->tabs[i].tab_id == target_id) {
+      target_idx = i;
+      break;
+    }
+  }
+  if (target_idx == -1 || target_idx >= win_ctx->tab_count - 1) return;
+
+  for (int i = target_idx + 1; i < win_ctx->tab_count; i++) {
+    cef_browser_t* target_browser = win_ctx->tabs[i].browser;
+    if (target_browser) {
+      cef_browser_host_t* host = target_browser->get_host(target_browser);
+      if (host) {
+        host->close_browser(host, 1);
+        host->base.release(&host->base);
+      }
+    }
+  }
+
+  int old_active = win_ctx->active_tab_index;
+  int new_active = old_active;
+  if (old_active > target_idx) {
+    new_active = target_idx;
+    if (win_ctx->tabs[new_active].hwnd) {
+      ShowWindow(win_ctx->tabs[new_active].hwnd, SW_SHOW);
+      RECT rect;
+      GetClientRect(win_ctx->main_hwnd, &rect);
+      PostMessage(win_ctx->main_hwnd, WM_SIZE, 0, MAKELPARAM(rect.right, rect.bottom));
+      cef_browser_host_t* host = win_ctx->tabs[new_active].browser->get_host(win_ctx->tabs[new_active].browser);
+      if (host) {
+        host->was_resized(host);
+        host->set_focus(host, 1);
+        host->base.release(&host->base);
+      }
+    }
+  }
+
+  win_ctx->tab_count = target_idx + 1;
+  win_ctx->active_tab_index = new_active;
+
+  update_ui_tabs(win_ctx);
+  update_ui_nav_state(win_ctx);
+}
+
 //
 // Request handler implementation.
+//
 //
 
 IMPLEMENT_REFCOUNTING_SIMPLE(simple_request_handler_t, request_handler,
@@ -1504,54 +1649,31 @@ int CEF_CALLBACK request_handler_on_before_browse(
           }
         } else if (strncmp(action, "close-tab?id=", 13) == 0) {
           int target_id = atoi(action + 13);
-          int found_idx = -1;
-          for (int i = 0; i < win_ctx->tab_count; i++) {
-            if (win_ctx->tabs[i].tab_id == target_id) {
-              found_idx = i;
-              break;
-            }
-          }
-          if (found_idx != -1) {
-            if (win_ctx->tab_count <= 1) {
-              PostMessage(win_ctx->main_hwnd, WM_CLOSE, 0, 0);
-            } else {
-              cef_browser_t* target_browser = win_ctx->tabs[found_idx].browser;
-              if (target_browser) {
-                cef_browser_host_t* host = target_browser->get_host(target_browser);
-                if (host) {
-                  host->close_browser(host, 1);
-                  host->base.release(&host->base);
-                }
-              }
+          CloseTab(win_ctx, target_id);
+        } else if (strncmp(action, "show-tab-menu?", 14) == 0) {
+          int tab_id = 0, click_x = 0, click_y = 0;
+          if (sscanf(action + 14, "id=%d&x=%d&y=%d", &tab_id, &click_x, &click_y) == 3) {
+            POINT pt = {click_x, click_y};
+            ClientToScreen(win_ctx->ui_hwnd, &pt);
 
-              int old_active = win_ctx->active_tab_index;
-              int new_active = old_active;
-              if (old_active == found_idx) {
-                new_active = (found_idx == win_ctx->tab_count - 1) ? found_idx - 1 : found_idx;
-                if (win_ctx->tabs[new_active].hwnd) {
-                  ShowWindow(win_ctx->tabs[new_active].hwnd, SW_SHOW);
-                  RECT rect;
-                  GetClientRect(win_ctx->main_hwnd, &rect);
-                  PostMessage(win_ctx->main_hwnd, WM_SIZE, 0, MAKELPARAM(rect.right, rect.bottom));
-                  cef_browser_host_t* host = win_ctx->tabs[new_active].browser->get_host(win_ctx->tabs[new_active].browser);
-                  if (host) {
-                    host->was_resized(host);
-                    host->set_focus(host, 1);
-                    host->base.release(&host->base);
-                  }
-                }
-              } else if (old_active > found_idx) {
-                new_active = old_active - 1;
-              }
+            HMENU hMenu = CreatePopupMenu();
+            AppendMenuW(hMenu, MF_STRING, 2001, L"새 탭");
+            AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+            AppendMenuW(hMenu, MF_STRING, 2002, L"탭 닫기");
+            AppendMenuW(hMenu, MF_STRING, 2003, L"다른 탭 닫기");
+            AppendMenuW(hMenu, MF_STRING, 2004, L"오른쪽 탭 닫기");
 
-              for (int i = found_idx; i < win_ctx->tab_count - 1; i++) {
-                win_ctx->tabs[i] = win_ctx->tabs[i + 1];
-              }
-              win_ctx->tab_count--;
-              win_ctx->active_tab_index = new_active;
+            int cmd = TrackPopupMenu(hMenu, TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN, pt.x, pt.y, 0, win_ctx->main_hwnd, NULL);
+            DestroyMenu(hMenu);
 
-              update_ui_tabs(win_ctx);
-              update_ui_nav_state(win_ctx);
+            if (cmd == 2001) {
+              CreateNewTab(win_ctx, "https://gemini.google.com");
+            } else if (cmd == 2002) {
+              CloseTab(win_ctx, tab_id);
+            } else if (cmd == 2003) {
+              CloseOtherTabs(win_ctx, tab_id);
+            } else if (cmd == 2004) {
+              CloseTabsToRight(win_ctx, tab_id);
             }
           }
         } else if (strcmp(action, "new-window") == 0) {

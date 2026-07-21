@@ -78,6 +78,14 @@ window.updateTabsList = function(tabs, activeId) {
     tabEl.className = 'tab' + (tab.id === activeId ? ' active' : '');
     tabEl.draggable = false;
     
+    tabEl.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const x = Math.round(e.clientX);
+      const y = Math.round(e.clientY);
+      window.location.href = 'http://ui-action/show-tab-menu?id=' + tab.id + '&x=' + x + '&y=' + y;
+    });
+    
     const titleEl = document.createElement('span');
     titleEl.className = 'tab-title';
     titleEl.innerText = tab.title || '새 탭';
