@@ -256,6 +256,14 @@ if(OS_WINDOWS)
     # Copy and rename the bootstrap binary.
     COPY_SINGLE_FILE(${CEF_TARGET} ${CEF_BINARY_DIR}/bootstrap.exe ${CEF_TARGET_OUT_DIR}/${CEF_TARGET}.exe)
 
+    # Inject the custom icon into the bootstrap executable.
+    add_custom_command(
+      TARGET ${CEF_TARGET}
+      POST_BUILD
+      COMMAND python "${CMAKE_CURRENT_SOURCE_DIR}/win/inject_icon.py" "$<TARGET_FILE_DIR:${CEF_TARGET}>/${CEF_TARGET}.exe" "${CMAKE_CURRENT_SOURCE_DIR}/win/cefsimple.ico" 120
+      VERBATIM
+      )
+
     if (CMAKE_GENERATOR MATCHES "Visual Studio")
       # Make the bootstrap binary the default command for the Visual Studio debugger.
       set_target_properties(${CEF_TARGET} PROPERTIES

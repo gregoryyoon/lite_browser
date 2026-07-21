@@ -151,67 +151,47 @@ int CEF_CALLBACK life_span_handler_on_before_popup(
   browser_window_t *win_ctx = handler->parent->window_ctx;
 
   if (win_ctx && win_ctx->tab_count < MAX_TABS) {
-    LogMsg("life_span_handler_on_before_popup (Allow with WS_CHILD): target_url = %p\n", target_url);
-
-    int next_idx = win_ctx->tab_count;
-    int max_id = 0;
-    for(int k=0; k<win_ctx->tab_count; k++) {
-      if (win_ctx->tabs[k].tab_id > max_id) max_id = win_ctx->tabs[k].tab_id;
-    }
-    win_ctx->tabs[next_idx].tab_id = max_id + 1;
-    win_ctx->tabs[next_idx].browser = NULL;
-    win_ctx->tabs[next_idx].hwnd = NULL;
-    strcpy(win_ctx->tabs[next_idx].title, "새 탭");
-    win_ctx->tabs[next_idx].is_loaded = 0;
+    LogMsg("life_span_handler_on_before_popup (Redirect to CreateNewTab & Cancel Native Popup): target_url = %p\n", target_url);
 
     cef_string_utf8_t url_utf8 = {};
-    if (target_url && target_url->str) {
-      cef_string_to_utf8(target_url->str, target_url->length, &url_utf8);
+    int conv_ok = 0;
+
+    __try {
+      LogMsg("on_before_popup: target_url pointer check: %p\n", target_url);
+      if (target_url) {
+        LogMsg("on_before_popup: target_url->str = %p, length = %d\n", target_url->str, (int)target_url->length);
+        if (target_url->str && target_url->length > 0) {
+          cef_string_to_utf8(target_url->str, target_url->length, &url_utf8);
+          conv_ok = 1;
+          LogMsg("on_before_popup: cef_string_to_utf8 success. url = %s\n", url_utf8.str ? url_utf8.str : "(null)");
+        }
+      }
     }
-    if (url_utf8.str && strlen(url_utf8.str) > 0) {
-      strncpy(win_ctx->tabs[next_idx].url, url_utf8.str, sizeof(win_ctx->tabs[next_idx].url) - 1);
-      win_ctx->tabs[next_idx].url[sizeof(win_ctx->tabs[next_idx].url) - 1] = '\0';
+    __except(EXCEPTION_EXECUTE_HANDLER) {
+      LogMsg("on_before_popup: EXCEPTION caught during target_url memory access!\n");
+      conv_ok = 0;
+    }
+
+    char target_url_str[1024] = {0};
+    if (conv_ok && url_utf8.str && strlen(url_utf8.str) > 0) {
+      strncpy(target_url_str, url_utf8.str, sizeof(target_url_str) - 1);
     } else {
-      strcpy(win_ctx->tabs[next_idx].url, "about:blank");
-    }
-    cef_string_utf8_clear(&url_utf8);
-
-    win_ctx->active_tab_index = next_idx;
-    win_ctx->tab_count++;
-    update_ui_tabs(win_ctx);
-
-    RECT rect;
-    GetClientRect(win_ctx->main_hwnd, &rect);
-    int width = rect.right;
-    int height = rect.bottom;
-
-    int ui_height = GetUIHeightForWindow(win_ctx->main_hwnd);
-    int content_y = ui_height + 1;
-    int content_h = height - content_y - 1;
-
-    // Modify windowInfo to render inside the main window as a WS_CHILD window
-    windowInfo->style = WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
-    windowInfo->parent_window = win_ctx->main_hwnd;
-    windowInfo->bounds.x = 1;
-    windowInfo->bounds.y = content_y;
-    windowInfo->bounds.width = width - 2;
-    windowInfo->bounds.height = content_h;
-
-    // Attach a new simple_handler client for this tab browser
-    simple_handler_t *content_handler = simple_handler_create(0);
-    content_handler->window_ctx = win_ctx;
-    win_ctx->tabs[next_idx].tab_handler = content_handler;
-    *client = &content_handler->client;
-    if (no_javascript_access) {
-      *no_javascript_access = 1;
+      strcpy(target_url_str, "about:blank");
     }
 
-    // Release C structures of browser and frame arguments
+    if (conv_ok) {
+      cef_string_utf8_clear(&url_utf8);
+    }
+
+    // Redirect popup creation directly into our robust CreateNewTab helper
+    CreateNewTab(win_ctx, target_url_str);
+
+    // Release C structures of browser and frame arguments as we cancel popup creation
     if (browser) browser->base.release(&browser->base);
     if (frame) frame->base.release(&frame->base);
 
-    // Return 0 (false) to allow creation, using modified windowInfo and client
-    return 0;
+    // Return 1 (true) to cancel default popup window creation
+    return 1;
   }
 
   // Release C structures of browser and frame arguments
