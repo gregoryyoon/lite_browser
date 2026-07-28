@@ -40,3 +40,4 @@ documents/
 # Ignore installer build outputs
 LiteBrowserInstaller.exe
 
+LiteBrowserInstaller.zip

@@ -106,8 +106,9 @@ LLM 서비스(Gemini, ChatGPT, Claude 등)의 입력창에 에디터에서 작�
 ### 2. 잔상 없는 스냅 기동 (Flicker-free Startup)
 - `CreateWindowEx` 시점에 창 스타일에서 `WS_VISIBLE`을 제외하여 숨김 창으로 띄우고, 저장된 이전 WINDOWPLACEMENT 복원 처리를 마친 후에 `UpdateWindow`로 스냅 노출하여 기동 즉시 크기가 뒤바뀌며 발생할 수 있는 레이아웃 번쩍임 현상을 완전 차단했습니다. 설정 파일이 없는 최초 1회 기동 시에는 전체 화면 최대화(`SW_SHOWMAXIMIZED`)로 실행됩니다.
 
-### 3. 최대화 시 작업 표시줄 보호 및 자동 숨기기(Auto-hide Taskbar) 팝업 보장
+### 3. 최대화 시 작업 표시줄 보호, 자동 숨기기(Auto-hide Taskbar) 팝업 보장 및 듀얼 모니터 대응
 - **`WM_GETMINMAXINFO` 메시지 하이재킹**: 프레임리스(`WS_POPUP`) 창 최대화 시 작업 표시줄이 뒤로 가려지거나, 반대로 자동 숨기기 모드에서 마우스를 가져다 대도 작업 표시줄이 위로 올라오지 않는 프레임리스의 한계를 극복했습니다.
+- **듀얼/멀티 모니터 최대화 오프셋 보정 (사라짐 버그 해결)**: 윈도우 `WM_GETMINMAXINFO` 의 `ptMaxPosition` 은 가상 화면 전역 좌표가 아닌 **해당 창이 속한 모니터 좌상단 기준의 상대 좌표(Relative Coordinates)**를 요구합니다. 보조 모니터에서 최대화 시 `rcWork.left` 전역 좌표를 그대로 대입하면 OS가 모니터 위치 오프셋을 중복 가산하여 창을 가상 화면 밖(예: 3840px 이격 영역)으로 날려 보내어 창이 완전히 사라져 보이던 버그를 분석 해결했습니다. `mmi->ptMaxPosition.x = mi.rcWork.left - mi.rcMonitor.left` 및 `y = mi.rcWork.top - mi.rcMonitor.top` 공식을 적용하여 보조/주 모니터 위치에 상관없이 언제나 해당 디스플레이 내에서 완벽하게 창이 최대화되도록 보장했습니다.
 - **자동 숨기기 대응**: `SHAppBarMessage(ABM_GETSTATE)`로 자동 숨기기(`ABS_AUTOHIDE`) 여부를 실시간 파악하여, 자동 숨기기가 켜져 있으면 `ABM_GETTASKBARPOS`로 작업 표시줄의 숨김 방향(Edge)을 알아낸 뒤, 해당 경계 좌표를 딱 **1픽셀 차감**하여 최대화 크기(`ptMaxSize`/`ptMaxPosition`)를 세팅합니다. 이 미세한 1px 핫존 개방 덕분에 OS 셸이 마우스 호버 이벤트를 차단하지 않고 작업 표시줄을 안정적으로 팝업시킵니다. 자동 숨기기가 꺼져 있을 때는 일반 작업 영역(`rcWork`)으로 창 크기를 제한하여 작업 표시줄을 가리지 않게 작동합니다.
 
 # High DPI 배율 대응 주소창 잘림 방지 (DPI Scaling)
@@ -146,3 +147,10 @@ LLM 서비스(Gemini, ChatGPT, Claude 등)의 입력창에 에디터에서 작�
 - **탭 우클릭 네이티브 컨텍스트 메뉴 시스템**: 탭 바 영역의 각 탭을 마우스 우클릭할 때, 해당 탭의 `id`와 좌표정보를 `http://ui-action/show-tab-menu?id=...&x=...&y=...` 형태의 액션 스키마로 트리거합니다. C 백엔드의 `on_before_browse`에서는 이를 캡처하여 Win32 `TrackPopupMenu`를 통해 **새 탭 / 구분선 / 탭 닫기 / 다른 탭 닫기 / 오른쪽 탭 닫기** 네이티브 메뉴를 제공하고, 이를 위해 최적화된 탭 제어 헬퍼 함수(`CloseTab`, `CloseOtherTabs`, `CloseTabsToRight`)를 통해 탭 구조를 안전하게 갱신하고 UI 상태를 최신화하도록 구현했습니다.
 
 - **조건부(링크 유무에 따른) 웹 콘텐츠 우클릭 컨텍스트 메뉴**: 마우스 커서 아래에 하이퍼링크가 존재하는지 감지하기 위해 `params->get_link_url()` API를 활용하여 검증합니다. 링크가 없는 일반 영역일 경우 기존 메뉴와 동일하게 노출하되 '마크다운 에디터 토글'을 안전히 제거(뒤로가기/앞으로가기/새로고침/인쇄/소스보기/검사)하고, 링크가 걸린 영역일 경우 전용 메뉴(**새 탭에서 링크 열기** - CreateNewTab 연동, **링크 페이지 저장** - start_download C API 연동, **링크 복사** - Win32 CF_UNICODETEXT 클립보드 복사 연동, **검사**)를 제공하는 조건별 분기 메뉴 아키텍처를 구현했습니다.
+
+# 중복 실행 시 기본 Chromium 창 노출 방지 및 프로세스 재실행(Relaunch) 처리
+
+### 1. `on_already_running_app_relaunch` 콜백 구현
+- **원인 분석**: Lite Browser가 실행 중인 상태에서 추가로 executable을 실행할 경우, 동일한 `cache_path` 프로필을 사용하는 싱글톤 프로세스 메커니즘에 의해 두 번째 프로세스는 기존 프로세스로 인자를 전달하고 종료됩니다. 이때 기존 프로세스에 `on_already_running_app_relaunch` 콜백이 정의되어 있지 않으면(NULL 또는 0 반환), CEF의 기본 동작(Default Behavior)이 작동하여 **기본 Chromium 스타일 윈도우**가 팝업되는 현상이 발생했습니다.
+- **해결 방안**: `simple_app.c` 의 `cef_browser_process_handler_t` 콜백에 `browser_process_handler_on_already_running_app_relaunch`를 탑재했습니다. 재실행 전달 신호를 수신하면 커맨드 라인 인자(`--url`)를 파싱하여 대상 URL을 구하고, `create_browser_window`를 호출해 Lite Browser 네이티브 메인 윈도우를 새로 생성하여 최전면(`SetForegroundWindow`)으로 복원한 뒤 `1` (true)을 반환함으로써 기본 Chromium 창이 노출되는 문제를 원천 차단했습니다.
+

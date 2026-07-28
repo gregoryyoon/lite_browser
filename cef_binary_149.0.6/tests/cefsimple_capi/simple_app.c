@@ -198,6 +198,10 @@ void CEF_CALLBACK browser_process_handler_on_context_initialized(
     cef_browser_process_handler_t *self);
 cef_client_t *CEF_CALLBACK
 browser_process_handler_get_default_client(cef_browser_process_handler_t *self);
+int CEF_CALLBACK browser_process_handler_on_already_running_app_relaunch(
+    cef_browser_process_handler_t *self,
+    struct _cef_command_line_t *command_line,
+    const cef_string_t *current_directory);
 
 // Implement reference counting functions for browser process handler.
 IMPLEMENT_REFCOUNTING_SIMPLE(simple_browser_process_handler_t,
@@ -228,13 +232,19 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
       UINT state = SHAppBarMessage(ABM_GETSTATE, &abd);
       int is_autohide = (state & ABS_AUTOHIDE);
 
-      if (is_autohide) {
-        SHAppBarMessage(ABM_GETTASKBARPOS, &abd);
-        
+      int has_taskbar = 0;
+      if (SHAppBarMessage(ABM_GETTASKBARPOS, &abd)) {
+        if (abd.rc.left >= mi.rcMonitor.left && abd.rc.right <= mi.rcMonitor.right &&
+            abd.rc.top >= mi.rcMonitor.top && abd.rc.bottom <= mi.rcMonitor.bottom) {
+          has_taskbar = 1;
+        }
+      }
+
+      if (has_taskbar && is_autohide) {
         mmi->ptMaxSize.x = mi.rcMonitor.right - mi.rcMonitor.left;
         mmi->ptMaxSize.y = mi.rcMonitor.bottom - mi.rcMonitor.top;
-        mmi->ptMaxPosition.x = mi.rcMonitor.left;
-        mmi->ptMaxPosition.y = mi.rcMonitor.top;
+        mmi->ptMaxPosition.x = 0;
+        mmi->ptMaxPosition.y = 0;
 
         if (abd.uEdge == ABE_BOTTOM) {
           mmi->ptMaxSize.y -= 1;
@@ -250,8 +260,8 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
       } else {
         mmi->ptMaxSize.x = mi.rcWork.right - mi.rcWork.left;
         mmi->ptMaxSize.y = mi.rcWork.bottom - mi.rcWork.top;
-        mmi->ptMaxPosition.x = mi.rcWork.left;
-        mmi->ptMaxPosition.y = mi.rcWork.top;
+        mmi->ptMaxPosition.x = mi.rcWork.left - mi.rcMonitor.left;
+        mmi->ptMaxPosition.y = mi.rcWork.top - mi.rcMonitor.top;
       }
     }
     return 0;
@@ -786,6 +796,56 @@ void CEF_CALLBACK browser_process_handler_on_context_initialized(
   cef_string_clear(&url);
 }
 
+// Handles relaunch when another instance is already running with the same cache/profile directory.
+int CEF_CALLBACK browser_process_handler_on_already_running_app_relaunch(
+    cef_browser_process_handler_t *self,
+    struct _cef_command_line_t *command_line,
+    const cef_string_t *current_directory) {
+  (void)self;
+  (void)current_directory;
+
+  char target_url[1024] = "";
+  if (g_startup_url[0] != '\0') {
+    strncpy(target_url, g_startup_url, sizeof(target_url) - 1);
+  } else {
+    strcpy(target_url, "https://gemini.google.com");
+  }
+
+  if (command_line) {
+    cef_string_t url_switch = {};
+    cef_string_from_ascii("url", 3, &url_switch);
+    cef_string_userfree_t url_value =
+        command_line->get_switch_value(command_line, &url_switch);
+    cef_string_clear(&url_switch);
+
+    if (url_value && url_value->length > 0) {
+      cef_string_utf8_t url_utf8 = {};
+      cef_string_to_utf8(url_value->str, url_value->length, &url_utf8);
+      if (url_utf8.str && url_utf8.length > 0) {
+        strncpy(target_url, url_utf8.str, sizeof(target_url) - 1);
+        target_url[sizeof(target_url) - 1] = '\0';
+      }
+      cef_string_utf8_clear(&url_utf8);
+    }
+    if (url_value) {
+      cef_string_userfree_free(url_value);
+    }
+  }
+
+#if defined(OS_WIN)
+  browser_window_t* win_ctx = create_browser_window(target_url);
+  if (win_ctx && win_ctx->main_hwnd) {
+    if (IsIconic(win_ctx->main_hwnd)) {
+      ShowWindow(win_ctx->main_hwnd, SW_RESTORE);
+    }
+    SetForegroundWindow(win_ctx->main_hwnd);
+  }
+#endif
+
+  // Return 1 (true) to indicate relaunch was handled and suppress default Chrome window
+  return 1;
+}
+
 // Returns the default client handler for Chrome style UI.
 cef_client_t *CEF_CALLBACK browser_process_handler_get_default_client(
     cef_browser_process_handler_t *self) {
@@ -817,6 +877,8 @@ simple_browser_process_handler_t *browser_process_handler_create(void) {
       browser_process_handler_on_context_initialized;
   handler->handler.get_default_client =
       browser_process_handler_get_default_client;
+  handler->handler.on_already_running_app_relaunch =
+      browser_process_handler_on_already_running_app_relaunch;
 
   // Initialize with ref count of 1.
   atomic_store(&handler->ref_count, 1);
