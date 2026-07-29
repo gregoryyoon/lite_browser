@@ -284,7 +284,10 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
         HWND ui_hwnd = host->get_window_handle(host);
         if (ui_hwnd)
         {
-          MoveWindow(ui_hwnd, 0, 0, width, ui_height, TRUE);
+          int target_ui_h = (win_ctx->is_ui_expanded && win_ctx->ui_expanded_height > 0) 
+                              ? win_ctx->ui_expanded_height 
+                              : ui_height;
+          SetWindowPos(ui_hwnd, HWND_TOP, 0, 0, width, target_ui_h, SWP_NOACTIVATE);
         }
         host->base.release(&host->base);
       }

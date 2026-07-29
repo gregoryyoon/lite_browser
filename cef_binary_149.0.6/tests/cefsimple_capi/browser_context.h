@@ -26,6 +26,8 @@ typedef struct _browser_window_t {
   cef_browser_t* editor_browser;
   HWND editor_hwnd;
   int show_editor;
+  int is_ui_expanded;
+  int ui_expanded_height;
 } browser_window_t;
 
 #if defined(OS_WIN)

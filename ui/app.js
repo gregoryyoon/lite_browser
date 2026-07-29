@@ -57,7 +57,59 @@ window.updateNavState = function(canGoBack, canGoForward, isLoading) {
   }
 };
 
+let bookmarksData = {
+  folders: ["즐겨찾기 바", "기타 즐겨찾기"],
+  bookmarks: []
+};
+let currentUrl = '';
+let currentTitle = '';
+
+function requestLoadBookmarks() {
+  window.location.href = 'http://ui-action/load-bookmarks';
+}
+
+window.loadBookmarksDataB64 = function(b64Str) {
+  try {
+    const jsonStr = decodeURIComponent(escape(atob(b64Str)));
+    bookmarksData = JSON.parse(jsonStr);
+    if (!bookmarksData.folders) bookmarksData.folders = ["즐겨찾기 바", "기타 즐겨찾기"];
+    if (!bookmarksData.bookmarks) bookmarksData.bookmarks = [];
+  } catch (e) {
+    console.error("Failed to parse bookmarks data:", e);
+  }
+  updateStarIcon();
+};
+
+function saveBookmarksToBackend() {
+  try {
+    const jsonStr = JSON.stringify(bookmarksData);
+    const b64Str = btoa(unescape(encodeURIComponent(jsonStr)));
+    window.location.href = 'http://ui-action/save-bookmarks?data=' + encodeURIComponent(b64Str);
+  } catch (e) {
+    console.error("Failed to save bookmarks:", e);
+  }
+}
+
+function findCurrentBookmark() {
+  if (!currentUrl) return null;
+  return bookmarksData.bookmarks.find(b => b.url === currentUrl);
+}
+
+function updateStarIcon() {
+  const starBtn = document.getElementById('bookmark-star-btn');
+  if (!starBtn) return;
+  const bm = findCurrentBookmark();
+  if (bm) {
+    starBtn.classList.add('bookmarked');
+    starBtn.title = "즐겨찾기 편집";
+  } else {
+    starBtn.classList.remove('bookmarked');
+    starBtn.title = "이 페이지를 즐겨찾기에 추가";
+  }
+}
+
 window.updateAddress = function(url) {
+  currentUrl = url;
   const addressBar = document.getElementById('address-bar');
   if (document.activeElement !== addressBar) {
     if (url.indexOf('ui/index.html') !== -1 || url.indexOf('ui-action') !== -1) {
@@ -66,6 +118,7 @@ window.updateAddress = function(url) {
       addressBar.value = url;
     }
   }
+  updateStarIcon();
 };
 
 window.updateTabsList = function(tabs, activeId) {
@@ -74,6 +127,9 @@ window.updateTabsList = function(tabs, activeId) {
 
   container.innerHTML = '';
   tabs.forEach(tab => {
+    if (tab.id === activeId) {
+      currentTitle = tab.title || '';
+    }
     const tabEl = document.createElement('div');
     tabEl.className = 'tab' + (tab.id === activeId ? ' active' : '');
     tabEl.draggable = false;
@@ -202,6 +258,9 @@ document.addEventListener('DOMContentLoaded', () => {
       isSelectAllOnFocus = false;
     });
   }
+
+  // Request initial bookmarks load from C backend
+  requestLoadBookmarks();
 });
 
 // 최소화, 최대화, 닫기 액션 디스패치 함수
@@ -235,4 +294,227 @@ window.updateMaximizeState = function(isMaximized) {
 
 function toggleEditor() {
   window.location.href = 'http://ui-action/toggle-editor';
+}
+
+// ==================== BOOKMARK FUNCTIONS ====================
+
+function closeAllPopups() {
+  const addPopup = document.getElementById('bookmark-add-popup');
+  const listPopup = document.getElementById('bookmark-list-popup');
+  const backdrop = document.getElementById('popup-backdrop');
+
+  if (addPopup) addPopup.classList.add('hide');
+  if (listPopup) listPopup.classList.add('hide');
+  if (backdrop) backdrop.classList.add('hide');
+
+  window.location.href = 'http://ui-action/collapse-ui';
+}
+
+function expandUI(height) {
+  window.location.href = 'http://ui-action/expand-ui?height=' + height;
+  const backdrop = document.getElementById('popup-backdrop');
+  if (backdrop) backdrop.classList.remove('hide');
+}
+
+function toggleBookmarkAddPopup(event) {
+  if (event) event.stopPropagation();
+
+  const addPopup = document.getElementById('bookmark-add-popup');
+  const listPopup = document.getElementById('bookmark-list-popup');
+  if (!addPopup) return;
+
+  if (!addPopup.classList.contains('hide')) {
+    closeAllPopups();
+    return;
+  }
+
+  if (listPopup) listPopup.classList.add('hide');
+
+  const titleEl = document.getElementById('bm-popup-title');
+  const nameInput = document.getElementById('bm-name-input');
+  const folderSelect = document.getElementById('bm-folder-select');
+  const removeBtn = document.getElementById('bm-remove-btn');
+
+  folderSelect.innerHTML = '';
+  bookmarksData.folders.forEach(f => {
+    const opt = document.createElement('option');
+    opt.value = f;
+    opt.innerText = f;
+    folderSelect.appendChild(opt);
+  });
+
+  const bm = findCurrentBookmark();
+  if (bm) {
+    if (titleEl) titleEl.innerText = '즐겨찾기 편집';
+    if (nameInput) nameInput.value = bm.title;
+    if (folderSelect) folderSelect.value = bm.folder || '즐겨찾기 바';
+    if (removeBtn) removeBtn.style.display = 'inline-block';
+  } else {
+    const addressBar = document.getElementById('address-bar');
+    const autoTitle = currentTitle || (addressBar ? addressBar.value : '페이지');
+    const autoUrl = currentUrl || (addressBar ? addressBar.value : '');
+
+    if (!autoUrl) return;
+
+    const newBm = {
+      id: 'bm_' + Date.now(),
+      title: autoTitle,
+      url: autoUrl,
+      folder: '즐겨찾기 바',
+      createdAt: Date.now()
+    };
+    bookmarksData.bookmarks.push(newBm);
+    saveBookmarksToBackend();
+    updateStarIcon();
+
+    if (titleEl) titleEl.innerText = '즐겨찾기 추가됨';
+    if (nameInput) nameInput.value = autoTitle;
+    if (folderSelect) folderSelect.value = '즐겨찾기 바';
+    if (removeBtn) removeBtn.style.display = 'inline-block';
+  }
+
+  addPopup.classList.remove('hide');
+  expandUI(320);
+}
+
+function saveCurrentBookmark() {
+  const nameInput = document.getElementById('bm-name-input');
+  const folderSelect = document.getElementById('bm-folder-select');
+  const bm = findCurrentBookmark();
+
+  if (bm && nameInput && folderSelect) {
+    bm.title = nameInput.value.trim() || bm.title;
+    bm.folder = folderSelect.value;
+    saveBookmarksToBackend();
+    updateStarIcon();
+  }
+  closeAllPopups();
+}
+
+function removeCurrentBookmark() {
+  const bm = findCurrentBookmark();
+  if (bm) {
+    bookmarksData.bookmarks = bookmarksData.bookmarks.filter(b => b.url !== currentUrl);
+    saveBookmarksToBackend();
+    updateStarIcon();
+  }
+  closeAllPopups();
+}
+
+function toggleBookmarkListPopup(event) {
+  if (event) event.stopPropagation();
+
+  const addPopup = document.getElementById('bookmark-add-popup');
+  const listPopup = document.getElementById('bookmark-list-popup');
+  if (!listPopup) return;
+
+  if (!listPopup.classList.contains('hide')) {
+    closeAllPopups();
+    return;
+  }
+
+  if (addPopup) addPopup.classList.add('hide');
+
+  renderBookmarksTree();
+  listPopup.classList.remove('hide');
+  expandUI(520);
+}
+
+function renderBookmarksTree(filterQuery = '') {
+  const container = document.getElementById('bm-tree-container');
+  if (!container) return;
+
+  container.innerHTML = '';
+  const query = filterQuery.toLowerCase().trim();
+
+  let hasAnyItems = false;
+
+  bookmarksData.folders.forEach(folderName => {
+    const itemsInFolder = bookmarksData.bookmarks.filter(b => {
+      if (b.folder !== folderName) return false;
+      if (!query) return true;
+      return (b.title && b.title.toLowerCase().includes(query)) || (b.url && b.url.toLowerCase().includes(query));
+    });
+
+    if (query && itemsInFolder.length === 0) return;
+
+    hasAnyItems = true;
+    const folderGroup = document.createElement('div');
+    folderGroup.className = 'folder-group';
+
+    const folderHeader = document.createElement('div');
+    folderHeader.className = 'folder-header';
+    folderHeader.innerHTML = `
+      <svg class="folder-icon" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.89 2 1.99 2H20c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+      <span>${folderName}</span>
+    `;
+    folderGroup.appendChild(folderHeader);
+
+    if (itemsInFolder.length === 0) {
+      const emptyDiv = document.createElement('div');
+      emptyDiv.className = 'bm-empty-msg';
+      emptyDiv.innerText = '즐겨찾기가 없습니다';
+      folderGroup.appendChild(emptyDiv);
+    } else {
+      itemsInFolder.forEach(bm => {
+        const itemEl = document.createElement('div');
+        itemEl.className = 'bm-item';
+        itemEl.onclick = (e) => {
+          e.stopPropagation();
+          window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(bm.url);
+          closeAllPopups();
+        };
+
+        itemEl.innerHTML = `
+          <svg class="bm-favicon" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+          <div class="bm-details">
+            <div class="bm-title">${bm.title || '북마크'}</div>
+            <div class="bm-url">${bm.url || ''}</div>
+          </div>
+          <div class="bm-item-actions">
+            <button class="icon-btn" title="삭제" onclick="deleteBookmarkItem('${bm.id}', event)">
+              <svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+            </button>
+          </div>
+        `;
+        folderGroup.appendChild(itemEl);
+      });
+    }
+
+    container.appendChild(folderGroup);
+  });
+
+  if (!hasAnyItems) {
+    const emptyDiv = document.createElement('div');
+    emptyDiv.className = 'bm-empty-msg';
+    emptyDiv.innerText = query ? '검색 결과가 없습니다' : '즐겨찾기가 없습니다';
+    container.appendChild(emptyDiv);
+  }
+}
+
+function filterBookmarksList() {
+  const input = document.getElementById('bm-search-input');
+  if (input) {
+    renderBookmarksTree(input.value);
+  }
+}
+
+function addNewFolderPrompt() {
+  const folderName = prompt('새 즐겨찾기 폴더 이름을 입력하세요:', '새 폴더');
+  if (folderName && folderName.trim()) {
+    const name = folderName.trim();
+    if (!bookmarksData.folders.includes(name)) {
+      bookmarksData.folders.push(name);
+      saveBookmarksToBackend();
+      renderBookmarksTree();
+    }
+  }
+}
+
+function deleteBookmarkItem(bmId, event) {
+  if (event) event.stopPropagation();
+  bookmarksData.bookmarks = bookmarksData.bookmarks.filter(b => b.id !== bmId);
+  saveBookmarksToBackend();
+  updateStarIcon();
+  filterBookmarksList();
 }

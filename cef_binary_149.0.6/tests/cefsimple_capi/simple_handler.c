@@ -66,6 +66,17 @@ static void get_editor_root_path(char* out_path, size_t max_len) {
   CreateDirectoryA(out_path, NULL);
 }
 
+static void GetBookmarksFilePath(char* out_path, size_t max_len) {
+  char user_profile[MAX_PATH];
+  if (SHGetSpecialFolderPathA(NULL, user_profile, CSIDL_PROFILE, FALSE)) {
+    snprintf(out_path, max_len, "%s\\.lite-browser", user_profile);
+    CreateDirectoryA(out_path, NULL);
+    snprintf(out_path, max_len, "%s\\.lite-browser\\bookmarks.json", user_profile);
+  } else {
+    snprintf(out_path, max_len, "C:\\projects\\lite_browser\\bookmarks.json");
+  }
+}
+
 static void scan_directory_recursive(const char* dir_path, char** json_ptr, size_t* len_ptr, size_t* cap_ptr, int is_first_in_level) {
   char search_path[MAX_PATH];
   snprintf(search_path, sizeof(search_path), "%s\\*", dir_path);
@@ -1049,6 +1060,100 @@ int CEF_CALLBACK request_handler_on_before_browse(
               cef_string_clear(&cef_url);
               free(decoded);
             }
+          }
+        } else if (strncmp(action, "expand-ui?", 10) == 0) {
+          int h = 500;
+          if (sscanf(action + 10, "height=%d", &h) == 1) {
+            if (win_ctx) {
+              double scale = 1.0;
+              UINT dpi = GetDpiForWindow(win_ctx->main_hwnd);
+              if (dpi > 0) scale = (double)dpi / 96.0;
+              win_ctx->is_ui_expanded = 1;
+              win_ctx->ui_expanded_height = (int)(h * scale);
+              if (win_ctx->ui_hwnd) {
+                RECT rect;
+                GetClientRect(win_ctx->main_hwnd, &rect);
+                SetWindowPos(win_ctx->ui_hwnd, HWND_TOP, 0, 0, rect.right, win_ctx->ui_expanded_height, SWP_NOACTIVATE);
+              }
+            }
+          }
+        } else if (strcmp(action, "collapse-ui") == 0) {
+          if (win_ctx) {
+            win_ctx->is_ui_expanded = 0;
+            if (win_ctx->ui_hwnd) {
+              RECT rect;
+              GetClientRect(win_ctx->main_hwnd, &rect);
+              int default_h = GetUIHeightForWindow(win_ctx->main_hwnd);
+              SetWindowPos(win_ctx->ui_hwnd, HWND_TOP, 0, 0, rect.right, default_h, SWP_NOACTIVATE);
+            }
+          }
+        } else if (strcmp(action, "load-bookmarks") == 0) {
+          char filepath[MAX_PATH];
+          GetBookmarksFilePath(filepath, sizeof(filepath));
+          
+          FILE* f = fopen(filepath, "rb");
+          if (!f) {
+            const char* default_json = "{\"folders\":[\"\\uC990\\uACA8\\uCC3E\\uAE30 \\uBC14\",\"\\uAE30\\uD0C0 \\uC990\\uACA8\\uCC3E\\uAE30\"],\"bookmarks\":[]}";
+            f = fopen(filepath, "wb");
+            if (f) {
+              fwrite(default_json, 1, strlen(default_json), f);
+              fclose(f);
+            }
+            f = fopen(filepath, "rb");
+          }
+
+          if (f) {
+            fseek(f, 0, SEEK_END);
+            long fsize = ftell(f);
+            fseek(f, 0, SEEK_SET);
+
+            if (fsize > 0) {
+              unsigned char* buf = (unsigned char*)malloc(fsize + 1);
+              if (buf) {
+                fread(buf, 1, fsize, f);
+                buf[fsize] = '\0';
+                
+                char* b64_str = base64_encode(buf, fsize);
+                if (b64_str && win_ctx && win_ctx->ui_browser) {
+                  size_t b64_len = strlen(b64_str);
+                  char* js_call = (char*)malloc(b64_len + 128);
+                  if (js_call) {
+                    snprintf(js_call, b64_len + 128, "if (window.loadBookmarksDataB64) { window.loadBookmarksDataB64('%s'); }", b64_str);
+                    
+                    cef_frame_t* ui_frame = win_ctx->ui_browser->get_main_frame(win_ctx->ui_browser);
+                    if (ui_frame) {
+                      cef_string_t js_str = {};
+                      cef_string_from_utf8(js_call, strlen(js_call), &js_str);
+                      ui_frame->execute_java_script(ui_frame, &js_str, NULL, 0);
+                      cef_string_clear(&js_str);
+                      ui_frame->base.release(&ui_frame->base);
+                    }
+                    free(js_call);
+                  }
+                  free(b64_str);
+                }
+                free(buf);
+              }
+            }
+            fclose(f);
+          }
+        } else if (strncmp(action, "save-bookmarks?", 15) == 0) {
+          const char* query = action + 15;
+          char* data_base64 = get_query_param(query, "data");
+          if (data_base64) {
+            size_t decoded_len = 0;
+            unsigned char* decoded = base64_decode(data_base64, &decoded_len);
+            if (decoded) {
+              char filepath[MAX_PATH];
+              GetBookmarksFilePath(filepath, sizeof(filepath));
+              FILE* f = fopen(filepath, "wb");
+              if (f) {
+                fwrite(decoded, 1, decoded_len, f);
+                fclose(f);
+              }
+              free(decoded);
+            }
+            free(data_base64);
           }
         } else if (strcmp(action, "toggle-editor") == 0) {
           if (win_ctx) {
