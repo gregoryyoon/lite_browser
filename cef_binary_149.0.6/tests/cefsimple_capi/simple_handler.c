@@ -2113,23 +2113,33 @@ void CreateNewTab(browser_window_t* win_ctx, const char* url) {
   simple_handler_t *content_handler = simple_handler_create(0);
   content_handler->window_ctx = win_ctx;
 
-  int next_idx = win_ctx->tab_count;
+  int insert_idx = win_ctx->tab_count;
+  if (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+    insert_idx = win_ctx->active_tab_index + 1;
+  }
+
   int max_id = 0;
-  for(int k=0; k<win_ctx->tab_count; k++) {
+  for (int k = 0; k < win_ctx->tab_count; k++) {
     if (win_ctx->tabs[k].tab_id > max_id) max_id = win_ctx->tabs[k].tab_id;
   }
-  win_ctx->tabs[next_idx].tab_id = max_id + 1;
-  win_ctx->tabs[next_idx].browser = NULL;
-  win_ctx->tabs[next_idx].hwnd = NULL;
-  strcpy(win_ctx->tabs[next_idx].title, "새 탭");
-  if (url && strlen(url) > 0) {
-    strncpy(win_ctx->tabs[next_idx].url, url, sizeof(win_ctx->tabs[next_idx].url) - 1);
-  } else {
-    strcpy(win_ctx->tabs[next_idx].url, "https://gemini.google.com");
+
+  for (int i = win_ctx->tab_count; i > insert_idx; i--) {
+    win_ctx->tabs[i] = win_ctx->tabs[i - 1];
   }
-  win_ctx->tabs[next_idx].is_loaded = 0;
-  win_ctx->tabs[next_idx].tab_handler = content_handler;
-  win_ctx->active_tab_index = next_idx;
+
+  memset(&win_ctx->tabs[insert_idx], 0, sizeof(tab_info_t));
+  win_ctx->tabs[insert_idx].tab_id = max_id + 1;
+  win_ctx->tabs[insert_idx].browser = NULL;
+  win_ctx->tabs[insert_idx].hwnd = NULL;
+  strcpy(win_ctx->tabs[insert_idx].title, "새 탭");
+  if (url && strlen(url) > 0) {
+    strncpy(win_ctx->tabs[insert_idx].url, url, sizeof(win_ctx->tabs[insert_idx].url) - 1);
+  } else {
+    strcpy(win_ctx->tabs[insert_idx].url, "https://gemini.google.com");
+  }
+  win_ctx->tabs[insert_idx].is_loaded = 0;
+  win_ctx->tabs[insert_idx].tab_handler = content_handler;
+  win_ctx->active_tab_index = insert_idx;
   win_ctx->tab_count++;
   update_ui_tabs(win_ctx);
 
