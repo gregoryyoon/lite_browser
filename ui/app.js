@@ -608,8 +608,11 @@ function openBookmarkDashboard() {
 
 // ==================== SMART OMNIBOX ENGINE ====================
 
+// ==================== SMART OMNIBOX ENGINE ====================
+
 let omniSelectedIndex = -1;
 let omniResults = [];
+let omniRawQuery = '';
 
 document.addEventListener('DOMContentLoaded', () => {
   const addressBar = document.getElementById('address-bar');
@@ -624,10 +627,28 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
+function formatTimeAgo(timestamp) {
+  if (!timestamp) return '최근 저장';
+  const diffMs = Date.now() - timestamp;
+  const diffMin = Math.floor(diffMs / (1000 * 60));
+  const diffHour = Math.floor(diffMs / (1000 * 60 * 60));
+  const diffDay = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+  if (diffMin < 1) return '방금 전 저장';
+  if (diffMin < 60) return `${diffMin}분 전 저장`;
+  if (diffHour < 24) return `${diffHour}시간 전 저장`;
+  if (diffDay < 30) return `${diffDay}일 전 저장`;
+  const d = new Date(timestamp);
+  return `${d.getFullYear()}.${d.getMonth() + 1}.${d.getDate()} 저장`;
+}
+
 function handleOmniboxInput(e) {
-  const query = e.target.value.trim().toLowerCase();
+  const rawValue = e.target.value;
+  const query = rawValue.trim().toLowerCase();
   const dropdown = document.getElementById('omnibox-dropdown');
   if (!dropdown) return;
+
+  omniRawQuery = rawValue.trim();
 
   if (!query) {
     closeOmniboxDropdown();
@@ -651,16 +672,22 @@ function handleOmniboxInput(e) {
     });
   }
 
-  if (omniResults.length === 0) {
-    closeOmniboxDropdown();
-    return;
-  }
-
-  omniResults = omniResults.slice(0, 6);
+  omniResults = omniResults.slice(0, 5);
   omniSelectedIndex = -1;
   renderOmniboxDropdown();
   dropdown.classList.remove('hide');
-  expandUI(340);
+  updateOmniboxHeight();
+}
+
+function updateOmniboxHeight() {
+  const dropdown = document.getElementById('omnibox-dropdown');
+  if (!dropdown || dropdown.classList.contains('hide')) return;
+
+  requestAnimationFrame(() => {
+    const dropHeight = dropdown.offsetHeight || dropdown.scrollHeight || 0;
+    const targetHeight = Math.min(520, Math.max(90, 72 + dropHeight + 16));
+    expandUI(targetHeight);
+  });
 }
 
 function renderOmniboxDropdown() {
@@ -668,6 +695,8 @@ function renderOmniboxDropdown() {
   if (!dropdown) return;
 
   dropdown.innerHTML = '';
+
+  // Render matched bookmarks
   omniResults.forEach((bm, idx) => {
     const item = document.createElement('div');
     item.className = 'omni-item' + (idx === omniSelectedIndex ? ' selected' : '');
@@ -676,43 +705,73 @@ function renderOmniboxDropdown() {
       closeOmniboxDropdown();
     };
 
-    const tagsHtml = (bm.extractedTags || []).slice(0, 2).map(t => `<span class="tag-chip">#${t}</span>`).join('');
-    const snippetText = bm.textSnippet || '요약 정보가 없습니다.';
+    const tagsHtml = (bm.extractedTags || []).map(t => `<span class="omni-tag-chip">#${t}</span>`).join(' ');
+    const timeAgoStr = formatTimeAgo(bm.context?.createdAt);
+    const searchIntent = bm.context?.searchIntent;
+    const snippetText = bm.textSnippet;
 
     item.innerHTML = `
-      <span class="omni-badge">북마크</span>
-      <img src="${bm.faviconUrl || ''}" class="card-favicon" onerror="this.style.display='none'">
-      <div class="omni-info">
-        <div class="omni-title">${bm.title}</div>
-        <div class="omni-sub">${bm.url}</div>
+      <div class="omni-row-top">
+        <div class="omni-title-group">
+          <span class="omni-icon">🔖</span>
+          <span class="omni-badge">북마크</span>
+          <span class="omni-title-text">${bm.title}</span>
+        </div>
+        <div class="omni-date">📅 ${timeAgoStr}</div>
       </div>
-      <div class="omni-tags">${tagsHtml}</div>
-      <div class="omni-popover">
-        <strong>본문 요약:</strong>
-        <p>${snippetText}</p>
-        ${bm.context?.pageAnchor ? `<div style="margin-top:4px;color:#0078d4;">📍 앵커: ${bm.context.pageAnchor}</div>` : ''}
+      <div class="omni-row-meta">
+        ${tagsHtml ? `<span class="omni-tags-list">🏷️ ${tagsHtml}</span>` : ''}
+        ${searchIntent ? `<span class="omni-intent">💡 검색어: "${searchIntent}"</span>` : ''}
       </div>
+      ${snippetText ? `<div class="omni-row-snippet">📄 요약: ${snippetText}</div>` : ''}
     `;
     dropdown.appendChild(item);
   });
+
+  // Render Google Search item at bottom
+  if (omniRawQuery) {
+    const googleIdx = omniResults.length;
+    const googleItem = document.createElement('div');
+    googleItem.className = 'omni-google-item' + (omniSelectedIndex === googleIdx ? ' selected' : '');
+    googleItem.onclick = () => {
+      const searchUrl = 'https://www.google.com/search?q=' + encodeURIComponent(omniRawQuery);
+      window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(searchUrl);
+      closeOmniboxDropdown();
+    };
+    googleItem.innerHTML = `
+      <span class="omni-icon">🔍</span>
+      <span>구글 검색: "${omniRawQuery}"</span>
+    `;
+    dropdown.appendChild(googleItem);
+  }
+
+  updateOmniboxHeight();
 }
 
 function handleOmniboxKeydown(e) {
   const dropdown = document.getElementById('omnibox-dropdown');
   if (!dropdown || dropdown.classList.contains('hide')) return;
 
+  const totalCount = omniResults.length + (omniRawQuery ? 1 : 0);
+  if (totalCount === 0) return;
+
   if (e.key === 'ArrowDown') {
     e.preventDefault();
-    omniSelectedIndex = (omniSelectedIndex + 1) % omniResults.length;
+    omniSelectedIndex = (omniSelectedIndex + 1) % totalCount;
     renderOmniboxDropdown();
   } else if (e.key === 'ArrowUp') {
     e.preventDefault();
-    omniSelectedIndex = (omniSelectedIndex - 1 + omniResults.length) % omniResults.length;
+    omniSelectedIndex = (omniSelectedIndex - 1 + totalCount) % totalCount;
     renderOmniboxDropdown();
-  } else if (e.key === 'Enter' && omniSelectedIndex >= 0 && omniSelectedIndex < omniResults.length) {
+  } else if (e.key === 'Enter' && omniSelectedIndex >= 0) {
     e.preventDefault();
-    const targetUrl = omniResults[omniSelectedIndex].url;
-    window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(targetUrl);
+    if (omniSelectedIndex < omniResults.length) {
+      const targetUrl = omniResults[omniSelectedIndex].url;
+      window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(targetUrl);
+    } else if (omniSelectedIndex === omniResults.length && omniRawQuery) {
+      const searchUrl = 'https://www.google.com/search?q=' + encodeURIComponent(omniRawQuery);
+      window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(searchUrl);
+    }
     closeOmniboxDropdown();
   } else if (e.key === 'Escape') {
     closeOmniboxDropdown();

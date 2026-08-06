@@ -41,11 +41,20 @@
 
 ### 2.3 지능형 주소창 엔진 (Smart Omnibox Engine)
 - **파일**: [ui/app.js](file:///c:/projects/lite_browser/ui/app.js), [ui/index.html](file:///c:/projects/lite_browser/ui/index.html), [ui/style.css](file:///c:/projects/lite_browser/ui/style.css)
-- **다차원 실시간 검색**: 주소창 입력 시 URL, 제목뿐만 아니라 **본문 요약 스니펫, 유입 검색어, 추출 태그**까지 통합 탐색.
+- **다차원 실시간 검색**: 주소창 입력 시 URL, 제목뿐만 아니라 **본문 요약 스니펫, 유입 검색어(`q=`), 추출 태그**까지 통합 탐색.
 - **`#` 태그 숏컷**: `#` 입력 시 자동 태그 드롭다운 노출 및 태그별 북마크 필터링.
-- **Rich Dropdown & Hover Popover Card**:
-  - `[북마크]` 뱃지, 태그 칩, 저장 시점이 노출됨.
-  - 마우스 호버 및 키보드 방향키(↑/↓) 선택 시 우측 Popover 카드로 **본문 요약 및 드래그 하이라이트 문장 미리보기** 제공.
+- **드롭다운 동적 높이 계산 (Dynamic HWND Resizing)**:
+  - 렌더링된 드롭다운 DOM 높이(`offsetHeight`)를 실시간 측정하여 필요한 높이만큼만 네이티브 UI 브라우저 HWND(`ui_hwnd`)를 동적으로 확장 (`updateOmniboxHeight`).
+  - 결과 항목 수(1개~5개)에 따라 높이가 최적 축소되어 하단 웹 브라우저 화면 가림 현상을 완전 방지.
+- **양옆 투명 배경 최적화 (Transparent Side Overlay)**:
+  - 확장 영역 중 드롭다운 박스 폭(주소창과 1:1 맞춤) 외 좌/우측 영역의 UI 배경을 `transparent` 처리하여 양옆 웹 브라우저 화면 보존.
+- **3행 인라인 카드 레이아웃 & Popover 제거 (Clean Inline UX)**:
+  - 기존 우측 팝업 Popover 카드를 제거하고 단일 드롭다운 항목 내 3행 구조로 직관적 정보 통합 노출:
+    - **1행**: `🔖 [북마크] {제목}` + `📅 {N일/시간/분 전 저장}` (타임스탬프 자동 계산)
+    - **2행**: `🏷️ #태그 목록` + `💡 검색어: "{유입 검색어}"` (수집된 검색 맥락)
+    - **3행**: `📄 요약: {본문 스니펫}` (본문 요약)
+- **하단 구글 검색 연동**:
+  - 드롭다운 최하단에 `🔍 구글 검색: "{입력 키워드}"` 항목 기본 노출 및 키보드(↑/↓)/클릭 통합 탐색 제공.
 
 ### 2.4 북마크 전용 관리자 대시보드 (`lite://favorites`)
 - **파일**: [ui/manager.html](file:///c:/projects/lite_browser/ui/manager.html), [ui/manager.css](file:///c:/projects/lite_browser/ui/manager.css), [ui/manager.js](file:///c:/projects/lite_browser/ui/manager.js)
