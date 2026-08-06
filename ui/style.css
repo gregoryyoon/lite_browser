@@ -657,3 +657,206 @@ body {
   from { opacity: 0; transform: translateY(-4px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+/* Smart Omnibox Dropdown */
+.omnibox-dropdown {
+  position: absolute;
+  top: 36px;
+  left: 0;
+  right: 0;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 12px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  max-height: 380px;
+  overflow-y: auto;
+  padding: 6px 0;
+}
+
+.omnibox-dropdown.hide {
+  display: none;
+}
+
+.omni-item {
+  display: flex;
+  align-items: center;
+  padding: 8px 14px;
+  gap: 10px;
+  cursor: pointer;
+  position: relative;
+  transition: background 0.12s ease;
+}
+
+.omni-item:hover, .omni-item.selected {
+  background: #f4f4f5;
+}
+
+.omni-badge {
+  background: #0078d4;
+  color: #ffffff;
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.omni-info {
+  flex: 1;
+  overflow: hidden;
+}
+
+.omni-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #18181b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.omni-sub {
+  font-size: 11px;
+  color: #71717a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.omni-tags {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+/* Omnibox Popover Card on Hover */
+.omni-popover {
+  position: absolute;
+  left: 102%;
+  top: 0;
+  width: 260px;
+  background: #ffffff;
+  border: 1px solid #e4e4e7;
+  border-radius: 8px;
+  padding: 10px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
+  font-size: 11.5px;
+  color: #52525b;
+  z-index: 1001;
+  display: none;
+}
+
+.omni-item:hover .omni-popover {
+  display: block;
+}
+
+/* Toast / Modal Preview Card */
+.toast-modal {
+  position: absolute;
+  top: 68px;
+  right: 60px;
+  width: 340px;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 12px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.18);
+  z-index: 1000;
+  padding: 14px;
+  animation: fadeIn 0.15s ease-out;
+}
+
+.toast-modal.hide {
+  display: none;
+}
+
+.toast-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.toast-badge {
+  font-size: 12px;
+  font-weight: 700;
+  color: #166534;
+  background: #f0fdf4;
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+
+.toast-close-btn {
+  background: transparent;
+  border: none;
+  font-size: 12px;
+  color: #a1a1aa;
+  cursor: pointer;
+}
+
+.toast-body {
+  display: flex;
+  gap: 12px;
+}
+
+.toast-thumb-box {
+  width: 70px;
+  height: 70px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #e0f2fe 0%, #bae6fd 100%);
+  flex-shrink: 0;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.toast-thumb-box img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.toast-info {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.toast-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #18181b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.toast-snippet {
+  font-size: 11.5px;
+  color: #71717a;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.toast-intent {
+  font-size: 11px;
+  color: #92400e;
+  background: #fef3c7;
+  padding: 2px 6px;
+  border-radius: 4px;
+  width: fit-content;
+}
+
+.toast-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+

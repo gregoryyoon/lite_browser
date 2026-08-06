@@ -56,12 +56,9 @@ Section "Install"
   SetOutPath "$INSTDIR\locales"
   File "c:\projects\lite_browser\cef_binary_149.0.6\build\tests\cefsimple_capi\Release\locales\*.*"
   
-  ; UI folder (Main UI & MD Editor)
+  ; UI folder (Main UI, MD Editor, Bookmark Manager, Extractor)
   SetOutPath "$INSTDIR\ui"
-  File "c:\projects\lite_browser\ui\index.html"
-  File "c:\projects\lite_browser\ui\style.css"
-  File "c:\projects\lite_browser\ui\app.js"
-  File "c:\projects\lite_browser\ui\editor.html"
+  File "c:\projects\lite_browser\ui\*.*"
   
   SetOutPath "$INSTDIR"
   WriteUninstaller "$INSTDIR\uninstall.exe"

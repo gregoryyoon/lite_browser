@@ -764,7 +764,7 @@ void CEF_CALLBACK browser_process_handler_on_context_initialized(
   }
   else
   {
-    cef_string_from_ascii("https://gemini.google.com", 25, &url);
+    cef_string_from_ascii("lite://favorites", 16, &url);
   }
 
   cef_string_utf8_t url_utf8 = {};
@@ -811,7 +811,7 @@ int CEF_CALLBACK browser_process_handler_on_already_running_app_relaunch(
   if (g_startup_url[0] != '\0') {
     strncpy(target_url, g_startup_url, sizeof(target_url) - 1);
   } else {
-    strcpy(target_url, "https://gemini.google.com");
+    strcpy(target_url, "lite://favorites");
   }
 
   if (command_line) {

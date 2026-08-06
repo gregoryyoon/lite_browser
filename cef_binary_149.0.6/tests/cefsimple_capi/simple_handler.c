@@ -71,10 +71,63 @@ static void GetBookmarksFilePath(char* out_path, size_t max_len) {
   if (SHGetSpecialFolderPathA(NULL, user_profile, CSIDL_PROFILE, FALSE)) {
     snprintf(out_path, max_len, "%s\\.lite-browser", user_profile);
     CreateDirectoryA(out_path, NULL);
-    snprintf(out_path, max_len, "%s\\.lite-browser\\bookmarks.json", user_profile);
+    snprintf(out_path, max_len, "%s\\.lite-browser\\bookmarks_v2.json", user_profile);
   } else {
-    snprintf(out_path, max_len, "C:\\projects\\lite_browser\\bookmarks.json");
+    snprintf(out_path, max_len, "C:\\projects\\lite_browser\\bookmarks_v2.json");
   }
+}
+
+static void ResolveUIFilePath(const char* relative_path, char* out_file_path, size_t max_path_len, char* out_file_url, size_t max_url_len) {
+#if defined(OS_WIN)
+  char exe_path[MAX_PATH];
+  GetModuleFileNameA(NULL, exe_path, MAX_PATH);
+
+  char path[MAX_PATH];
+  strcpy(path, exe_path);
+
+  int found = 0;
+  for (int i = 0; i < 8; i++) {
+    char *last_backslash = strrchr(path, '\\');
+    if (!last_backslash) break;
+    *last_backslash = '\0';
+
+    char test_path[MAX_PATH];
+    snprintf(test_path, sizeof(test_path), "%s\\%s", path, relative_path);
+    DWORD attrib = GetFileAttributesA(test_path);
+    if (attrib != INVALID_FILE_ATTRIBUTES && !(attrib & FILE_ATTRIBUTE_DIRECTORY)) {
+      if (out_file_path && max_path_len > 0) {
+        strncpy(out_file_path, test_path, max_path_len - 1);
+        out_file_path[max_path_len - 1] = '\0';
+      }
+      if (out_file_url && max_url_len > 0) {
+        snprintf(out_file_url, max_url_len, "file:///%s/%s", path, relative_path);
+        for (size_t j = 8; out_file_url[j]; j++) {
+          if (out_file_url[j] == '\\') {
+            out_file_url[j] = '/';
+          }
+        }
+      }
+      found = 1;
+      break;
+    }
+  }
+
+  if (!found) {
+    if (out_file_path && max_path_len > 0) {
+      snprintf(out_file_path, max_path_len, "C:\\projects\\lite_browser\\%s", relative_path);
+    }
+    if (out_file_url && max_url_len > 0) {
+      snprintf(out_file_url, max_url_len, "file:///C:/projects/lite_browser/%s", relative_path);
+    }
+  }
+#else
+  if (out_file_path && max_path_len > 0) {
+    snprintf(out_file_path, max_path_len, "/projects/lite_browser/%s", relative_path);
+  }
+  if (out_file_url && max_url_len > 0) {
+    snprintf(out_file_url, max_url_len, "file:///projects/lite_browser/%s", relative_path);
+  }
+#endif
 }
 
 static void scan_directory_recursive(const char* dir_path, char** json_ptr, size_t* len_ptr, size_t* cap_ptr, int is_first_in_level) {
@@ -277,7 +330,7 @@ static simple_handler_t *g_instance = NULL;
 
 // cef_browser_t *g_ui_browser = NULL;
 // cef_browser_t *g_content_browser = NULL;
-char g_startup_url[1024] = "https://gemini.google.com";
+char g_startup_url[1024] = "lite://favorites";
 
 // Forward declarations for handler create functions.
 simple_display_handler_t *display_handler_create(simple_handler_t *parent);
@@ -800,6 +853,23 @@ int CEF_CALLBACK request_handler_on_before_browse(
     cef_string_utf8_t url_utf8 = {};
     cef_string_to_utf8(url_userfree->str, url_userfree->length, &url_utf8);
 
+    if (url_utf8.str) {
+      if (strncmp(url_utf8.str, "lite://favorites", 16) == 0 ||
+          strncmp(url_utf8.str, "lite://bookmarks", 16) == 0 ||
+          strncmp(url_utf8.str, "edge://favorites", 16) == 0 ||
+          strncmp(url_utf8.str, "chrome://favorites", 18) == 0) {
+        char mgr_url_buf[MAX_PATH + 32];
+        ResolveUIFilePath("ui/manager.html", NULL, 0, mgr_url_buf, sizeof(mgr_url_buf));
+        cef_string_t mgr_url = {};
+        cef_string_from_utf8(mgr_url_buf, strlen(mgr_url_buf), &mgr_url);
+        frame->load_url(frame, &mgr_url);
+        cef_string_clear(&mgr_url);
+        cef_string_utf8_clear(&url_utf8);
+        cef_string_userfree_free(url_userfree);
+        return 1;
+      }
+    }
+
     if (url_utf8.str && strncmp(url_utf8.str, "http://ui-action/", 17) == 0) {
       const char *action = url_utf8.str + 17;
       LogMsg("Interrupted ui-action: %s\n", action);
@@ -846,9 +916,9 @@ int CEF_CALLBACK request_handler_on_before_browse(
             DestroyMenu(hMenu);
 
             if (cmd == 1001) {
-              CreateNewTab(win_ctx, "https://gemini.google.com");
+              CreateNewTab(win_ctx, "lite://favorites");
             } else if (cmd == 1002) {
-              create_browser_window("https://gemini.google.com");
+              create_browser_window("lite://favorites");
             } else if (cmd == 1003) {
               if (cb) {
                 cef_browser_host_t* host = cb->get_host(cb);
@@ -1154,6 +1224,122 @@ int CEF_CALLBACK request_handler_on_before_browse(
               free(decoded);
             }
             free(data_base64);
+          }
+        } else if (strcmp(action, "extract-and-save-bookmark") == 0) {
+          if (win_ctx && win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+            cef_browser_t* act_browser = win_ctx->tabs[win_ctx->active_tab_index].browser;
+            if (act_browser) {
+              char extractor_path[MAX_PATH];
+              ResolveUIFilePath("ui/extractor.js", extractor_path, sizeof(extractor_path), NULL, 0);
+              FILE* f_js = fopen(extractor_path, "rb");
+              if (f_js) {
+                fseek(f_js, 0, SEEK_END);
+                long js_sz = ftell(f_js);
+                fseek(f_js, 0, SEEK_SET);
+
+                if (js_sz > 0) {
+                  char* js_buf = (char*)malloc(js_sz + 1);
+                  if (js_buf) {
+                    fread(js_buf, 1, js_sz, f_js);
+                    js_buf[js_sz] = '\0';
+
+                    cef_frame_t* c_frame = act_browser->get_main_frame(act_browser);
+                    if (c_frame) {
+                      cef_string_t js_str = {};
+                      cef_string_from_utf8(js_buf, strlen(js_buf), &js_str);
+                      c_frame->execute_java_script(c_frame, &js_str, NULL, 0);
+                      cef_string_clear(&js_str);
+                      c_frame->base.release(&c_frame->base);
+                    }
+                    free(js_buf);
+                  }
+                }
+                fclose(f_js);
+              }
+            }
+          }
+        } else if (strncmp(action, "save-contextual-bookmark?", 25) == 0) {
+          const char* query = action + 25;
+          char* data_b64 = get_query_param(query, "data");
+          if (data_b64) {
+            if (win_ctx && win_ctx->ui_browser) {
+              char* js_call = (char*)malloc(strlen(data_b64) + 128);
+              if (js_call) {
+                snprintf(js_call, strlen(data_b64) + 128, "if (window.onContextualBookmarkExtractedB64) { window.onContextualBookmarkExtractedB64('%s'); }", data_b64);
+                cef_frame_t* ui_frame = win_ctx->ui_browser->get_main_frame(win_ctx->ui_browser);
+                if (ui_frame) {
+                  cef_string_t js_str = {};
+                  cef_string_from_utf8(js_call, strlen(js_call), &js_str);
+                  ui_frame->execute_java_script(ui_frame, &js_str, NULL, 0);
+                  cef_string_clear(&js_str);
+                  ui_frame->base.release(&ui_frame->base);
+                }
+                free(js_call);
+              }
+            }
+            free(data_b64);
+          }
+        } else if (strcmp(action, "open-bookmark-manager") == 0) {
+          if (win_ctx) {
+            CreateNewTab(win_ctx, "lite://favorites");
+          }
+        } else if (strcmp(action, "load-bookmarks-v2") == 0) {
+          char filepath[MAX_PATH];
+          GetBookmarksFilePath(filepath, sizeof(filepath));
+          
+          FILE* f = fopen(filepath, "rb");
+          if (!f) {
+            const char* default_json = "{\"bookmarks\":[]}";
+            f = fopen(filepath, "wb");
+            if (f) {
+              fwrite(default_json, 1, strlen(default_json), f);
+              fclose(f);
+            }
+            f = fopen(filepath, "rb");
+          }
+
+          if (f) {
+            fseek(f, 0, SEEK_END);
+            long fsize = ftell(f);
+            fseek(f, 0, SEEK_SET);
+
+            if (fsize > 0) {
+              unsigned char* buf = (unsigned char*)malloc(fsize + 1);
+              if (buf) {
+                fread(buf, 1, fsize, f);
+                buf[fsize] = '\0';
+                
+                char* b64_str = base64_encode(buf, fsize);
+                if (b64_str && win_ctx) {
+                  size_t b64_len = strlen(b64_str);
+                  char* js_call = (char*)malloc(b64_len + 128);
+                  if (js_call) {
+                    snprintf(js_call, b64_len + 128, "if (window.loadBookmarksDataB64) { window.loadBookmarksDataB64('%s'); }", b64_str);
+                    
+                    cef_browser_t* target_b = NULL;
+                    if (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+                      target_b = win_ctx->tabs[win_ctx->active_tab_index].browser;
+                    }
+                    if (!target_b) target_b = win_ctx->ui_browser;
+
+                    if (target_b) {
+                      cef_frame_t* target_frame = target_b->get_main_frame(target_b);
+                      if (target_frame) {
+                        cef_string_t js_str = {};
+                        cef_string_from_utf8(js_call, strlen(js_call), &js_str);
+                        target_frame->execute_java_script(target_frame, &js_str, NULL, 0);
+                        cef_string_clear(&js_str);
+                        target_frame->base.release(&target_frame->base);
+                      }
+                    }
+                    free(js_call);
+                  }
+                  free(b64_str);
+                }
+                free(buf);
+              }
+            }
+            fclose(f);
           }
         } else if (strcmp(action, "toggle-editor") == 0) {
           if (win_ctx) {
@@ -1721,7 +1907,7 @@ int CEF_CALLBACK request_handler_on_before_browse(
             free(text_base64);
           }
         } else if (strcmp(action, "new-tab") == 0) {
-          CreateNewTab(win_ctx, "https://gemini.google.com");
+          CreateNewTab(win_ctx, "lite://favorites");
         } else if (strncmp(action, "switch-tab?id=", 14) == 0) {
           int target_id = atoi(action + 14);
           int found_idx = -1;
@@ -1782,7 +1968,7 @@ int CEF_CALLBACK request_handler_on_before_browse(
             DestroyMenu(hMenu);
 
             if (cmd == 2001) {
-              CreateNewTab(win_ctx, "https://gemini.google.com");
+              CreateNewTab(win_ctx, "lite://favorites");
             } else if (cmd == 2002) {
               CloseTab(win_ctx, tab_id);
             } else if (cmd == 2003) {
@@ -1792,7 +1978,7 @@ int CEF_CALLBACK request_handler_on_before_browse(
             }
           }
         } else if (strcmp(action, "new-window") == 0) {
-          create_browser_window("https://gemini.google.com");
+          create_browser_window("lite://favorites");
         } else if (strncmp(action, "detach-tab?id=", 14) == 0) {
           int target_id = atoi(action + 14);
           int found_idx = -1;
@@ -2212,7 +2398,7 @@ void CreateNewTab(browser_window_t* win_ctx, const char* url) {
   if (url && strlen(url) > 0) {
     cef_string_from_utf8(url, strlen(url), &content_url);
   } else {
-    cef_string_from_ascii("https://gemini.google.com", 25, &content_url);
+    cef_string_from_ascii("lite://favorites", 16, &content_url);
   }
 
   simple_handler_t *content_handler = simple_handler_create(0);
@@ -2240,7 +2426,7 @@ void CreateNewTab(browser_window_t* win_ctx, const char* url) {
   if (url && strlen(url) > 0) {
     strncpy(win_ctx->tabs[insert_idx].url, url, sizeof(win_ctx->tabs[insert_idx].url) - 1);
   } else {
-    strcpy(win_ctx->tabs[insert_idx].url, "https://gemini.google.com");
+    strcpy(win_ctx->tabs[insert_idx].url, "lite://favorites");
   }
   win_ctx->tabs[insert_idx].is_loaded = 0;
   win_ctx->tabs[insert_idx].tab_handler = content_handler;

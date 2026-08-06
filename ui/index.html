@@ -45,14 +45,17 @@
       </div>
       <input type="text" id="address-bar" placeholder="검색어 또는 웹사이트 주소 입력" onkeydown="handleKey(event)">
       <div id="loader" class="loader hide"></div>
-      <button id="bookmark-star-btn" class="star-btn" onclick="toggleBookmarkAddPopup(event)" title="이 페이지를 즐겨찾기에 추가">
+      <button id="bookmark-star-btn" class="star-btn" onclick="triggerContextualBookmark(event)" title="이 페이지를 차세대 북마크로 자동 수집">
         <svg id="star-icon" class="star-icon" viewBox="0 0 24 24">
           <path class="star-outline" d="M12 7.13l1.82 3.69 4.07.59-2.95 2.88.7 4.05L12 16.43l-3.64 1.91.7-4.05-2.95-2.88 4.07-.59L12 7.13M12 2L9.19 7.7 2.88 8.62l4.56 4.45L6.37 19.38 12 16.4l5.63 2.98-1.07-6.31 4.56-4.45-6.31-.92L12 2z"/>
           <path class="star-filled" d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/>
         </svg>
       </button>
+
+      <!-- Smart Omnibox Dropdown -->
+      <div id="omnibox-dropdown" class="omnibox-dropdown hide"></div>
     </div>
-    <button id="bookmark-view-btn" class="nav-btn" onclick="toggleBookmarkListPopup(event)" title="즐겨찾기">
+    <button id="bookmark-view-btn" class="nav-btn" onclick="openBookmarkDashboard()" title="북마크 관리자 대시보드 (Ctrl+Shift+O)">
       <svg viewBox="0 0 24 24"><path d="M17 3H7c-1.1 0-1.99.9-1.99 2L5 21l7-3 7 3V5c0-1.1-.9-2-2-2zm0 15l-5-2.18L7 18V5h10v13z"/></svg>
     </button>
     <button id="editor-toggle-btn" class="nav-btn" onclick="toggleEditor()" title="마크다운 에디터 토글">
@@ -64,6 +67,23 @@
       </button>
     </div>
   </div>
+  </div>
+
+  <!-- Contextual Ingestion Toast Modal -->
+  <div id="bookmark-toast-modal" class="toast-modal hide">
+    <div class="toast-header">
+      <div class="toast-badge">🚀 차세대 북마크 자동 수집 완료</div>
+      <button class="toast-close-btn" onclick="closeToastModal()">✕</button>
+    </div>
+    <div class="toast-body">
+      <div id="toast-thumb-box" class="toast-thumb-box"></div>
+      <div class="toast-info">
+        <h4 id="toast-title" class="toast-title">제목</h4>
+        <p id="toast-snippet" class="toast-snippet">요약 내용</p>
+        <div id="toast-intent" class="toast-intent hide"></div>
+        <div id="toast-tags" class="toast-tags"></div>
+      </div>
+    </div>
   </div>
 
   <!-- Backdrop for auto-closing popups -->

@@ -32,7 +32,7 @@ function handleKey(event) {
     let url = event.target.value.trim();
     if (url.length === 0) return;
     
-    if (!/^https?:\/\//i.test(url) && !/^about:/i.test(url) && !/^file:\/\//i.test(url)) {
+    if (!/^https?:\/\//i.test(url) && !/^about:/i.test(url) && !/^file:\/\//i.test(url) && !/^lite:\/\//i.test(url) && !/^edge:\/\//i.test(url)) {
       if (url.indexOf('.') === -1 || url.indexOf(' ') !== -1) {
         url = 'https://www.google.com/search?q=' + encodeURIComponent(url);
       } else {
@@ -114,6 +114,8 @@ window.updateAddress = function(url) {
   if (document.activeElement !== addressBar) {
     if (url.indexOf('ui/index.html') !== -1 || url.indexOf('ui-action') !== -1) {
       addressBar.value = '';
+    } else if (url.indexOf('ui/manager.html') !== -1 || url.indexOf('lite://favorites') !== -1 || url.indexOf('edge://favorites') !== -1) {
+      addressBar.value = 'lite://favorites';
     } else {
       addressBar.value = url;
     }
@@ -127,8 +129,9 @@ window.updateTabsList = function(tabs, activeId) {
 
   container.innerHTML = '';
   tabs.forEach(tab => {
+    const isManager = tab.url && (tab.url.indexOf('ui/manager.html') !== -1 || tab.url.indexOf('lite://favorites') !== -1);
     if (tab.id === activeId) {
-      currentTitle = tab.title || '';
+      currentTitle = isManager ? '즐겨찾기' : (tab.title || '');
     }
     const tabEl = document.createElement('div');
     tabEl.className = 'tab' + (tab.id === activeId ? ' active' : '');
@@ -144,8 +147,9 @@ window.updateTabsList = function(tabs, activeId) {
     
     const titleEl = document.createElement('span');
     titleEl.className = 'tab-title';
-    titleEl.innerText = tab.title || '새 탭';
-    titleEl.title = tab.title || '새 탭';
+    const displayTitle = isManager ? '즐겨찾기' : (tab.title || '새 탭');
+    titleEl.innerText = displayTitle;
+    titleEl.title = displayTitle;
     tabEl.appendChild(titleEl);
 
     const closeEl = document.createElement('button');
@@ -511,10 +515,213 @@ function addNewFolderPrompt() {
   }
 }
 
-function deleteBookmarkItem(bmId, event) {
+function triggerContextualBookmark(event) {
   if (event) event.stopPropagation();
-  bookmarksData.bookmarks = bookmarksData.bookmarks.filter(b => b.id !== bmId);
-  saveBookmarksToBackend();
-  updateStarIcon();
-  filterBookmarksList();
+
+  const bm = findCurrentBookmark();
+  if (bm) {
+    // 이미 등록된 북마크인 경우 삭제
+    bookmarksData.bookmarks = bookmarksData.bookmarks.filter(b => b.url !== currentUrl);
+    saveBookmarksToBackend();
+    updateStarIcon();
+    return;
+  }
+
+  // 등록되지 않은 경우 메타데이터 수집 후 추가
+  window.location.href = 'http://ui-action/extract-and-save-bookmark';
 }
+
+window.onContextualBookmarkExtractedB64 = function(b64Str) {
+  try {
+    const jsonStr = decodeURIComponent(escape(atob(b64Str)));
+    const payload = JSON.parse(jsonStr);
+
+    const existingIdx = bookmarksData.bookmarks.findIndex(b => b.url === payload.url);
+    const newBm = {
+      id: existingIdx >= 0 ? bookmarksData.bookmarks[existingIdx].id : ('bm_' + Date.now()),
+      url: payload.url,
+      title: payload.title || payload.url,
+      faviconUrl: payload.faviconUrl || '',
+      thumbnailUrl: payload.thumbnailUrl || '',
+      themeColor: payload.themeColor || '#0078d4',
+      extractedTags: payload.extractedTags || [],
+      textSnippet: payload.textSnippet || '',
+      context: payload.context || { createdAt: Date.now() },
+      folder: '즐겨찾기 바'
+    };
+
+    if (existingIdx >= 0) {
+      bookmarksData.bookmarks[existingIdx] = newBm;
+    } else {
+      bookmarksData.bookmarks.unshift(newBm);
+    }
+
+    saveBookmarksToBackend();
+    updateStarIcon();
+  } catch(e) {
+    console.error("Failed to process extracted bookmark:", e);
+  }
+};
+
+function showIngestionToast(bm) {
+  const toast = document.getElementById('bookmark-toast-modal');
+  if (!toast) return;
+
+  document.getElementById('toast-title').innerText = bm.title || '북마크 추가됨';
+  document.getElementById('toast-snippet').innerText = bm.textSnippet || bm.url;
+
+  const thumbBox = document.getElementById('toast-thumb-box');
+  if (bm.thumbnailUrl) {
+    thumbBox.innerHTML = `<img src="${bm.thumbnailUrl}" onerror="this.outerHTML='<span>⭐</span>'">`;
+  } else {
+    thumbBox.innerHTML = `<span>⭐</span>`;
+  }
+
+  const intentEl = document.getElementById('toast-intent');
+  if (bm.context && bm.context.searchIntent) {
+    intentEl.innerText = `🔍 ${bm.context.searchIntent}`;
+    intentEl.classList.remove('hide');
+  } else {
+    intentEl.classList.add('hide');
+  }
+
+  const tagsEl = document.getElementById('toast-tags');
+  tagsEl.innerHTML = (bm.extractedTags || []).map(t => `<span class="tag-chip">#${t}</span>`).join('');
+
+  toast.classList.remove('hide');
+  expandUI(220);
+
+  setTimeout(() => {
+    closeToastModal();
+  }, 2500);
+}
+
+function closeToastModal() {
+  const toast = document.getElementById('bookmark-toast-modal');
+  if (toast) toast.classList.add('hide');
+  closeAllPopups();
+}
+
+function openBookmarkDashboard() {
+  window.location.href = 'http://ui-action/open-bookmark-manager';
+}
+
+// ==================== SMART OMNIBOX ENGINE ====================
+
+let omniSelectedIndex = -1;
+let omniResults = [];
+
+document.addEventListener('DOMContentLoaded', () => {
+  const addressBar = document.getElementById('address-bar');
+  if (addressBar) {
+    addressBar.addEventListener('input', handleOmniboxInput);
+    addressBar.addEventListener('keydown', handleOmniboxKeydown);
+    addressBar.addEventListener('blur', () => {
+      setTimeout(() => {
+        closeOmniboxDropdown();
+      }, 200);
+    });
+  }
+});
+
+function handleOmniboxInput(e) {
+  const query = e.target.value.trim().toLowerCase();
+  const dropdown = document.getElementById('omnibox-dropdown');
+  if (!dropdown) return;
+
+  if (!query) {
+    closeOmniboxDropdown();
+    return;
+  }
+
+  // Multi-dimensional matching
+  if (query.startsWith('#')) {
+    const tagName = query.slice(1);
+    omniResults = bookmarksData.bookmarks.filter(b => 
+      (b.extractedTags || []).some(t => t.toLowerCase().includes(tagName))
+    );
+  } else {
+    omniResults = bookmarksData.bookmarks.filter(b => {
+      const matchTitle = (b.title || '').toLowerCase().includes(query);
+      const matchUrl = (b.url || '').toLowerCase().includes(query);
+      const matchSnippet = (b.textSnippet || '').toLowerCase().includes(query);
+      const matchIntent = (b.context?.searchIntent || '').toLowerCase().includes(query);
+      const matchTags = (b.extractedTags || []).some(t => t.toLowerCase().includes(query));
+      return matchTitle || matchUrl || matchSnippet || matchIntent || matchTags;
+    });
+  }
+
+  if (omniResults.length === 0) {
+    closeOmniboxDropdown();
+    return;
+  }
+
+  omniResults = omniResults.slice(0, 6);
+  omniSelectedIndex = -1;
+  renderOmniboxDropdown();
+  dropdown.classList.remove('hide');
+  expandUI(340);
+}
+
+function renderOmniboxDropdown() {
+  const dropdown = document.getElementById('omnibox-dropdown');
+  if (!dropdown) return;
+
+  dropdown.innerHTML = '';
+  omniResults.forEach((bm, idx) => {
+    const item = document.createElement('div');
+    item.className = 'omni-item' + (idx === omniSelectedIndex ? ' selected' : '');
+    item.onclick = () => {
+      window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(bm.url);
+      closeOmniboxDropdown();
+    };
+
+    const tagsHtml = (bm.extractedTags || []).slice(0, 2).map(t => `<span class="tag-chip">#${t}</span>`).join('');
+    const snippetText = bm.textSnippet || '요약 정보가 없습니다.';
+
+    item.innerHTML = `
+      <span class="omni-badge">북마크</span>
+      <img src="${bm.faviconUrl || ''}" class="card-favicon" onerror="this.style.display='none'">
+      <div class="omni-info">
+        <div class="omni-title">${bm.title}</div>
+        <div class="omni-sub">${bm.url}</div>
+      </div>
+      <div class="omni-tags">${tagsHtml}</div>
+      <div class="omni-popover">
+        <strong>본문 요약:</strong>
+        <p>${snippetText}</p>
+        ${bm.context?.pageAnchor ? `<div style="margin-top:4px;color:#0078d4;">📍 앵커: ${bm.context.pageAnchor}</div>` : ''}
+      </div>
+    `;
+    dropdown.appendChild(item);
+  });
+}
+
+function handleOmniboxKeydown(e) {
+  const dropdown = document.getElementById('omnibox-dropdown');
+  if (!dropdown || dropdown.classList.contains('hide')) return;
+
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    omniSelectedIndex = (omniSelectedIndex + 1) % omniResults.length;
+    renderOmniboxDropdown();
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    omniSelectedIndex = (omniSelectedIndex - 1 + omniResults.length) % omniResults.length;
+    renderOmniboxDropdown();
+  } else if (e.key === 'Enter' && omniSelectedIndex >= 0 && omniSelectedIndex < omniResults.length) {
+    e.preventDefault();
+    const targetUrl = omniResults[omniSelectedIndex].url;
+    window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(targetUrl);
+    closeOmniboxDropdown();
+  } else if (e.key === 'Escape') {
+    closeOmniboxDropdown();
+  }
+}
+
+function closeOmniboxDropdown() {
+  const dropdown = document.getElementById('omnibox-dropdown');
+  if (dropdown) dropdown.classList.add('hide');
+  closeAllPopups();
+}
+

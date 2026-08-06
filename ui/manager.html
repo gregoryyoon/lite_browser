@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>북마크 관리자 대시보드</title>
+  <link rel="stylesheet" href="manager.css">
+</head>
+<body>
+  <div class="dashboard-container">
+    <!-- Left Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <svg class="logo-icon" viewBox="0 0 24 24"><path d="M17 3H7c-1.1 0-1.99.9-1.99 2L5 21l7-3 7 3V5c0-1.1-.9-2-2-2zm0 15l-5-2.18L7 18V5h10v13z"/></svg>
+        <h2>북마크 자산</h2>
+      </div>
+
+      <nav class="sidebar-menu">
+        <div class="menu-section">
+          <span class="section-title">QUICK ACCESS</span>
+          <button class="nav-item active" onclick="setQuickFilter('all')">
+            <svg viewBox="0 0 24 24"><path d="M4 6h16v2H4zm0 5h16v2H4zm0 5h16v2H4z"/></svg>
+            <span>전체 북마크</span>
+            <span id="count-all" class="badge">0</span>
+          </button>
+          <button class="nav-item" onclick="setQuickFilter('recent')">
+            <svg viewBox="0 0 24 24"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg>
+            <span>최근 저장됨</span>
+            <span id="count-recent" class="badge">0</span>
+          </button>
+          <button class="nav-item" onclick="setQuickFilter('highlights')">
+            <svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+            <span>하이라이트 앵커</span>
+            <span id="count-highlights" class="badge">0</span>
+          </button>
+        </div>
+
+        <div class="menu-section">
+          <span class="section-title">스마트 태그 목록</span>
+          <div id="smart-tags-list" class="tags-list"></div>
+        </div>
+      </nav>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      <!-- Top Control Bar -->
+      <header class="top-bar">
+        <div class="search-box">
+          <svg class="search-icon" viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+          <input type="text" id="manager-search" placeholder="제목, URL, #태그, 본문 요약, 유입 검색어로 탐색..." oninput="handleSearchInput()">
+        </div>
+
+        <div class="temporal-filter">
+          <span class="filter-label">저장 시점:</span>
+          <input type="range" id="temporal-slider" min="0" max="30" value="0" oninput="handleTemporalSlider()">
+          <span id="temporal-value" class="slider-text">전체 기간</span>
+        </div>
+
+        <div class="layout-switcher">
+          <button id="view-card-btn" class="layout-btn active" onclick="switchLayout('card')" title="카드 뷰">
+            <svg viewBox="0 0 24 24"><path d="M4 11h5V5H4v6zm0 7h5v-6H4v6zm6 0h5v-6h-5v6zm6 0h5v-6h-5v6zm-6-7h5V5h-5v6zm6-6v6h5V5h-5z"/></svg>
+          </button>
+          <button id="view-list-btn" class="layout-btn" onclick="switchLayout('list')" title="리스트 뷰">
+            <svg viewBox="0 0 24 24"><path d="M4 14h4v-4H4v4zm0 5h4v-4H4v4zM4 9h4V5H4v4zm5 5h12v-4H9v4zm0 5h12v-4H9v4zM9 5v4h12V5H9z"/></svg>
+          </button>
+        </div>
+      </header>
+
+      <!-- Grid / List Main View Container -->
+      <section id="manager-view-container" class="view-container">
+        <div id="card-grid" class="card-grid"></div>
+        <div id="list-table" class="list-table hide"></div>
+        <div id="empty-state" class="empty-state hide">
+          <svg viewBox="0 0 24 24"><path d="M19 5v14H5V5h14m0-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
+          <p>조건에 일치하는 북마크가 없습니다.</p>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="manager.js"></script>
+</body>
+</html>
