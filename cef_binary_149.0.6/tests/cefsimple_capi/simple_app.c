@@ -177,6 +177,21 @@ void CEF_CALLBACK simple_app_on_before_command_line_processing(
   cef_string_from_ascii("allow-file-access-from-files", 28, &switch2);
   command_line->append_switch(command_line, &switch2);
   cef_string_clear(&switch2);
+
+#if defined(OS_WIN)
+  cef_string_t lang_switch = {};
+  cef_string_from_ascii("lang", 4, &lang_switch);
+  if (!command_line->has_switch(command_line, &lang_switch)) {
+    WCHAR locale_name[LOCALE_NAME_MAX_LENGTH] = {0};
+    if (GetUserDefaultLocaleName(locale_name, LOCALE_NAME_MAX_LENGTH) > 0) {
+      cef_string_t lang_val = {};
+      cef_string_wide_to_utf16(locale_name, wcslen(locale_name), &lang_val);
+      command_line->append_switch_with_value(command_line, &lang_switch, &lang_val);
+      cef_string_clear(&lang_val);
+    }
+  }
+  cef_string_clear(&lang_switch);
+#endif
 }
 
 // Returns the browser process handler.

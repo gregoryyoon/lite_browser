@@ -154,3 +154,13 @@ LLM 서비스(Gemini, ChatGPT, Claude 등)의 입력창에 에디터에서 작�
 - **원인 분석**: Lite Browser가 실행 중인 상태에서 추가로 executable을 실행할 경우, 동일한 `cache_path` 프로필을 사용하는 싱글톤 프로세스 메커니즘에 의해 두 번째 프로세스는 기존 프로세스로 인자를 전달하고 종료됩니다. 이때 기존 프로세스에 `on_already_running_app_relaunch` 콜백이 정의되어 있지 않으면(NULL 또는 0 반환), CEF의 기본 동작(Default Behavior)이 작동하여 **기본 Chromium 스타일 윈도우**가 팝업되는 현상이 발생했습니다.
 - **해결 방안**: `simple_app.c` 의 `cef_browser_process_handler_t` 콜백에 `browser_process_handler_on_already_running_app_relaunch`를 탑재했습니다. 재실행 전달 신호를 수신하면 커맨드 라인 인자(`--url`)를 파싱하여 대상 URL을 구하고, `create_browser_window`를 호출해 Lite Browser 네이티브 메인 윈도우를 새로 생성하여 최전면(`SetForegroundWindow`)으로 복원한 뒤 `1` (true)을 반환함으로써 기본 Chromium 창이 노출되는 문제를 원천 차단했습니다.
 
+# Windows OS 기본 설정 언어 자동 감지 및 CEF Locale/Accept-Language 설정
+
+### 1. OS 기본 언어 동적 감지 (`ConfigureSystemLocale`)
+- **원인 분석**: 기존에는 CEF 초기화 시 `settings.locale` 및 `settings.accept_language_list`가 빈 값으로 전달되어 Chromium 기본값인 `en-US`로 동작했습니다. 이로 인해 한국어 Windows 환경에서도 대한항공 등 사이트 최초 접속 시 영어 페이지가 로드되고 패스워드 매니저/내장 Chromium UI가 영어로 노출되었습니다.
+- **해결 방안**: `cefsimple_win.c` 에서 Win32 API (`GetUserDefaultLocaleName`, `GetUserPreferredUILanguages`)를 사용해 시스템 기본 언어를 동적으로 탐색합니다.
+  - **`settings.locale`**: 사용자 OS UI 기본 언어(예: `ko-KR`)를 지정하여 내장 Chrome 패스워드 매니저, 다이얼로그, 내부 UI 및 `navigator.language`를 시스템 기본 언어로 설정했습니다.
+  - **`settings.accept_language_list`**: OS 선호 언어 순서(예: `ko-KR,ko,en-US,en`)를 추출하여 HTTP 요청 헤더 `Accept-Language`로 전달함으로써 접속하는 웹 페이지들이 기본 한국어로 적절히 로딩되도록 처리했습니다.
+  - **`--lang` 커맨드라인 스위치 전달**: `simple_app.c` 의 `simple_app_on_before_command_line_processing` 수신기에서 `--lang` 스위치가 없는 경우 OS 기본 locale(예: `ko-KR`)을 자동 추가하여 렌더러 및 모든 서브프로세스 렌더링 언어가 완벽하게 동기화되도록 보장했습니다.
+
+
