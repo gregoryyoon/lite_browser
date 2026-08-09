@@ -725,6 +725,19 @@ body {
   flex-shrink: 0;
 }
 
+.omni-history-badge {
+  background: #059669;
+  color: #ffffff;
+}
+
+.omni-history-url {
+  color: #0284c7;
+  font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .omni-date {
   font-size: 11px;
   color: #71717a;

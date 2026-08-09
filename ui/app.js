@@ -61,11 +61,18 @@ let bookmarksData = {
   folders: ["즐겨찾기 바", "기타 즐겨찾기"],
   bookmarks: []
 };
+let historyData = {
+  history: []
+};
 let currentUrl = '';
 let currentTitle = '';
 
 function requestLoadBookmarks() {
   window.location.href = 'http://ui-action/load-bookmarks';
+}
+
+function requestLoadHistory() {
+  window.location.href = 'http://ui-action/load-history';
 }
 
 window.loadBookmarksDataB64 = function(b64Str) {
@@ -80,6 +87,16 @@ window.loadBookmarksDataB64 = function(b64Str) {
   updateStarIcon();
 };
 
+window.loadHistoryDataB64 = function(b64Str) {
+  try {
+    const jsonStr = decodeURIComponent(escape(atob(b64Str)));
+    historyData = JSON.parse(jsonStr);
+    if (!historyData.history) historyData.history = [];
+  } catch (e) {
+    console.error("Failed to parse history data:", e);
+  }
+};
+
 function saveBookmarksToBackend() {
   try {
     const jsonStr = JSON.stringify(bookmarksData);
@@ -88,6 +105,50 @@ function saveBookmarksToBackend() {
   } catch (e) {
     console.error("Failed to save bookmarks:", e);
   }
+}
+
+function saveHistoryToBackend() {
+  try {
+    const jsonStr = JSON.stringify(historyData);
+    const b64Str = btoa(unescape(encodeURIComponent(jsonStr)));
+    window.location.href = 'http://ui-action/save-history?data=' + encodeURIComponent(b64Str);
+  } catch (e) {
+    console.error("Failed to save history:", e);
+  }
+}
+
+function trackHistoryVisit(url, title) {
+  if (!url || typeof url !== 'string') return;
+  if (url.indexOf('ui/') !== -1 || url.indexOf('ui-action') !== -1 || url.indexOf('lite://') !== -1 || url.indexOf('edge://') !== -1 || url.indexOf('about:blank') !== -1 || url.startsWith('file://')) {
+    return;
+  }
+
+  const existingIdx = historyData.history.findIndex(h => h.url === url);
+  if (existingIdx >= 0) {
+    const existing = historyData.history[existingIdx];
+    existing.visitedAt = Date.now();
+    if (title && title !== '새 탭' && title !== url) {
+      existing.title = title;
+    }
+    existing.visitCount = (existing.visitCount || 1) + 1;
+    historyData.history.splice(existingIdx, 1);
+    historyData.history.unshift(existing);
+  } else {
+    const newItem = {
+      id: 'hist_' + Date.now(),
+      url: url,
+      title: (title && title !== '새 탭') ? title : url,
+      visitedAt: Date.now(),
+      visitCount: 1
+    };
+    historyData.history.unshift(newItem);
+  }
+
+  if (historyData.history.length > 1000) {
+    historyData.history = historyData.history.slice(0, 1000);
+  }
+
+  saveHistoryToBackend();
 }
 
 function findCurrentBookmark() {
@@ -126,6 +187,11 @@ window.updateAddress = function(url) {
 window.updateTabsList = function(tabs, activeId) {
   const container = document.getElementById('tabs');
   if (!container) return;
+
+  const activeTab = tabs.find(t => t.id === activeId);
+  if (activeTab && activeTab.url && activeTab.title && activeTab.title !== '새 탭') {
+    trackHistoryVisit(activeTab.url, activeTab.title);
+  }
 
   container.innerHTML = '';
   tabs.forEach(tab => {
@@ -608,13 +674,14 @@ function openBookmarkDashboard() {
 
 // ==================== SMART OMNIBOX ENGINE ====================
 
-// ==================== SMART OMNIBOX ENGINE ====================
-
 let omniSelectedIndex = -1;
-let omniResults = [];
+let omniBookmarkResults = [];
+let omniHistoryResults = [];
 let omniRawQuery = '';
 
 document.addEventListener('DOMContentLoaded', () => {
+  requestLoadBookmarks();
+  requestLoadHistory();
   const addressBar = document.getElementById('address-bar');
   if (addressBar) {
     addressBar.addEventListener('input', handleOmniboxInput);
@@ -627,19 +694,20 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
-function formatTimeAgo(timestamp) {
-  if (!timestamp) return '최근 저장';
+function formatTimeAgo(timestamp, isBookmark = true) {
+  const suffix = isBookmark ? '저장' : '방문';
+  if (!timestamp) return `최근 ${suffix}`;
   const diffMs = Date.now() - timestamp;
   const diffMin = Math.floor(diffMs / (1000 * 60));
   const diffHour = Math.floor(diffMs / (1000 * 60 * 60));
   const diffDay = Math.floor(diffMs / (1000 * 60 * 60 * 24));
 
-  if (diffMin < 1) return '방금 전 저장';
-  if (diffMin < 60) return `${diffMin}분 전 저장`;
-  if (diffHour < 24) return `${diffHour}시간 전 저장`;
-  if (diffDay < 30) return `${diffDay}일 전 저장`;
+  if (diffMin < 1) return `방금 전 ${suffix}`;
+  if (diffMin < 60) return `${diffMin}분 전 ${suffix}`;
+  if (diffHour < 24) return `${diffHour}시간 전 ${suffix}`;
+  if (diffDay < 30) return `${diffDay}일 전 ${suffix}`;
   const d = new Date(timestamp);
-  return `${d.getFullYear()}.${d.getMonth() + 1}.${d.getDate()} 저장`;
+  return `${d.getFullYear()}.${d.getMonth() + 1}.${d.getDate()} ${suffix}`;
 }
 
 function handleOmniboxInput(e) {
@@ -655,14 +723,14 @@ function handleOmniboxInput(e) {
     return;
   }
 
-  // Multi-dimensional matching
+  // Multi-dimensional matching for Bookmarks
   if (query.startsWith('#')) {
     const tagName = query.slice(1);
-    omniResults = bookmarksData.bookmarks.filter(b => 
+    omniBookmarkResults = bookmarksData.bookmarks.filter(b => 
       (b.extractedTags || []).some(t => t.toLowerCase().includes(tagName))
     );
   } else {
-    omniResults = bookmarksData.bookmarks.filter(b => {
+    omniBookmarkResults = bookmarksData.bookmarks.filter(b => {
       const matchTitle = (b.title || '').toLowerCase().includes(query);
       const matchUrl = (b.url || '').toLowerCase().includes(query);
       const matchSnippet = (b.textSnippet || '').toLowerCase().includes(query);
@@ -671,8 +739,15 @@ function handleOmniboxInput(e) {
       return matchTitle || matchUrl || matchSnippet || matchIntent || matchTags;
     });
   }
+  omniBookmarkResults = omniBookmarkResults.slice(0, 3);
 
-  omniResults = omniResults.slice(0, 5);
+  // Search History
+  omniHistoryResults = historyData.history.filter(h => {
+    const matchTitle = (h.title || '').toLowerCase().includes(query);
+    const matchUrl = (h.url || '').toLowerCase().includes(query);
+    return matchTitle || matchUrl;
+  }).slice(0, 3);
+
   omniSelectedIndex = -1;
   renderOmniboxDropdown();
   dropdown.classList.remove('hide');
@@ -685,7 +760,7 @@ function updateOmniboxHeight() {
 
   requestAnimationFrame(() => {
     const dropHeight = dropdown.offsetHeight || dropdown.scrollHeight || 0;
-    const targetHeight = Math.min(520, Math.max(90, 72 + dropHeight + 16));
+    const targetHeight = Math.min(540, Math.max(90, 72 + dropHeight + 16));
     expandUI(targetHeight);
   });
 }
@@ -695,18 +770,20 @@ function renderOmniboxDropdown() {
   if (!dropdown) return;
 
   dropdown.innerHTML = '';
+  let globalIndex = 0;
 
-  // Render matched bookmarks
-  omniResults.forEach((bm, idx) => {
+  // 1. Render matched bookmarks
+  omniBookmarkResults.forEach((bm) => {
+    const currentIndex = globalIndex++;
     const item = document.createElement('div');
-    item.className = 'omni-item' + (idx === omniSelectedIndex ? ' selected' : '');
+    item.className = 'omni-item' + (currentIndex === omniSelectedIndex ? ' selected' : '');
     item.onclick = () => {
       window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(bm.url);
       closeOmniboxDropdown();
     };
 
     const tagsHtml = (bm.extractedTags || []).map(t => `<span class="omni-tag-chip">#${t}</span>`).join(' ');
-    const timeAgoStr = formatTimeAgo(bm.context?.createdAt);
+    const timeAgoStr = formatTimeAgo(bm.context?.createdAt, true);
     const searchIntent = bm.context?.searchIntent;
     const snippetText = bm.textSnippet;
 
@@ -728,11 +805,39 @@ function renderOmniboxDropdown() {
     dropdown.appendChild(item);
   });
 
-  // Render Google Search item at bottom
+  // 2. Render matched history items
+  omniHistoryResults.forEach((hist) => {
+    const currentIndex = globalIndex++;
+    const item = document.createElement('div');
+    item.className = 'omni-item omni-history-item' + (currentIndex === omniSelectedIndex ? ' selected' : '');
+    item.onclick = () => {
+      window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(hist.url);
+      closeOmniboxDropdown();
+    };
+
+    const timeAgoStr = formatTimeAgo(hist.visitedAt, false);
+
+    item.innerHTML = `
+      <div class="omni-row-top">
+        <div class="omni-title-group">
+          <span class="omni-icon">🌐</span>
+          <span class="omni-badge omni-history-badge">방문 기록</span>
+          <span class="omni-title-text">${hist.title || hist.url}</span>
+        </div>
+        <div class="omni-date">📅 ${timeAgoStr}</div>
+      </div>
+      <div class="omni-row-meta">
+        <span class="omni-history-url">🔗 ${hist.url}</span>
+      </div>
+    `;
+    dropdown.appendChild(item);
+  });
+
+  // 3. Render Google Search item at bottom
   if (omniRawQuery) {
-    const googleIdx = omniResults.length;
+    const currentIndex = globalIndex++;
     const googleItem = document.createElement('div');
-    googleItem.className = 'omni-google-item' + (omniSelectedIndex === googleIdx ? ' selected' : '');
+    googleItem.className = 'omni-google-item' + (currentIndex === omniSelectedIndex ? ' selected' : '');
     googleItem.onclick = () => {
       const searchUrl = 'https://www.google.com/search?q=' + encodeURIComponent(omniRawQuery);
       window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(searchUrl);
@@ -752,7 +857,7 @@ function handleOmniboxKeydown(e) {
   const dropdown = document.getElementById('omnibox-dropdown');
   if (!dropdown || dropdown.classList.contains('hide')) return;
 
-  const totalCount = omniResults.length + (omniRawQuery ? 1 : 0);
+  const totalCount = omniBookmarkResults.length + omniHistoryResults.length + (omniRawQuery ? 1 : 0);
   if (totalCount === 0) return;
 
   if (e.key === 'ArrowDown') {
@@ -765,10 +870,17 @@ function handleOmniboxKeydown(e) {
     renderOmniboxDropdown();
   } else if (e.key === 'Enter' && omniSelectedIndex >= 0) {
     e.preventDefault();
-    if (omniSelectedIndex < omniResults.length) {
-      const targetUrl = omniResults[omniSelectedIndex].url;
+    const bookmarkCount = omniBookmarkResults.length;
+    const historyCount = omniHistoryResults.length;
+
+    if (omniSelectedIndex < bookmarkCount) {
+      const targetUrl = omniBookmarkResults[omniSelectedIndex].url;
       window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(targetUrl);
-    } else if (omniSelectedIndex === omniResults.length && omniRawQuery) {
+    } else if (omniSelectedIndex < bookmarkCount + historyCount) {
+      const histIdx = omniSelectedIndex - bookmarkCount;
+      const targetUrl = omniHistoryResults[histIdx].url;
+      window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(targetUrl);
+    } else if (omniSelectedIndex === bookmarkCount + historyCount && omniRawQuery) {
       const searchUrl = 'https://www.google.com/search?q=' + encodeURIComponent(omniRawQuery);
       window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(searchUrl);
     }

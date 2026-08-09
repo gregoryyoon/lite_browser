@@ -77,6 +77,17 @@ static void GetBookmarksFilePath(char* out_path, size_t max_len) {
   }
 }
 
+static void GetHistoryFilePath(char* out_path, size_t max_len) {
+  char user_profile[MAX_PATH];
+  if (SHGetSpecialFolderPathA(NULL, user_profile, CSIDL_PROFILE, FALSE)) {
+    snprintf(out_path, max_len, "%s\\.lite-browser", user_profile);
+    CreateDirectoryA(out_path, NULL);
+    snprintf(out_path, max_len, "%s\\.lite-browser\\history.json", user_profile);
+  } else {
+    snprintf(out_path, max_len, "C:\\projects\\lite_browser\\history.json");
+  }
+}
+
 static void ResolveUIFilePath(const char* relative_path, char* out_file_path, size_t max_path_len, char* out_file_url, size_t max_url_len) {
 #if defined(OS_WIN)
   char exe_path[MAX_PATH];
@@ -1216,6 +1227,74 @@ int CEF_CALLBACK request_handler_on_before_browse(
             if (decoded) {
               char filepath[MAX_PATH];
               GetBookmarksFilePath(filepath, sizeof(filepath));
+              FILE* f = fopen(filepath, "wb");
+              if (f) {
+                fwrite(decoded, 1, decoded_len, f);
+                fclose(f);
+              }
+              free(decoded);
+            }
+            free(data_base64);
+          }
+        } else if (strcmp(action, "load-history") == 0) {
+          char filepath[MAX_PATH];
+          GetHistoryFilePath(filepath, sizeof(filepath));
+          
+          FILE* f = fopen(filepath, "rb");
+          if (!f) {
+            const char* default_json = "{\"history\":[]}";
+            f = fopen(filepath, "wb");
+            if (f) {
+              fwrite(default_json, 1, strlen(default_json), f);
+              fclose(f);
+            }
+            f = fopen(filepath, "rb");
+          }
+
+          if (f) {
+            fseek(f, 0, SEEK_END);
+            long fsize = ftell(f);
+            fseek(f, 0, SEEK_SET);
+
+            if (fsize > 0) {
+              unsigned char* buf = (unsigned char*)malloc(fsize + 1);
+              if (buf) {
+                fread(buf, 1, fsize, f);
+                buf[fsize] = '\0';
+                
+                char* b64_str = base64_encode(buf, fsize);
+                if (b64_str && win_ctx && win_ctx->ui_browser) {
+                  size_t b64_len = strlen(b64_str);
+                  char* js_call = (char*)malloc(b64_len + 128);
+                  if (js_call) {
+                    snprintf(js_call, b64_len + 128, "if (window.loadHistoryDataB64) { window.loadHistoryDataB64('%s'); }", b64_str);
+                    
+                    cef_frame_t* ui_frame = win_ctx->ui_browser->get_main_frame(win_ctx->ui_browser);
+                    if (ui_frame) {
+                      cef_string_t js_str = {};
+                      cef_string_from_utf8(js_call, strlen(js_call), &js_str);
+                      ui_frame->execute_java_script(ui_frame, &js_str, NULL, 0);
+                      cef_string_clear(&js_str);
+                      ui_frame->base.release(&ui_frame->base);
+                    }
+                    free(js_call);
+                  }
+                  free(b64_str);
+                }
+                free(buf);
+              }
+            }
+            fclose(f);
+          }
+        } else if (strncmp(action, "save-history?", 13) == 0) {
+          const char* query = action + 13;
+          char* data_base64 = get_query_param(query, "data");
+          if (data_base64) {
+            size_t decoded_len = 0;
+            unsigned char* decoded = base64_decode(data_base64, &decoded_len);
+            if (decoded) {
+              char filepath[MAX_PATH];
+              GetHistoryFilePath(filepath, sizeof(filepath));
               FILE* f = fopen(filepath, "wb");
               if (f) {
                 fwrite(decoded, 1, decoded_len, f);
