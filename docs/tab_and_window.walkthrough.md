@@ -97,6 +97,15 @@
 - **탭바 우클릭 메뉴**: `show-tab-menu` IPC 수신 시 `TrackPopupMenu`를 통해 **새 탭 / 구분선 / 탭 닫기 / 다른 탭 닫기 / 오른쪽 탭 닫기** 메뉴를 제공하며, 최적화 헬퍼(`CloseTab`, `CloseOtherTabs`, `CloseTabsToRight`)로 안전 처리합니다.
 - **웹 콘텐츠 조건부 우클릭 메뉴**: `params->get_link_url()` 조회를 통해 일반 영역 우클릭 시(뒤로/앞으로/새로고침/인쇄/소스보기/검사)와 하이퍼링크 영역 우클릭 시(**새 탭에서 링크 열기**, **링크 페이지 저장** - `start_download`, **링크 복사** - `CF_UNICODETEXT`, **검사**)를 분기 렌더링합니다.
 
+### 7) 탭 삭제/종료 시 활성 탭 전환 및 HWND Z-order 노출 버그 수정 (`RemoveTabAt`)
+- **원인 분석**:
+  - 기존 `CloseTab`, `detach-tab`, `drag-end` 시 활성 탭(`found_idx`)이 종료되면 탭 배열 시프트 전에 `new_active`가 `found_idx`로 결정되어 이전(좌측) 탭 대신 우측 탭이 활성화되는 문제가 있었습니다.
+  - 또한 배열 시프트 **전에** `ShowWindow(tabs[new_active].hwnd, SW_SHOW)`가 호출되어 닫히는 HWND에 보여주기 명령이 들어가고, 정작 시프트 후 새로 활성화된 탭의 HWND는 `SW_HIDE` 상태로 유지되어 브라우저 영역에 회색 바탕만 뜨는 버그가 발생했습니다.
+- **해결 방안 (`RemoveTabAt` 공통 헬퍼 구현)**:
+  - 탭 삭제/이관 전용 공통 헬퍼 `RemoveTabAt(win_ctx, remove_idx, close_cef_browser)`를 신설했습니다.
+  - 활성 탭 삭제 시 이전(좌측) 탭(`remove_idx - 1`)을 활성 인덱스로 지정하고(`remove_idx == 0`일 경우 0번), 탭 배열 시프트 및 `tab_count`, `active_tab_index`를 먼저 갱신합니다.
+  - 남은 모든 탭들의 HWND를 루프 순회하여 비활성 탭은 `SW_HIDE`, 새로 활성화된 탭은 `SW_SHOW` 및 `MoveWindow`, `was_resized`, `set_focus`를 호출하여 전환 반응성과 브라우저 렌더링 노출을 100% 보장하도록 처리했습니다.
+
 ---
 
 ## 7. 관련 주요 구성 파일 안내
