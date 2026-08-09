@@ -84,17 +84,18 @@
   - `open-bookmark-manager`: `lite://favorites` 새 탭 개설.
   - `load-bookmarks-v2`: V2 북마크 데이터 파일 읽기 및 JS In-Memory 전달.
 
-### 2.8 방문 기록(Browsing History) 자동 수집 & 주소창 연동 Engine
+### 2.8 방문 기록 (History) 자동 수집 및 Smart Omnibox 그룹화 연동
 - **파일**: [simple_handler.c](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_handler.c), [ui/app.js](file:///c:/projects/lite_browser/ui/app.js), [ui/style.css](file:///c:/projects/lite_browser/ui/style.css)
-- **저장 경로**: `C:\Users\<Username>\.lite-browser\history.json`
-- **백그라운드 자동 수집 & 중복 타임스탬프 갱신 (Option A)**:
-  - 사용자가 웹페이지 탐색 시 URL과 Title을 자동으로 감지하여 `history.json`에 영속화.
-  - 동일한 URL 재방문 시 중복 항목을 생성하지 않고 최근 방문 시각(`visitedAt`)과 타이틀만 업데이트(Option A).
-- **드롭다운 노출 순서 & 가변 높이 (Option B UI)**:
-  - 1순위: 🔖 **[북마크 목록]** (최대 3개)
-  - 2순위: 🔍 **[구글 검색]**: `"입력 키워드"`
-  - 3순위: 🌐 **[방문 기록 목록]**: `🌐 [방문 기록] 제목 - URL` + `📅 N시간/일 전 방문` (최대 3개)
-  - 전체 항목 수에 맞춰 스크롤바(`overflow-y: hidden`) 없이 딱 들어맞게 HWND 동적 확장.
+- **자동 방문 기록 수집 (Automatic Tracking)**:
+  - 탭 로드 완료 및 이동 시 `trackHistoryVisit` 호출하여 방문한 웹페이지 URL, 제목, 타임스탬프 자동 수집.
+  - 동일 URL 방문 시 타임스탬프 최신화 및 방문 횟수 증가 (Deduplication).
+  - 로컬/내부 URL 제외 및 최대 1,000개 최신 기록 순환 관리.
+- **`history.json` 영속화**:
+  - `GetHistoryFilePath` 헬퍼 및 `load-history` / `save-history?data=BASE64` IPC 핸들러 구축.
+- **Smart Omnibox 그룹화 통합 렌더링**:
+  - 주소창 키워드 입력 시 북마크(상단 최대 3개) ➔ 방문 기록(중하단 최대 3개) ➔ 구글 검색(최하단) 순으로 레이어 그룹화 노출.
+  - 방문 기록 행: `🌐 [방문 기록] {제목}` + `📅 N일/시간/분 전 방문` + `🔗 {URL}` (2행 콤팩트 카드 형태).
+  - 방향키(↑/↓) 및 Enter 키로 북마크, 방문 기록, 구글 검색 간 연속 이동 및 접속 보장.
 
 ---
 
@@ -102,12 +103,12 @@
 
 | 구분 | 파일 경로 | 주요 변경 내용 |
 | :--- | :--- | :--- |
-| **C Backend** | [simple_handler.c](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_handler.c) | `ResolveUIFilePath` 동적 경로 탐색, `lite://favorites` 커스텀 스키마 핸들러, V2 IPC 연동, 디폴트 URL 변경 |
+| **C Backend** | [simple_handler.c](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_handler.c) | `ResolveUIFilePath` 동적 경로 탐색, `lite://favorites` 커스텀 스키마 핸들러, V2 북마크 & History IPC 연동, 디폴트 URL 변경 |
 | **C Backend** | [simple_app.c](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_app.c) | `is_ui_expanded` Z-Order 팝업 레이아웃 처리, 스타트업 디폴트 URL `lite://favorites` 설정 |
 | **C Backend** | [browser_context.h](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/browser_context.h) | `browser_window_t` 구조체에 `is_ui_expanded`, `ui_expanded_height` 필드 추가 |
 | **UI Main** | [ui/index.html](file:///c:/projects/lite_browser/ui/index.html) | 별 아이콘 버튼, Smart Omnibox 드롭다운 컨테이너 배치 |
-| **UI Main** | [ui/style.css](file:///c:/projects/lite_browser/ui/style.css) | Omnibox 드롭다운, Popover 카드, 태그 칩 스타일링 |
-| **UI Main** | [ui/app.js](file:///c:/projects/lite_browser/ui/app.js) | 원클릭 토글(추가/제거), Smart Omnibox 실시간 엔진, `lite://favorites` 주소창 표시 |
+| **UI Main** | [ui/style.css](file:///c:/projects/lite_browser/ui/style.css) | Omnibox 드롭다운, 3행 카드리스트, 방문 기록 뱃지/URL 스타일링 |
+| **UI Main** | [ui/app.js](file:///c:/projects/lite_browser/ui/app.js) | 원클릭 토글(추가/제거), History 자동 트래킹, Smart Omnibox 통합 그룹화 검색 엔진 |
 | **UI Extractor** | [ui/extractor.js](file:///c:/projects/lite_browser/ui/extractor.js) (신규) | DOM 파싱, OG 썸네일/요약, 유입어, TF-IDF 태그, 앵커 자동 수집기 |
 | **UI Dashboard**| [ui/manager.html](file:///c:/projects/lite_browser/ui/manager.html) (신규) | `lite://favorites` 대시보드 마크업 구조 |
 | **UI Dashboard**| [ui/manager.css](file:///c:/projects/lite_browser/ui/manager.css) (신규) | 대시보드 사이드바, 카드 그리드, 날짜 슬라이더 디자인 시스템 |
@@ -121,3 +122,6 @@
 2. **원클릭 토글 검증**: 미등록 페이지 별 클릭 시 `★` 추가, 등록 페이지 별 클릭 시 `☆` 제거 확인.
 3. **`lite://favorites` 및 경로 동적 해결 검증**: 설치 폴더 위치와 무관하게 `GetModuleFileNameA` 기반 동적 탐색으로 대시보드 정상 접속 확인.
 4. **시동 디폴트 URL 검증**: 브라우저 최초 시동, `Ctrl+T`, `Ctrl+N` 실행 시 `lite://favorites` 관리자 대시보드가 디폴트 노출됨 확인.
+5. **방문 기록 수집 및 Omnibox 연동 검증**:
+   - 웹사이트 방문 시 `.lite-browser/history.json` 자동 수집 및 중복 처리 확인.
+   - 주소창 검색 시 북마크(상단) ➔ 방문 기록(중하단) ➔ 구글 검색(최하단) 구별 렌더링 및 키보드/엔터 이동 검증 완료.
