@@ -69,9 +69,6 @@ let currentTitle = '';
 
 function requestLoadBookmarks() {
   window.location.href = 'http://ui-action/load-bookmarks';
-}
-
-function requestLoadHistory() {
   window.location.href = 'http://ui-action/load-history';
 }
 
@@ -90,8 +87,8 @@ window.loadBookmarksDataB64 = function(b64Str) {
 window.loadHistoryDataB64 = function(b64Str) {
   try {
     const jsonStr = decodeURIComponent(escape(atob(b64Str)));
-    historyData = JSON.parse(jsonStr);
-    if (!historyData.history) historyData.history = [];
+    const payload = JSON.parse(jsonStr);
+    historyData.history = payload.history || [];
   } catch (e) {
     console.error("Failed to parse history data:", e);
   }
@@ -117,35 +114,33 @@ function saveHistoryToBackend() {
   }
 }
 
-function trackHistoryVisit(url, title) {
-  if (!url || typeof url !== 'string') return;
-  if (url.indexOf('ui/') !== -1 || url.indexOf('ui-action') !== -1 || url.indexOf('lite://') !== -1 || url.indexOf('edge://') !== -1 || url.indexOf('about:blank') !== -1 || url.startsWith('file://')) {
-    return;
-  }
+function addHistoryEntry(url, title) {
+  if (!url || !/^https?:\/\//i.test(url)) return;
+  if (url.includes('ui-action') || url.includes('lite-browser') || url.includes('lite://') || url.includes('ui/')) return;
 
-  const existingIdx = historyData.history.findIndex(h => h.url === url);
+  const now = Date.now();
+  const entryTitle = (title && title !== url) ? title : url;
+  const existingIdx = (historyData.history || []).findIndex(h => h.url === url);
+
   if (existingIdx >= 0) {
-    const existing = historyData.history[existingIdx];
-    existing.visitedAt = Date.now();
-    if (title && title !== '새 탭' && title !== url) {
-      existing.title = title;
+    // Option A: Update timestamp and title for existing URL
+    historyData.history[existingIdx].visitedAt = now;
+    if (title && title !== url) {
+      historyData.history[existingIdx].title = title;
     }
-    existing.visitCount = (existing.visitCount || 1) + 1;
-    historyData.history.splice(existingIdx, 1);
-    historyData.history.unshift(existing);
+    const updated = historyData.history.splice(existingIdx, 1)[0];
+    historyData.history.unshift(updated);
   } else {
-    const newItem = {
-      id: 'hist_' + Date.now(),
+    historyData.history.unshift({
+      id: 'hist_' + now,
       url: url,
-      title: (title && title !== '새 탭') ? title : url,
-      visitedAt: Date.now(),
-      visitCount: 1
-    };
-    historyData.history.unshift(newItem);
+      title: entryTitle,
+      visitedAt: now
+    });
   }
 
-  if (historyData.history.length > 1000) {
-    historyData.history = historyData.history.slice(0, 1000);
+  if (historyData.history.length > 500) {
+    historyData.history = historyData.history.slice(0, 500);
   }
 
   saveHistoryToBackend();
@@ -182,16 +177,14 @@ window.updateAddress = function(url) {
     }
   }
   updateStarIcon();
+  if (url && /^https?:\/\//i.test(url)) {
+    addHistoryEntry(url, currentTitle);
+  }
 };
 
 window.updateTabsList = function(tabs, activeId) {
   const container = document.getElementById('tabs');
   if (!container) return;
-
-  const activeTab = tabs.find(t => t.id === activeId);
-  if (activeTab && activeTab.url && activeTab.title && activeTab.title !== '새 탭') {
-    trackHistoryVisit(activeTab.url, activeTab.title);
-  }
 
   container.innerHTML = '';
   tabs.forEach(tab => {
@@ -675,13 +668,11 @@ function openBookmarkDashboard() {
 // ==================== SMART OMNIBOX ENGINE ====================
 
 let omniSelectedIndex = -1;
-let omniBookmarkResults = [];
+let omniResults = [];
 let omniHistoryResults = [];
 let omniRawQuery = '';
 
 document.addEventListener('DOMContentLoaded', () => {
-  requestLoadBookmarks();
-  requestLoadHistory();
   const addressBar = document.getElementById('address-bar');
   if (addressBar) {
     addressBar.addEventListener('input', handleOmniboxInput);
@@ -694,20 +685,19 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
-function formatTimeAgo(timestamp, isBookmark = true) {
-  const suffix = isBookmark ? '저장' : '방문';
-  if (!timestamp) return `최근 ${suffix}`;
+function formatTimeAgo(timestamp) {
+  if (!timestamp) return '최근 저장';
   const diffMs = Date.now() - timestamp;
   const diffMin = Math.floor(diffMs / (1000 * 60));
   const diffHour = Math.floor(diffMs / (1000 * 60 * 60));
   const diffDay = Math.floor(diffMs / (1000 * 60 * 60 * 24));
 
-  if (diffMin < 1) return `방금 전 ${suffix}`;
-  if (diffMin < 60) return `${diffMin}분 전 ${suffix}`;
-  if (diffHour < 24) return `${diffHour}시간 전 ${suffix}`;
-  if (diffDay < 30) return `${diffDay}일 전 ${suffix}`;
+  if (diffMin < 1) return '방금 전';
+  if (diffMin < 60) return `${diffMin}분 전`;
+  if (diffHour < 24) return `${diffHour}시간 전`;
+  if (diffDay < 30) return `${diffDay}일 전`;
   const d = new Date(timestamp);
-  return `${d.getFullYear()}.${d.getMonth() + 1}.${d.getDate()} ${suffix}`;
+  return `${d.getFullYear()}.${d.getMonth() + 1}.${d.getDate()}`;
 }
 
 function handleOmniboxInput(e) {
@@ -723,14 +713,15 @@ function handleOmniboxInput(e) {
     return;
   }
 
-  // Multi-dimensional matching for Bookmarks
+  // 1. Multi-dimensional matching for Bookmarks
   if (query.startsWith('#')) {
     const tagName = query.slice(1);
-    omniBookmarkResults = bookmarksData.bookmarks.filter(b => 
+    omniResults = bookmarksData.bookmarks.filter(b => 
       (b.extractedTags || []).some(t => t.toLowerCase().includes(tagName))
     );
+    omniHistoryResults = [];
   } else {
-    omniBookmarkResults = bookmarksData.bookmarks.filter(b => {
+    omniResults = bookmarksData.bookmarks.filter(b => {
       const matchTitle = (b.title || '').toLowerCase().includes(query);
       const matchUrl = (b.url || '').toLowerCase().includes(query);
       const matchSnippet = (b.textSnippet || '').toLowerCase().includes(query);
@@ -738,16 +729,17 @@ function handleOmniboxInput(e) {
       const matchTags = (b.extractedTags || []).some(t => t.toLowerCase().includes(query));
       return matchTitle || matchUrl || matchSnippet || matchIntent || matchTags;
     });
+
+    // 2. Matching for Browsing History
+    omniHistoryResults = (historyData.history || []).filter(h => {
+      const matchTitle = (h.title || '').toLowerCase().includes(query);
+      const matchUrl = (h.url || '').toLowerCase().includes(query);
+      return matchTitle || matchUrl;
+    });
   }
-  omniBookmarkResults = omniBookmarkResults.slice(0, 3);
 
-  // Search History
-  omniHistoryResults = historyData.history.filter(h => {
-    const matchTitle = (h.title || '').toLowerCase().includes(query);
-    const matchUrl = (h.url || '').toLowerCase().includes(query);
-    return matchTitle || matchUrl;
-  }).slice(0, 3);
-
+  omniResults = omniResults.slice(0, 3);
+  omniHistoryResults = omniHistoryResults.slice(0, 3);
   omniSelectedIndex = -1;
   renderOmniboxDropdown();
   dropdown.classList.remove('hide');
@@ -760,7 +752,8 @@ function updateOmniboxHeight() {
 
   requestAnimationFrame(() => {
     const dropHeight = dropdown.offsetHeight || dropdown.scrollHeight || 0;
-    const targetHeight = Math.min(540, Math.max(90, 72 + dropHeight + 16));
+    // 툴바 높이(72px) + 오프셋 + 실제 드롭다운 높이 + 여백(16px) -> 스크롤 없이 가변 높이 확장
+    const targetHeight = Math.min(650, Math.max(90, 72 + dropHeight + 16));
     expandUI(targetHeight);
   });
 }
@@ -772,18 +765,18 @@ function renderOmniboxDropdown() {
   dropdown.innerHTML = '';
   let globalIndex = 0;
 
-  // 1. Render matched bookmarks
-  omniBookmarkResults.forEach((bm) => {
-    const currentIndex = globalIndex++;
+  // 1. Render matched Bookmarks
+  omniResults.forEach((bm) => {
+    const itemIndex = globalIndex++;
     const item = document.createElement('div');
-    item.className = 'omni-item' + (currentIndex === omniSelectedIndex ? ' selected' : '');
+    item.className = 'omni-item' + (itemIndex === omniSelectedIndex ? ' selected' : '');
     item.onclick = () => {
       window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(bm.url);
       closeOmniboxDropdown();
     };
 
     const tagsHtml = (bm.extractedTags || []).map(t => `<span class="omni-tag-chip">#${t}</span>`).join(' ');
-    const timeAgoStr = formatTimeAgo(bm.context?.createdAt, true);
+    const timeAgoStr = formatTimeAgo(bm.context?.createdAt);
     const searchIntent = bm.context?.searchIntent;
     const snippetText = bm.textSnippet;
 
@@ -794,7 +787,7 @@ function renderOmniboxDropdown() {
           <span class="omni-badge">북마크</span>
           <span class="omni-title-text">${bm.title}</span>
         </div>
-        <div class="omni-date">📅 ${timeAgoStr}</div>
+        <div class="omni-date">📅 ${timeAgoStr} 저장</div>
       </div>
       <div class="omni-row-meta">
         ${tagsHtml ? `<span class="omni-tags-list">🏷️ ${tagsHtml}</span>` : ''}
@@ -805,39 +798,11 @@ function renderOmniboxDropdown() {
     dropdown.appendChild(item);
   });
 
-  // 2. Render matched history items
-  omniHistoryResults.forEach((hist) => {
-    const currentIndex = globalIndex++;
-    const item = document.createElement('div');
-    item.className = 'omni-item omni-history-item' + (currentIndex === omniSelectedIndex ? ' selected' : '');
-    item.onclick = () => {
-      window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(hist.url);
-      closeOmniboxDropdown();
-    };
-
-    const timeAgoStr = formatTimeAgo(hist.visitedAt, false);
-
-    item.innerHTML = `
-      <div class="omni-row-top">
-        <div class="omni-title-group">
-          <span class="omni-icon">🌐</span>
-          <span class="omni-badge omni-history-badge">방문 기록</span>
-          <span class="omni-title-text">${hist.title || hist.url}</span>
-        </div>
-        <div class="omni-date">📅 ${timeAgoStr}</div>
-      </div>
-      <div class="omni-row-meta">
-        <span class="omni-history-url">🔗 ${hist.url}</span>
-      </div>
-    `;
-    dropdown.appendChild(item);
-  });
-
-  // 3. Render Google Search item at bottom
+  // 2. Render Google Search item at middle
   if (omniRawQuery) {
-    const currentIndex = globalIndex++;
+    const googleItemIndex = globalIndex++;
     const googleItem = document.createElement('div');
-    googleItem.className = 'omni-google-item' + (currentIndex === omniSelectedIndex ? ' selected' : '');
+    googleItem.className = 'omni-google-item' + (omniSelectedIndex === googleItemIndex ? ' selected' : '');
     googleItem.onclick = () => {
       const searchUrl = 'https://www.google.com/search?q=' + encodeURIComponent(omniRawQuery);
       window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(searchUrl);
@@ -850,6 +815,31 @@ function renderOmniboxDropdown() {
     dropdown.appendChild(googleItem);
   }
 
+  // 3. Render matched Browsing History items (Option B layout)
+  omniHistoryResults.forEach((hist) => {
+    const histItemIndex = globalIndex++;
+    const histItem = document.createElement('div');
+    histItem.className = 'omni-history-item' + (histItemIndex === omniSelectedIndex ? ' selected' : '');
+    histItem.onclick = () => {
+      window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(hist.url);
+      closeOmniboxDropdown();
+    };
+
+    const timeAgoStr = formatTimeAgo(hist.visitedAt);
+
+    histItem.innerHTML = `
+      <div class="omni-history-content">
+        <span class="omni-icon">🌐</span>
+        <span class="omni-history-badge">[방문 기록]</span>
+        <span class="omni-history-title">${hist.title || hist.url}</span>
+        <span class="omni-history-sep">-</span>
+        <span class="omni-history-url">${hist.url}</span>
+      </div>
+      <div class="omni-history-date">📅 ${timeAgoStr} 방문</div>
+    `;
+    dropdown.appendChild(histItem);
+  });
+
   updateOmniboxHeight();
 }
 
@@ -857,7 +847,9 @@ function handleOmniboxKeydown(e) {
   const dropdown = document.getElementById('omnibox-dropdown');
   if (!dropdown || dropdown.classList.contains('hide')) return;
 
-  const totalCount = omniBookmarkResults.length + omniHistoryResults.length + (omniRawQuery ? 1 : 0);
+  const bookmarkCount = omniResults.length;
+  const hasGoogle = omniRawQuery ? 1 : 0;
+  const totalCount = bookmarkCount + hasGoogle + omniHistoryResults.length;
   if (totalCount === 0) return;
 
   if (e.key === 'ArrowDown') {
@@ -870,19 +862,20 @@ function handleOmniboxKeydown(e) {
     renderOmniboxDropdown();
   } else if (e.key === 'Enter' && omniSelectedIndex >= 0) {
     e.preventDefault();
-    const bookmarkCount = omniBookmarkResults.length;
-    const historyCount = omniHistoryResults.length;
+    const googleIndex = bookmarkCount;
 
     if (omniSelectedIndex < bookmarkCount) {
-      const targetUrl = omniBookmarkResults[omniSelectedIndex].url;
+      const targetUrl = omniResults[omniSelectedIndex].url;
       window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(targetUrl);
-    } else if (omniSelectedIndex < bookmarkCount + historyCount) {
-      const histIdx = omniSelectedIndex - bookmarkCount;
-      const targetUrl = omniHistoryResults[histIdx].url;
-      window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(targetUrl);
-    } else if (omniSelectedIndex === bookmarkCount + historyCount && omniRawQuery) {
+    } else if (hasGoogle && omniSelectedIndex === googleIndex) {
       const searchUrl = 'https://www.google.com/search?q=' + encodeURIComponent(omniRawQuery);
       window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(searchUrl);
+    } else {
+      const histIdx = omniSelectedIndex - bookmarkCount - hasGoogle;
+      if (histIdx >= 0 && histIdx < omniHistoryResults.length) {
+        const targetUrl = omniHistoryResults[histIdx].url;
+        window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(targetUrl);
+      }
     }
     closeOmniboxDropdown();
   } else if (e.key === 'Escape') {
