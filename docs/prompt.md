@@ -156,11 +156,10 @@ LLM 서비스(Gemini, ChatGPT, Claude 등)의 입력창에 에디터에서 작�
 
 # Windows OS 기본 설정 언어 자동 감지 및 CEF Locale/Accept-Language 설정
 
-### 1. OS 기본 언어 동적 감지 (`ConfigureSystemLocale`)
-- **원인 분석**: 기존에는 CEF 초기화 시 `settings.locale` 및 `settings.accept_language_list`가 빈 값으로 전달되어 Chromium 기본값인 `en-US`로 동작했습니다. 이로 인해 한국어 Windows 환경에서도 대한항공 등 사이트 최초 접속 시 영어 페이지가 로드되고 패스워드 매니저/내장 Chromium UI가 영어로 노출되었습니다.
-- **해결 방안**: `cefsimple_win.c` 에서 Win32 API (`GetUserDefaultLocaleName`, `GetUserPreferredUILanguages`)를 사용해 시스템 기본 언어를 동적으로 탐색합니다.
-  - **`settings.locale`**: 사용자 OS UI 기본 언어(예: `ko-KR`)를 지정하여 내장 Chrome 패스워드 매니저, 다이얼로그, 내부 UI 및 `navigator.language`를 시스템 기본 언어로 설정했습니다.
-  - **`settings.accept_language_list`**: OS 선호 언어 순서(예: `ko-KR,ko,en-US,en`)를 추출하여 HTTP 요청 헤더 `Accept-Language`로 전달함으로써 접속하는 웹 페이지들이 기본 한국어로 적절히 로딩되도록 처리했습니다.
-  - **`--lang` 커맨드라인 스위치 전달**: `simple_app.c` 의 `simple_app_on_before_command_line_processing` 수신기에서 `--lang` 스위치가 없는 경우 OS 기본 locale(예: `ko-KR`)을 자동 추가하여 렌더러 및 모든 서브프로세스 렌더링 언어가 완벽하게 동기화되도록 보장했습니다.
+### 1. OS 기본 언어 동적 감지 및 적용
+- **원인 분석**: CEF 초기화 시 `settings.locale` 및 `settings.accept_language_list`가 설정되어 있지 않아 Chromium 기본값인 `en-US`로 작동했습니다. 이로 인해 대한항공 등 다국어 지원 웹사이트 접속 시 영어 메인 페이지가 노출되고 패스워드 매니저/내장 UI가 영어로 설정되었습니다.
+- **해결 방안**: `cefsimple_win.c`에서 Win32 API (`GetUserDefaultLocaleName`)를 사용하여 시스템의 기본 사용자 언어(예: `ko-KR`)를 동적으로 추출합니다.
+  - **`settings.locale`**: OS UI 기본 언어(예: `ko-KR`)를 CEF 전역 locale로 지정하여 패스워드 매니저, 컨텍스트 메뉴, DevTools 등 모든 CEF 내장 UI의 언어를 일괄 적용했습니다.
+  - **`settings.accept_language_list`**: 언어 우선순위 목록(예: `ko-KR,ko,en-US,en`)을 지정하여 HTTP Request Header의 `Accept-Language` 및 JS `navigator.language` / `navigator.languages`에 반영했습니다.
 
 
