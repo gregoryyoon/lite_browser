@@ -1189,7 +1189,8 @@ int CEF_CALLBACK request_handler_on_before_browse(
               if (win_ctx->ui_hwnd) {
                 RECT rect;
                 GetClientRect(win_ctx->main_hwnd, &rect);
-                SetWindowPos(win_ctx->ui_hwnd, HWND_TOP, 0, 0, rect.right, win_ctx->ui_expanded_height, SWP_NOACTIVATE);
+                SetWindowPos(win_ctx->ui_hwnd, HWND_TOP, 0, 0, rect.right, win_ctx->ui_expanded_height, SWP_SHOWWINDOW);
+                BringWindowToTop(win_ctx->ui_hwnd);
               }
             }
           }
@@ -1200,7 +1201,8 @@ int CEF_CALLBACK request_handler_on_before_browse(
               RECT rect;
               GetClientRect(win_ctx->main_hwnd, &rect);
               int default_h = GetUIHeightForWindow(win_ctx->main_hwnd);
-              SetWindowPos(win_ctx->ui_hwnd, HWND_TOP, 0, 0, rect.right, default_h, SWP_NOACTIVATE);
+              SetWindowPos(win_ctx->ui_hwnd, HWND_TOP, 0, 0, rect.right, default_h, SWP_SHOWWINDOW);
+              BringWindowToTop(win_ctx->ui_hwnd);
             }
           }
         } else if (strcmp(action, "load-bookmarks") == 0) {

@@ -291,23 +291,6 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
     int content_y = ui_height + 1;
     int content_h = height - content_y - 1;
 
-    if (win_ctx->ui_browser)
-    {
-      cef_browser_host_t *host = win_ctx->ui_browser->get_host(win_ctx->ui_browser);
-      if (host)
-      {
-        HWND ui_hwnd = host->get_window_handle(host);
-        if (ui_hwnd)
-        {
-          int target_ui_h = (win_ctx->is_ui_expanded && win_ctx->ui_expanded_height > 0) 
-                              ? win_ctx->ui_expanded_height 
-                              : ui_height;
-          SetWindowPos(ui_hwnd, HWND_TOP, 0, 0, width, target_ui_h, SWP_NOACTIVATE);
-        }
-        host->base.release(&host->base);
-      }
-    }
-
     int content_w = width - 2;
     int editor_w = 0;
 
@@ -338,6 +321,25 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
           }
           host->base.release(&host->base);
         }
+      }
+    }
+
+    // Position UI browser LAST and bring it to TOP so it sits above content_hwnd
+    if (win_ctx->ui_browser)
+    {
+      cef_browser_host_t *host = win_ctx->ui_browser->get_host(win_ctx->ui_browser);
+      if (host)
+      {
+        HWND ui_hwnd = host->get_window_handle(host);
+        if (ui_hwnd)
+        {
+          int target_ui_h = (win_ctx->is_ui_expanded && win_ctx->ui_expanded_height > 0) 
+                              ? win_ctx->ui_expanded_height 
+                              : ui_height;
+          SetWindowPos(ui_hwnd, HWND_TOP, 0, 0, width, target_ui_h, SWP_SHOWWINDOW);
+          BringWindowToTop(ui_hwnd);
+        }
+        host->base.release(&host->base);
       }
     }
 
