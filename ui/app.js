@@ -29,6 +29,12 @@ function detachTab(id) {
 
 function handleKey(event) {
   if (event.key === 'Enter') {
+    const dropdown = document.getElementById('omnibox-dropdown');
+    const isDropdownOpen = dropdown && !dropdown.classList.contains('hide');
+    if (isDropdownOpen && omniSelectedIndex >= 0) {
+      return;
+    }
+
     let url = event.target.value.trim();
     if (url.length === 0) return;
     
