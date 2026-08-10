@@ -111,7 +111,9 @@ function switchLayout(layout) {
 
 function getFilteredBookmarks() {
   const now = Date.now();
-  return managerBookmarks.filter(bm => {
+  const thirtyDaysAgo = now - (30 * 24 * 60 * 60 * 1000);
+
+  const filtered = managerBookmarks.filter(bm => {
     // Quick filter
     if (currentFilter === 'recent') {
       if ((now - (bm.context?.createdAt || 0)) > 3 * 24 * 60 * 60 * 1000) return false;
@@ -148,6 +150,20 @@ function getFilteredBookmarks() {
 
     return true;
   });
+
+  // Priority 1: 30-day visit count desc, Priority 2: Creation time desc
+  filtered.sort((a, b) => {
+    const visitsA = (a.visitTimestamps || []).filter(t => t >= thirtyDaysAgo).length;
+    const visitsB = (b.visitTimestamps || []).filter(t => t >= thirtyDaysAgo).length;
+    if (visitsB !== visitsA) {
+      return visitsB - visitsA;
+    }
+    const timeA = a.context?.createdAt || a.createdAt || 0;
+    const timeB = b.context?.createdAt || b.createdAt || 0;
+    return timeB - timeA;
+  });
+
+  return filtered;
 }
 
 function renderMainView() {

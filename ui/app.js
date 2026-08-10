@@ -123,15 +123,22 @@ function addHistoryEntry(url, title) {
   if (url.includes('ui-action') || url.includes('lite-browser') || url.includes('lite://') || url.includes('ui/')) return;
 
   const now = Date.now();
+  const thirtyDaysAgo = now - (30 * 24 * 60 * 60 * 1000);
   const entryTitle = (title && title !== url) ? title : url;
   const existingIdx = (historyData.history || []).findIndex(h => h.url === url);
 
   if (existingIdx >= 0) {
-    // Option A: Update timestamp and title for existing URL
-    historyData.history[existingIdx].visitedAt = now;
+    const item = historyData.history[existingIdx];
+    item.visitedAt = now;
     if (title && title !== url) {
-      historyData.history[existingIdx].title = title;
+      item.title = title;
     }
+    if (!item.visitTimestamps || !Array.isArray(item.visitTimestamps)) {
+      item.visitTimestamps = [item.visitedAt || now];
+    }
+    item.visitTimestamps = item.visitTimestamps.filter(t => t >= thirtyDaysAgo);
+    item.visitTimestamps.push(now);
+
     const updated = historyData.history.splice(existingIdx, 1)[0];
     historyData.history.unshift(updated);
   } else {
@@ -139,7 +146,8 @@ function addHistoryEntry(url, title) {
       id: 'hist_' + now,
       url: url,
       title: entryTitle,
-      visitedAt: now
+      visitedAt: now,
+      visitTimestamps: [now]
     });
   }
 
@@ -148,6 +156,19 @@ function addHistoryEntry(url, title) {
   }
 
   saveHistoryToBackend();
+
+  // If this URL is a bookmark, update bookmark visit timestamps as well
+  if (bookmarksData && bookmarksData.bookmarks) {
+    const bm = bookmarksData.bookmarks.find(b => b.url === url);
+    if (bm) {
+      if (!bm.visitTimestamps || !Array.isArray(bm.visitTimestamps)) {
+        bm.visitTimestamps = [];
+      }
+      bm.visitTimestamps = bm.visitTimestamps.filter(t => t >= thirtyDaysAgo);
+      bm.visitTimestamps.push(now);
+      saveBookmarksToBackend();
+    }
+  }
 }
 
 function findCurrentBookmark() {
@@ -741,6 +762,33 @@ function handleOmniboxInput(e) {
       return matchTitle || matchUrl;
     });
   }
+
+  // Sort Bookmarks: Priority 1 (30-day visit count desc), Priority 2 (createdAt desc)
+  const now = Date.now();
+  const thirtyDaysAgo = now - (30 * 24 * 60 * 60 * 1000);
+
+  omniResults.sort((a, b) => {
+    const visitsA = (a.visitTimestamps || []).filter(t => t >= thirtyDaysAgo).length;
+    const visitsB = (b.visitTimestamps || []).filter(t => t >= thirtyDaysAgo).length;
+    if (visitsB !== visitsA) {
+      return visitsB - visitsA;
+    }
+    const timeA = a.context?.createdAt || a.createdAt || 0;
+    const timeB = b.context?.createdAt || b.createdAt || 0;
+    return timeB - timeA;
+  });
+
+  // Sort History: Priority 1 (30-day visit count desc), Priority 2 (visitedAt desc)
+  omniHistoryResults.sort((a, b) => {
+    const visitsA = (a.visitTimestamps || []).filter(t => t >= thirtyDaysAgo).length;
+    const visitsB = (b.visitTimestamps || []).filter(t => t >= thirtyDaysAgo).length;
+    if (visitsB !== visitsA) {
+      return visitsB - visitsA;
+    }
+    const timeA = a.visitedAt || 0;
+    const timeB = b.visitedAt || 0;
+    return timeB - timeA;
+  });
 
   omniResults = omniResults.slice(0, 3);
   omniHistoryResults = omniHistoryResults.slice(0, 3);

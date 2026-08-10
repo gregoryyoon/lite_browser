@@ -101,11 +101,15 @@ LiteBrowser 실행 시 Windows OS의 사용자 기본 로캘(UI Language)을 자
 - **소스**: [`ui/app.js`](file:///c:/projects/lite_browser/ui/app.js), [`ui/index.html`](file:///c:/projects/lite_browser/ui/index.html), [`ui/style.css`](file:///c:/projects/lite_browser/ui/style.css)
 - **다차원 검색 & `#` 태그 숏컷**: URL, 제목, 스니펫, 유입 검색어, 태그까지 통합 탐색 및 `#` 키워드 드롭다운 필터링.
 - **동적 HWND 높이 계산 & 3행 인라인 카드**: 드롭다운 높이를 측정하여 네이티브 UI HWND를 동적 확장(`expandUI`)하고, 양옆 영역은 `transparent` 처리하여 웹 화면을 보호.
-- **통합 검색 결과 순서**: 주소창 입력 시 북마크(상단 3개) ➔ 방문 기록(중하단 3개) ➔ 구글 검색(최하단) 순으로 인라인 카드 통합 렌더링.
+- **최근 30일 방문 빈도 & 최신성 2단계 정렬 알고리즘**:
+  - **북마크**: 1순위(최근 30일간 다빈도 방문) ➔ 2순위(최근 추가된 북마크 생성일)
+  - **방문 기록**: 1순위(최근 30일간 다빈도 접속) ➔ 2순위(최근 접속 시각)
+- **통합 검색 결과 순서**: 주소창 입력 시 북마크(상단 3개) ➔ 구글 검색(중간) ➔ 방문 기록(하단 3개) 순으로 인라인 카드 통합 렌더링.
 
 ### 3.4 북마크 전용 대시보드 (`lite://favorites`)
 - **소스**: [`ui/manager.html`](file:///c:/projects/lite_browser/ui/manager.html), [`ui/manager.js`](file:///c:/projects/lite_browser/ui/manager.js)
 - **기능**: 브라우저 디폴트 스타트업 URL, Ctrl+Shift+O 단축키 연결. 사이드바 태그 리스트, Temporal Slider 타임라인 필터, Card/List 뷰 스위처 제공.
+- **대시보드 정렬 알고리즘**: 전체 북마크 목록을 1순위(최근 30일간 다빈도 방문) ➔ 2순위(최근 추가된 북마크 생성일) 순으로 정렬하여 그리드/리스트 뷰에 우선 렌더링.
 
 ### 3.5 동적 설치 경로 해결 (`ResolveUIFilePath`)
 - **소스**: [`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_handler.c)
