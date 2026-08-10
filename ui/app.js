@@ -816,6 +816,19 @@ function updateOmniboxHeight() {
   });
 }
 
+function navigateToOmniboxUrl(targetUrl) {
+  if (!targetUrl) return;
+  const dropdown = document.getElementById('omnibox-dropdown');
+  if (dropdown) dropdown.classList.add('hide');
+
+  const addressBar = document.getElementById('address-bar');
+  if (addressBar && document.activeElement === addressBar) {
+    addressBar.blur();
+  }
+
+  window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(targetUrl);
+}
+
 function renderOmniboxDropdown() {
   const dropdown = document.getElementById('omnibox-dropdown');
   if (!dropdown) return;
@@ -828,10 +841,16 @@ function renderOmniboxDropdown() {
     const itemIndex = globalIndex++;
     const item = document.createElement('div');
     item.className = 'omni-item' + (itemIndex === omniSelectedIndex ? ' selected' : '');
-    item.onclick = () => {
-      window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(bm.url);
-      closeOmniboxDropdown();
+    
+    const handleBookmarkSelect = (e) => {
+      if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      navigateToOmniboxUrl(bm.url);
     };
+    item.onmousedown = handleBookmarkSelect;
+    item.onclick = handleBookmarkSelect;
 
     const tagsHtml = (bm.extractedTags || []).map(t => `<span class="omni-tag-chip">#${t}</span>`).join(' ');
     const timeAgoStr = formatTimeAgo(bm.context?.createdAt);
@@ -861,11 +880,18 @@ function renderOmniboxDropdown() {
     const googleItemIndex = globalIndex++;
     const googleItem = document.createElement('div');
     googleItem.className = 'omni-google-item' + (omniSelectedIndex === googleItemIndex ? ' selected' : '');
-    googleItem.onclick = () => {
+    
+    const handleGoogleSelect = (e) => {
+      if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
       const searchUrl = 'https://www.google.com/search?q=' + encodeURIComponent(omniRawQuery);
-      window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(searchUrl);
-      closeOmniboxDropdown();
+      navigateToOmniboxUrl(searchUrl);
     };
+    googleItem.onmousedown = handleGoogleSelect;
+    googleItem.onclick = handleGoogleSelect;
+
     googleItem.innerHTML = `
       <span class="omni-icon">🔍</span>
       <span>구글 검색: "${omniRawQuery}"</span>
@@ -878,10 +904,16 @@ function renderOmniboxDropdown() {
     const histItemIndex = globalIndex++;
     const histItem = document.createElement('div');
     histItem.className = 'omni-history-item' + (histItemIndex === omniSelectedIndex ? ' selected' : '');
-    histItem.onclick = () => {
-      window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(hist.url);
-      closeOmniboxDropdown();
+    
+    const handleHistorySelect = (e) => {
+      if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      navigateToOmniboxUrl(hist.url);
     };
+    histItem.onmousedown = handleHistorySelect;
+    histItem.onclick = handleHistorySelect;
 
     const timeAgoStr = formatTimeAgo(hist.visitedAt);
 
@@ -924,18 +956,17 @@ function handleOmniboxKeydown(e) {
 
     if (omniSelectedIndex < bookmarkCount) {
       const targetUrl = omniResults[omniSelectedIndex].url;
-      window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(targetUrl);
+      navigateToOmniboxUrl(targetUrl);
     } else if (hasGoogle && omniSelectedIndex === googleIndex) {
       const searchUrl = 'https://www.google.com/search?q=' + encodeURIComponent(omniRawQuery);
-      window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(searchUrl);
+      navigateToOmniboxUrl(searchUrl);
     } else {
       const histIdx = omniSelectedIndex - bookmarkCount - hasGoogle;
       if (histIdx >= 0 && histIdx < omniHistoryResults.length) {
         const targetUrl = omniHistoryResults[histIdx].url;
-        window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(targetUrl);
+        navigateToOmniboxUrl(targetUrl);
       }
     }
-    closeOmniboxDropdown();
   } else if (e.key === 'Escape') {
     closeOmniboxDropdown();
   }

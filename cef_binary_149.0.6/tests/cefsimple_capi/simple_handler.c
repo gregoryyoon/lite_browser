@@ -1136,6 +1136,15 @@ int CEF_CALLBACK request_handler_on_before_browse(
         } else if (strcmp(action, "window-close") == 0) {
           PostMessage(win_ctx->main_hwnd, WM_CLOSE, 0, 0);
         } else if (strncmp(action, "load?url=", 9) == 0) {
+          if (win_ctx) {
+            win_ctx->is_ui_expanded = 0;
+            if (win_ctx->ui_hwnd) {
+              RECT rect;
+              GetClientRect(win_ctx->main_hwnd, &rect);
+              int default_h = GetUIHeightForWindow(win_ctx->main_hwnd);
+              SetWindowPos(win_ctx->ui_hwnd, HWND_TOP, 0, 0, rect.right, default_h, SWP_NOACTIVATE);
+            }
+          }
           if (cb) {
             const char *encoded_url = action + 9;
             char *decoded = (char *)malloc(strlen(encoded_url) + 1);
