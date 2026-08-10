@@ -542,7 +542,7 @@ browser_window_t* create_browser_window(const char* startup_url) {
   cef_window_info_t ui_window_info = {};
   ui_window_info.size = sizeof(cef_window_info_t);
   ui_window_info.style =
-      WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
+      WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN;
   ui_window_info.parent_window = main_hwnd;
   ui_window_info.bounds.x = 0;
   ui_window_info.bounds.y = 0;
@@ -672,7 +672,7 @@ browser_window_t* create_browser_window_for_detached(cef_browser_t* detached_bro
   cef_window_info_t ui_window_info = {};
   ui_window_info.size = sizeof(cef_window_info_t);
   ui_window_info.style =
-      WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
+      WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN;
   ui_window_info.parent_window = main_hwnd;
   ui_window_info.bounds.x = 0;
   ui_window_info.bounds.y = 0;

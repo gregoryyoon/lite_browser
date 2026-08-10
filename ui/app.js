@@ -851,6 +851,11 @@ function renderOmniboxDropdown() {
     };
     item.onmousedown = handleBookmarkSelect;
     item.onclick = handleBookmarkSelect;
+    item.onmouseenter = () => {
+      omniSelectedIndex = itemIndex;
+      const allItems = dropdown.querySelectorAll('.omni-item, .omni-google-item, .omni-history-item');
+      allItems.forEach((el, idx) => el.classList.toggle('selected', idx === omniSelectedIndex));
+    };
 
     const tagsHtml = (bm.extractedTags || []).map(t => `<span class="omni-tag-chip">#${t}</span>`).join(' ');
     const timeAgoStr = formatTimeAgo(bm.context?.createdAt);
@@ -891,6 +896,11 @@ function renderOmniboxDropdown() {
     };
     googleItem.onmousedown = handleGoogleSelect;
     googleItem.onclick = handleGoogleSelect;
+    googleItem.onmouseenter = () => {
+      omniSelectedIndex = googleItemIndex;
+      const allItems = dropdown.querySelectorAll('.omni-item, .omni-google-item, .omni-history-item');
+      allItems.forEach((el, idx) => el.classList.toggle('selected', idx === omniSelectedIndex));
+    };
 
     googleItem.innerHTML = `
       <span class="omni-icon">🔍</span>
@@ -914,6 +924,11 @@ function renderOmniboxDropdown() {
     };
     histItem.onmousedown = handleHistorySelect;
     histItem.onclick = handleHistorySelect;
+    histItem.onmouseenter = () => {
+      omniSelectedIndex = histItemIndex;
+      const allItems = dropdown.querySelectorAll('.omni-item, .omni-google-item, .omni-history-item');
+      allItems.forEach((el, idx) => el.classList.toggle('selected', idx === omniSelectedIndex));
+    };
 
     const timeAgoStr = formatTimeAgo(hist.visitedAt);
 
