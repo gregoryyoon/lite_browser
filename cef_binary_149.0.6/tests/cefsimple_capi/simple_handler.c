@@ -2168,10 +2168,6 @@ int CEF_CALLBACK request_handler_on_before_browse(
       cef_string_utf8_clear(&url_utf8);
       cef_string_userfree_free(url_userfree);
 
-      browser->base.release(&browser->base);
-      frame->base.release(&frame->base);
-      request->base.release(&request->base);
-
       return 1;
     }
 
@@ -2179,11 +2175,42 @@ int CEF_CALLBACK request_handler_on_before_browse(
     cef_string_userfree_free(url_userfree);
   }
 
-  browser->base.release(&browser->base);
-  frame->base.release(&frame->base);
-  request->base.release(&request->base);
-
   return 0;
+}
+
+int CEF_CALLBACK request_handler_on_open_urlfrom_tab(
+    struct _cef_request_handler_t* self,
+    struct _cef_browser_t* browser,
+    struct _cef_frame_t* frame,
+    const cef_string_t* target_url,
+    cef_window_open_disposition_t target_disposition,
+    int user_gesture) {
+
+  simple_request_handler_t* handler = (simple_request_handler_t*)self;
+  browser_window_t *win_ctx = (handler && handler->parent) ? handler->parent->window_ctx : NULL;
+
+  cef_string_utf8_t url_utf8 = {};
+  int conv_ok = 0;
+
+  if (target_url && target_url->str && target_url->length > 0) {
+    cef_string_to_utf8(target_url->str, target_url->length, &url_utf8);
+    conv_ok = 1;
+  }
+
+  char target_url_str[1024] = {0};
+  if (conv_ok && url_utf8.str && strlen(url_utf8.str) > 0) {
+    strncpy(target_url_str, url_utf8.str, sizeof(target_url_str) - 1);
+    cef_string_utf8_clear(&url_utf8);
+  } else {
+    strcpy(target_url_str, "about:blank");
+  }
+
+  if (win_ctx && win_ctx->tab_count < MAX_TABS) {
+    CreateNewTab(win_ctx, target_url_str);
+  }
+
+  // Return 1 (true) to cancel default Chromium navigation/new window action for Ctrl+Click / Middle Click
+  return 1;
 }
 
 simple_request_handler_t *request_handler_create(simple_handler_t *parent) {
@@ -2195,6 +2222,7 @@ simple_request_handler_t *request_handler_create(simple_handler_t *parent) {
                            request_handler);
 
   handler->handler.on_before_browse = request_handler_on_before_browse;
+  handler->handler.on_open_urlfrom_tab = request_handler_on_open_urlfrom_tab;
   handler->parent = parent;
 
   atomic_store(&handler->ref_count, 1);

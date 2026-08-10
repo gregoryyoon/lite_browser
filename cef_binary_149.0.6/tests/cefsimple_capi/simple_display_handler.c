@@ -65,7 +65,6 @@ void CEF_CALLBACK display_handler_on_title_change(cef_display_handler_t* self,
   }
 
   cef_string_utf8_clear(&title_utf8);
-  browser->base.release(&browser->base);
 }
 
 void CEF_CALLBACK
@@ -105,8 +104,6 @@ display_handler_on_address_change(cef_display_handler_t* self,
   }
 
   cef_string_utf8_clear(&url_utf8);
-  browser->base.release(&browser->base);
-  frame->base.release(&frame->base);
 }
 
 simple_display_handler_t* display_handler_create(simple_handler_t* parent) {

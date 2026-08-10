@@ -81,10 +81,6 @@ void CEF_CALLBACK load_handler_on_load_error(cef_load_handler_t* self,
     cef_string_clear(&error_str);
     cef_string_clear(&mime_type);
   }
-
-  // Release all object parameters.
-  browser->base.release(&browser->base);
-  frame->base.release(&frame->base);
 }
 
 void CEF_CALLBACK
@@ -132,8 +128,6 @@ load_handler_on_loading_state_change(cef_load_handler_t* self,
       }
     }
   }
-
-  browser->base.release(&browser->base);
 }
 
 simple_load_handler_t* load_handler_create(simple_handler_t* parent) {

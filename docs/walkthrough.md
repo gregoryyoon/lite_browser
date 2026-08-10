@@ -82,6 +82,9 @@ LiteBrowser 실행 시 Windows OS의 사용자 기본 로캘(UI Language)을 자
    - 탭 삭제/이관 전용 공통 헬퍼 `RemoveTabAt`을 도입하여 활성 탭 종료 시 좌측 이전 탭(`remove_idx - 1`)이 즉각 활성화되도록 보정하고, 비활성 탭 HWND `SW_HIDE` 및 활성 탭 HWND `SW_SHOW`를 보장하여 브라우저 회색 바탕화면 현상을 완전히 차단했습니다.
 6. **주소창 URL 직접 입력 후 엔터 시 로딩 완료 URL 갱신 (`handleKey` blur)**:
    - 주소창 입력 후 Enter 키 입력 시 `event.target.blur()`를 호출하여 포커스를 해제함으로써, C 백엔드의 `on_address_change` 실행 시 `updateAddress` 가드 조건문이 정상 동작하여 이동 완료 후의 최종 전체 URL(`https://...`)로 화면 주소창이 즉시 갱신되도록 처리했습니다.
+7. **웹페이지 링크 Ctrl+클릭 / 휠클릭 시 새 탭 생성 및 기본 새 창 차단 (`on_open_urlfrom_tab`)**:
+   - CEF `cef_request_handler_t` 구조체에 `on_open_urlfrom_tab` 콜백 핸들러(`request_handler_on_open_urlfrom_tab`)를 추가 바인딩했습니다.
+   - 사용자가 웹페이지 내 일반 링크를 **Ctrl + 좌클릭** 또는 **휠클릭(Middle-click)**하는 이벤트를 가로채 target URL을 `CreateNewTab(win_ctx, target_url_str)`로 넘겨 기존 메인 창의 새 탭으로 오픈하고, `return 1`을 반환하여 Chromium 디폴트 팝업/새 창 생성을 원천 차단했습니다.
 
 ---
 
