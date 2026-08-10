@@ -21,16 +21,6 @@
 #include <shellapi.h>
 extern int GetUIHeightForWindow(HWND hwnd);
 
-static BOOL CALLBACK ResizeChildWindowProc(HWND child_hwnd, LPARAM lParam) {
-  HWND parent = GetParent(child_hwnd);
-  if (parent) {
-    RECT rect;
-    GetClientRect(parent, &rect);
-    MoveWindow(child_hwnd, 0, 0, rect.right, rect.bottom, TRUE);
-  }
-  return TRUE;
-}
-
 static void GetEditorRootConfigFilePath(char* out_path, size_t max_len) {
   char user_profile[MAX_PATH];
   if (SHGetSpecialFolderPathA(NULL, user_profile, CSIDL_PROFILE, FALSE)) {
@@ -95,6 +85,18 @@ static void GetHistoryFilePath(char* out_path, size_t max_len) {
     snprintf(out_path, max_len, "%s\\.lite-browser\\history.json", user_profile);
   } else {
     snprintf(out_path, max_len, "C:\\projects\\lite_browser\\history.json");
+  }
+}
+
+static void ExecuteJsOnBrowser(cef_browser_t* target_b, const char* js_call) {
+  if (!target_b || !js_call) return;
+  cef_frame_t* target_frame = target_b->get_main_frame(target_b);
+  if (target_frame) {
+    cef_string_t js_str = {};
+    cef_string_from_utf8(js_call, strlen(js_call), &js_str);
+    target_frame->execute_java_script(target_frame, &js_str, NULL, 0);
+    cef_string_clear(&js_str);
+    target_frame->base.release(&target_frame->base);
   }
 }
 
@@ -1146,27 +1148,6 @@ int CEF_CALLBACK request_handler_on_before_browse(
         } else if (strcmp(action, "window-close") == 0) {
           PostMessage(win_ctx->main_hwnd, WM_CLOSE, 0, 0);
         } else if (strncmp(action, "load?url=", 9) == 0) {
-          if (win_ctx) {
-            win_ctx->is_ui_expanded = 0;
-            if (win_ctx->ui_hwnd) {
-              RECT rect;
-              GetClientRect(win_ctx->main_hwnd, &rect);
-              int default_h = GetUIHeightForWindow(win_ctx->main_hwnd);
-              SetWindowPos(win_ctx->ui_hwnd, HWND_TOP, 0, 0, rect.right, default_h, SWP_SHOWWINDOW);
-              EnumChildWindows(win_ctx->ui_hwnd, ResizeChildWindowProc, 0);
-            }
-            if (win_ctx->ui_browser) {
-              cef_browser_host_t *host = win_ctx->ui_browser->get_host(win_ctx->ui_browser);
-              if (host) {
-                host->was_resized(host);
-                host->base.release(&host->base);
-              }
-            }
-            for (int t = 0; t < win_ctx->tab_count; t++) {
-              if (win_ctx->tabs[t].hwnd) EnableWindow(win_ctx->tabs[t].hwnd, TRUE);
-            }
-            if (win_ctx->editor_hwnd) EnableWindow(win_ctx->editor_hwnd, TRUE);
-          }
           if (cb) {
             const char *encoded_url = action + 9;
             char *decoded = (char *)malloc(strlen(encoded_url) + 1);
@@ -1211,21 +1192,8 @@ int CEF_CALLBACK request_handler_on_before_browse(
               if (win_ctx->ui_hwnd) {
                 RECT rect;
                 GetClientRect(win_ctx->main_hwnd, &rect);
-                SetWindowPos(win_ctx->ui_hwnd, HWND_TOP, 0, 0, rect.right, win_ctx->ui_expanded_height, SWP_SHOWWINDOW);
-                BringWindowToTop(win_ctx->ui_hwnd);
-                EnumChildWindows(win_ctx->ui_hwnd, ResizeChildWindowProc, 0);
+                SetWindowPos(win_ctx->ui_hwnd, HWND_TOP, 0, 0, rect.right, win_ctx->ui_expanded_height, SWP_NOACTIVATE);
               }
-              if (win_ctx->ui_browser) {
-                cef_browser_host_t *host = win_ctx->ui_browser->get_host(win_ctx->ui_browser);
-                if (host) {
-                  host->was_resized(host);
-                  host->base.release(&host->base);
-                }
-              }
-              for (int t = 0; t < win_ctx->tab_count; t++) {
-                if (win_ctx->tabs[t].hwnd) EnableWindow(win_ctx->tabs[t].hwnd, FALSE);
-              }
-              if (win_ctx->editor_hwnd) EnableWindow(win_ctx->editor_hwnd, FALSE);
             }
           }
         } else if (strcmp(action, "collapse-ui") == 0) {
@@ -1235,21 +1203,8 @@ int CEF_CALLBACK request_handler_on_before_browse(
               RECT rect;
               GetClientRect(win_ctx->main_hwnd, &rect);
               int default_h = GetUIHeightForWindow(win_ctx->main_hwnd);
-              SetWindowPos(win_ctx->ui_hwnd, HWND_TOP, 0, 0, rect.right, default_h, SWP_SHOWWINDOW);
-              BringWindowToTop(win_ctx->ui_hwnd);
-              EnumChildWindows(win_ctx->ui_hwnd, ResizeChildWindowProc, 0);
+              SetWindowPos(win_ctx->ui_hwnd, HWND_TOP, 0, 0, rect.right, default_h, SWP_NOACTIVATE);
             }
-            if (win_ctx->ui_browser) {
-              cef_browser_host_t *host = win_ctx->ui_browser->get_host(win_ctx->ui_browser);
-              if (host) {
-                host->was_resized(host);
-                host->base.release(&host->base);
-              }
-            }
-            for (int t = 0; t < win_ctx->tab_count; t++) {
-              if (win_ctx->tabs[t].hwnd) EnableWindow(win_ctx->tabs[t].hwnd, TRUE);
-            }
-            if (win_ctx->editor_hwnd) EnableWindow(win_ctx->editor_hwnd, TRUE);
           }
         } else if (strcmp(action, "load-bookmarks") == 0) {
           char filepath[MAX_PATH];
@@ -1410,21 +1365,11 @@ int CEF_CALLBACK request_handler_on_before_browse(
                   if (js_call) {
                     snprintf(js_call, b64_len + 128, "if (window.loadBookmarksDataB64) { window.loadBookmarksDataB64('%s'); }", b64_str);
                     
-                    cef_browser_t* target_b = NULL;
-                    if (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
-                      target_b = win_ctx->tabs[win_ctx->active_tab_index].browser;
+                    if (win_ctx->ui_browser) {
+                      ExecuteJsOnBrowser(win_ctx->ui_browser, js_call);
                     }
-                    if (!target_b) target_b = win_ctx->ui_browser;
-
-                    if (target_b) {
-                      cef_frame_t* target_frame = target_b->get_main_frame(target_b);
-                      if (target_frame) {
-                        cef_string_t js_str = {};
-                        cef_string_from_utf8(js_call, strlen(js_call), &js_str);
-                        target_frame->execute_java_script(target_frame, &js_str, NULL, 0);
-                        cef_string_clear(&js_str);
-                        target_frame->base.release(&target_frame->base);
-                      }
+                    if (browser && browser != win_ctx->ui_browser) {
+                      ExecuteJsOnBrowser(browser, js_call);
                     }
                     free(js_call);
                   }
@@ -1468,21 +1413,11 @@ int CEF_CALLBACK request_handler_on_before_browse(
                   if (js_call) {
                     snprintf(js_call, b64_len + 128, "if (window.loadHistoryDataB64) { window.loadHistoryDataB64('%s'); }", b64_str);
                     
-                    cef_browser_t* target_b = NULL;
-                    if (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
-                      target_b = win_ctx->tabs[win_ctx->active_tab_index].browser;
+                    if (win_ctx->ui_browser) {
+                      ExecuteJsOnBrowser(win_ctx->ui_browser, js_call);
                     }
-                    if (!target_b) target_b = win_ctx->ui_browser;
-
-                    if (target_b) {
-                      cef_frame_t* target_frame = target_b->get_main_frame(target_b);
-                      if (target_frame) {
-                        cef_string_t js_str = {};
-                        cef_string_from_utf8(js_call, strlen(js_call), &js_str);
-                        target_frame->execute_java_script(target_frame, &js_str, NULL, 0);
-                        cef_string_clear(&js_str);
-                        target_frame->base.release(&target_frame->base);
-                      }
+                    if (browser && browser != win_ctx->ui_browser) {
+                      ExecuteJsOnBrowser(browser, js_call);
                     }
                     free(js_call);
                   }

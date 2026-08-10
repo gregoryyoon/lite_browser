@@ -79,7 +79,9 @@ let currentTitle = '';
 
 function requestLoadBookmarks() {
   window.location.href = 'http://ui-action/load-bookmarks';
-  window.location.href = 'http://ui-action/load-history';
+  setTimeout(() => {
+    window.location.href = 'http://ui-action/load-history';
+  }, 150);
 }
 
 window.loadBookmarksDataB64 = function(b64Str) {
@@ -708,17 +710,12 @@ document.addEventListener('DOMContentLoaded', () => {
   if (addressBar) {
     addressBar.addEventListener('input', handleOmniboxInput);
     addressBar.addEventListener('keydown', handleOmniboxKeydown);
-  }
-
-  document.addEventListener('mousedown', (e) => {
-    const dropdown = document.getElementById('omnibox-dropdown');
-    const addressContainer = document.querySelector('.address-container');
-    if (dropdown && !dropdown.classList.contains('hide')) {
-      if (addressContainer && !addressContainer.contains(e.target)) {
+    addressBar.addEventListener('blur', () => {
+      setTimeout(() => {
         closeOmniboxDropdown();
-      }
-    }
-  });
+      }, 200);
+    });
+  }
 });
 
 function formatTimeAgo(timestamp) {
@@ -821,19 +818,6 @@ function updateOmniboxHeight() {
   });
 }
 
-function navigateToOmniboxUrl(targetUrl) {
-  if (!targetUrl) return;
-  const dropdown = document.getElementById('omnibox-dropdown');
-  if (dropdown) dropdown.classList.add('hide');
-
-  const addressBar = document.getElementById('address-bar');
-  if (addressBar && document.activeElement === addressBar) {
-    addressBar.blur();
-  }
-
-  window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(targetUrl);
-}
-
 function renderOmniboxDropdown() {
   const dropdown = document.getElementById('omnibox-dropdown');
   if (!dropdown) return;
@@ -846,20 +830,9 @@ function renderOmniboxDropdown() {
     const itemIndex = globalIndex++;
     const item = document.createElement('div');
     item.className = 'omni-item' + (itemIndex === omniSelectedIndex ? ' selected' : '');
-    
-    const handleBookmarkSelect = (e) => {
-      if (e) {
-        e.preventDefault();
-        e.stopPropagation();
-      }
-      navigateToOmniboxUrl(bm.url);
-    };
-    item.onmousedown = handleBookmarkSelect;
-    item.onclick = handleBookmarkSelect;
-    item.onmouseenter = () => {
-      omniSelectedIndex = itemIndex;
-      const allItems = dropdown.querySelectorAll('.omni-item, .omni-google-item, .omni-history-item');
-      allItems.forEach((el, idx) => el.classList.toggle('selected', idx === omniSelectedIndex));
+    item.onclick = () => {
+      window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(bm.url);
+      closeOmniboxDropdown();
     };
 
     const tagsHtml = (bm.extractedTags || []).map(t => `<span class="omni-tag-chip">#${t}</span>`).join(' ');
@@ -890,23 +863,11 @@ function renderOmniboxDropdown() {
     const googleItemIndex = globalIndex++;
     const googleItem = document.createElement('div');
     googleItem.className = 'omni-google-item' + (omniSelectedIndex === googleItemIndex ? ' selected' : '');
-    
-    const handleGoogleSelect = (e) => {
-      if (e) {
-        e.preventDefault();
-        e.stopPropagation();
-      }
+    googleItem.onclick = () => {
       const searchUrl = 'https://www.google.com/search?q=' + encodeURIComponent(omniRawQuery);
-      navigateToOmniboxUrl(searchUrl);
+      window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(searchUrl);
+      closeOmniboxDropdown();
     };
-    googleItem.onmousedown = handleGoogleSelect;
-    googleItem.onclick = handleGoogleSelect;
-    googleItem.onmouseenter = () => {
-      omniSelectedIndex = googleItemIndex;
-      const allItems = dropdown.querySelectorAll('.omni-item, .omni-google-item, .omni-history-item');
-      allItems.forEach((el, idx) => el.classList.toggle('selected', idx === omniSelectedIndex));
-    };
-
     googleItem.innerHTML = `
       <span class="omni-icon">🔍</span>
       <span>구글 검색: "${omniRawQuery}"</span>
@@ -919,20 +880,9 @@ function renderOmniboxDropdown() {
     const histItemIndex = globalIndex++;
     const histItem = document.createElement('div');
     histItem.className = 'omni-history-item' + (histItemIndex === omniSelectedIndex ? ' selected' : '');
-    
-    const handleHistorySelect = (e) => {
-      if (e) {
-        e.preventDefault();
-        e.stopPropagation();
-      }
-      navigateToOmniboxUrl(hist.url);
-    };
-    histItem.onmousedown = handleHistorySelect;
-    histItem.onclick = handleHistorySelect;
-    histItem.onmouseenter = () => {
-      omniSelectedIndex = histItemIndex;
-      const allItems = dropdown.querySelectorAll('.omni-item, .omni-google-item, .omni-history-item');
-      allItems.forEach((el, idx) => el.classList.toggle('selected', idx === omniSelectedIndex));
+    histItem.onclick = () => {
+      window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(hist.url);
+      closeOmniboxDropdown();
     };
 
     const timeAgoStr = formatTimeAgo(hist.visitedAt);
@@ -976,17 +926,18 @@ function handleOmniboxKeydown(e) {
 
     if (omniSelectedIndex < bookmarkCount) {
       const targetUrl = omniResults[omniSelectedIndex].url;
-      navigateToOmniboxUrl(targetUrl);
+      window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(targetUrl);
     } else if (hasGoogle && omniSelectedIndex === googleIndex) {
       const searchUrl = 'https://www.google.com/search?q=' + encodeURIComponent(omniRawQuery);
-      navigateToOmniboxUrl(searchUrl);
+      window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(searchUrl);
     } else {
       const histIdx = omniSelectedIndex - bookmarkCount - hasGoogle;
       if (histIdx >= 0 && histIdx < omniHistoryResults.length) {
         const targetUrl = omniHistoryResults[histIdx].url;
-        navigateToOmniboxUrl(targetUrl);
+        window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(targetUrl);
       }
     }
+    closeOmniboxDropdown();
   } else if (e.key === 'Escape') {
     closeOmniboxDropdown();
   }
