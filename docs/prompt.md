@@ -148,6 +148,10 @@ LLM 서비스(Gemini, ChatGPT, Claude 등)의 입력창에 에디터에서 작�
 
 - **조건부(링크 유무에 따른) 웹 콘텐츠 우클릭 컨텍스트 메뉴**: 마우스 커서 아래에 하이퍼링크가 존재하는지 감지하기 위해 `params->get_link_url()` API를 활용하여 검증합니다. 링크가 없는 일반 영역일 경우 기존 메뉴와 동일하게 노출하되 '마크다운 에디터 토글'을 안전히 제거(뒤로가기/앞으로가기/새로고침/인쇄/소스보기/검사)하고, 링크가 걸린 영역일 경우 전용 메뉴(**새 탭에서 링크 열기** - CreateNewTab 연동, **링크 페이지 저장** - start_download C API 연동, **링크 복사** - Win32 CF_UNICODETEXT 클립보드 복사 연동, **검사**)를 제공하는 조건별 분기 메뉴 아키텍처를 구현했습니다.
 
+### 6. 주소창 URL 직접 입력 후 엔터 시 로딩 완료 URL 갱신 버그 해결
+- **주소창 엔터 시 포커스 해제(Blur)**: 주소창에 URL(예: `github.com`) 입력 후 Enter 키를 누를 때 `handleKey`에서 `event.target.blur()`를 호출해 포커스를 즉시 해제하도록 개선했습니다.
+- **`updateAddress` 정상 갱신**: 포커스 해제로 인해 `ui/app.js` 내 `if (document.activeElement !== addressBar)` 가드 조건문이 통과되어, CEF 페이지 이동/리디렉션 완료 후 C 백엔드에서 전송되는 `updateAddress` 신호가 차단 없이 정상 반영되어 최종 URL(`https://github.com/`)로 화면에 즉시 갱신되도록 처리했습니다.
+
 # 중복 실행 시 기본 Chromium 창 노출 방지 및 프로세스 재실행(Relaunch) 처리
 
 ### 1. `on_already_running_app_relaunch` 콜백 구현

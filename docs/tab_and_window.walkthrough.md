@@ -106,6 +106,14 @@
   - 활성 탭 삭제 시 이전(좌측) 탭(`remove_idx - 1`)을 활성 인덱스로 지정하고(`remove_idx == 0`일 경우 0번), 탭 배열 시프트 및 `tab_count`, `active_tab_index`를 먼저 갱신합니다.
   - 남은 모든 탭들의 HWND를 루프 순회하여 비활성 탭은 `SW_HIDE`, 새로 활성화된 탭은 `SW_SHOW` 및 `MoveWindow`, `was_resized`, `set_focus`를 호출하여 전환 반응성과 브라우저 렌더링 노출을 100% 보장하도록 처리했습니다.
 
+### 8) 주소창 URL 직접 입력 후 엔터 시 로딩 완료 URL 갱신 버그 수정
+- **원인 분석**:
+  - 주소창(`addressBar`)에 URL(예: `github.com`) 입력 후 엔터를 눌렀을 때 `handleKey`에서 주소창 포커스 해제(`blur`) 처리가 누락되어 `document.activeElement`가 주소창으로 계속 유지되었습니다.
+  - 이로 인해 C 백엔드에서 `on_address_change` 콜백이 실행되어 `window.updateAddress("https://github.com/")`를 호출하더라도, `ui/app.js` 내부의 `if (document.activeElement !== addressBar)` 가드 조건문에 걸려 주소창 텍스트 갱신이 차단되고 입력 텍스트(`github.com`)가 그대로 남아있던 버그가 발생했습니다.
+- **해결 방안**:
+  - `ui/app.js`의 `handleKey` 함수 내에서 Enter 키 입력 시 `event.target.blur()` 및 `closeOmniboxDropdown()`을 호출하여 포커스를 즉시 해제하도록 보정했습니다.
+  - 이에 따라 CEF 페이지 이동 및 로딩 완료 후 `updateAddress`가 차단 없이 정상 작동하여 최종 리디렉션된 전체 URL(`https://github.com/`)로 화면에 즉시 갱신됩니다.
+
 ---
 
 ## 7. 관련 주요 구성 파일 안내

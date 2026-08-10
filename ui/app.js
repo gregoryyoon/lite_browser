@@ -40,6 +40,10 @@ function handleKey(event) {
       }
     }
     
+    if (event.target && typeof event.target.blur === 'function') {
+      event.target.blur();
+    }
+    closeOmniboxDropdown();
     window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(url);
   }
 }
@@ -886,6 +890,10 @@ function handleOmniboxKeydown(e) {
 function closeOmniboxDropdown() {
   const dropdown = document.getElementById('omnibox-dropdown');
   if (dropdown) dropdown.classList.add('hide');
+  const addressBar = document.getElementById('address-bar');
+  if (addressBar && document.activeElement === addressBar) {
+    addressBar.blur();
+  }
   closeAllPopups();
 }
 
