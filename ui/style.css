@@ -4,12 +4,18 @@
   padding: 0;
 }
 
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  width: 100%;
+  background-color: transparent;
+  overflow: hidden;
+}
+
 body {
   font-family: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  background-color: transparent;
   color: #18181b;
-  overflow: hidden;
-  height: 72px;
 }
 
 .browser-ui {
