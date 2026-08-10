@@ -708,12 +708,17 @@ document.addEventListener('DOMContentLoaded', () => {
   if (addressBar) {
     addressBar.addEventListener('input', handleOmniboxInput);
     addressBar.addEventListener('keydown', handleOmniboxKeydown);
-    addressBar.addEventListener('blur', () => {
-      setTimeout(() => {
-        closeOmniboxDropdown();
-      }, 200);
-    });
   }
+
+  document.addEventListener('mousedown', (e) => {
+    const dropdown = document.getElementById('omnibox-dropdown');
+    const addressContainer = document.querySelector('.address-container');
+    if (dropdown && !dropdown.classList.contains('hide')) {
+      if (addressContainer && !addressContainer.contains(e.target)) {
+        closeOmniboxDropdown();
+      }
+    }
+  });
 });
 
 function formatTimeAgo(timestamp) {

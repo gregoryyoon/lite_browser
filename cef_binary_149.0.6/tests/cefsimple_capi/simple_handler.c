@@ -1142,8 +1142,12 @@ int CEF_CALLBACK request_handler_on_before_browse(
               RECT rect;
               GetClientRect(win_ctx->main_hwnd, &rect);
               int default_h = GetUIHeightForWindow(win_ctx->main_hwnd);
-              SetWindowPos(win_ctx->ui_hwnd, HWND_TOP, 0, 0, rect.right, default_h, SWP_NOACTIVATE);
+              SetWindowPos(win_ctx->ui_hwnd, HWND_TOP, 0, 0, rect.right, default_h, SWP_SHOWWINDOW);
             }
+            for (int t = 0; t < win_ctx->tab_count; t++) {
+              if (win_ctx->tabs[t].hwnd) EnableWindow(win_ctx->tabs[t].hwnd, TRUE);
+            }
+            if (win_ctx->editor_hwnd) EnableWindow(win_ctx->editor_hwnd, TRUE);
           }
           if (cb) {
             const char *encoded_url = action + 9;
@@ -1192,6 +1196,10 @@ int CEF_CALLBACK request_handler_on_before_browse(
                 SetWindowPos(win_ctx->ui_hwnd, HWND_TOP, 0, 0, rect.right, win_ctx->ui_expanded_height, SWP_SHOWWINDOW);
                 BringWindowToTop(win_ctx->ui_hwnd);
               }
+              for (int t = 0; t < win_ctx->tab_count; t++) {
+                if (win_ctx->tabs[t].hwnd) EnableWindow(win_ctx->tabs[t].hwnd, FALSE);
+              }
+              if (win_ctx->editor_hwnd) EnableWindow(win_ctx->editor_hwnd, FALSE);
             }
           }
         } else if (strcmp(action, "collapse-ui") == 0) {
@@ -1204,6 +1212,10 @@ int CEF_CALLBACK request_handler_on_before_browse(
               SetWindowPos(win_ctx->ui_hwnd, HWND_TOP, 0, 0, rect.right, default_h, SWP_SHOWWINDOW);
               BringWindowToTop(win_ctx->ui_hwnd);
             }
+            for (int t = 0; t < win_ctx->tab_count; t++) {
+              if (win_ctx->tabs[t].hwnd) EnableWindow(win_ctx->tabs[t].hwnd, TRUE);
+            }
+            if (win_ctx->editor_hwnd) EnableWindow(win_ctx->editor_hwnd, TRUE);
           }
         } else if (strcmp(action, "load-bookmarks") == 0) {
           char filepath[MAX_PATH];
