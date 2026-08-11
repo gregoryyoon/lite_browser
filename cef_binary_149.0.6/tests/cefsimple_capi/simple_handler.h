@@ -159,6 +159,6 @@ void CreateNewTab(browser_window_t* win_ctx, const char* url);
 
 // extern cef_browser_t *g_ui_browser;
 // extern cef_browser_t *g_content_browser;
-extern char g_startup_url[1024];
+extern char g_startup_url[4096];
 
 #endif // CEF_TESTS_CEFSIMPLE_CAPI_SIMPLE_HANDLER_H_

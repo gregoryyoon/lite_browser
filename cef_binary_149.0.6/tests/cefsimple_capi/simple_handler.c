@@ -353,7 +353,7 @@ static simple_handler_t *g_instance = NULL;
 
 // cef_browser_t *g_ui_browser = NULL;
 // cef_browser_t *g_content_browser = NULL;
-char g_startup_url[1024] = "lite://favorites";
+char g_startup_url[4096] = "lite://favorites";
 
 // Forward declarations for handler create functions.
 simple_display_handler_t *display_handler_create(simple_handler_t *parent);
@@ -649,14 +649,14 @@ static void EscapeJsonString(const char* src, char* dest, size_t dest_len) {
 void update_ui_tabs(browser_window_t* win_ctx) {
   if (!win_ctx || !win_ctx->ui_browser) return;
 
-  char json[4096] = "[";
+  char json[65536] = "[";
   for (int i = 0; i < win_ctx->tab_count; i++) {
     char escaped_title[512] = {0};
-    char escaped_url[1536] = {0};
+    char escaped_url[4096] = {0};
     EscapeJsonString(win_ctx->tabs[i].title, escaped_title, sizeof(escaped_title));
     EscapeJsonString(win_ctx->tabs[i].url, escaped_url, sizeof(escaped_url));
 
-    char tab_str[2100];
+    char tab_str[5000];
     snprintf(tab_str, sizeof(tab_str), 
              "{\"id\":%d,\"title\":\"%s\",\"url\":\"%s\"}%s", 
              win_ctx->tabs[i].tab_id, 
@@ -670,7 +670,7 @@ void update_ui_tabs(browser_window_t* win_ctx) {
   }
   strcat(json, "]");
 
-  char js_code[4500];
+  char js_code[70000];
   snprintf(js_code, sizeof(js_code), "if (window.updateTabsList) { window.updateTabsList(%s, %d); }", 
            json, 
            (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) ? 
@@ -696,10 +696,10 @@ void update_ui_nav_state(browser_window_t* win_ctx) {
   int can_go_forward = cb->can_go_forward(cb);
   int is_loading = cb->is_loading(cb);
 
-  char escaped_url[1536] = {0};
+  char escaped_url[4096] = {0};
   EscapeJsonString(win_ctx->tabs[win_ctx->active_tab_index].url, escaped_url, sizeof(escaped_url));
 
-  char js_code[2048];
+  char js_code[5000];
   snprintf(js_code, sizeof(js_code), 
            "if (window.updateNavState) { window.updateNavState(%d, %d, %d); } "
            "if (window.updateAddress) { window.updateAddress(\"%s\"); }", 
@@ -2096,7 +2096,7 @@ int CEF_CALLBACK request_handler_on_before_browse(
           if (found_idx != -1 && win_ctx->tab_count > 1) {
             cef_browser_t* detached_browser = win_ctx->tabs[found_idx].browser;
             HWND detached_hwnd = win_ctx->tabs[found_idx].hwnd;
-            char target_url[1024];
+            char target_url[4096];
             char target_title[256];
             strcpy(target_url, win_ctx->tabs[found_idx].url);
             strcpy(target_title, win_ctx->tabs[found_idx].title);
@@ -2133,7 +2133,7 @@ int CEF_CALLBACK request_handler_on_before_browse(
             if (found_idx != -1 && win_ctx->tab_count > 1) {
               cef_browser_t* detached_browser = win_ctx->tabs[found_idx].browser;
               HWND detached_hwnd = win_ctx->tabs[found_idx].hwnd;
-              char target_url[1024];
+              char target_url[4096];
               char target_title[256];
               strcpy(target_url, win_ctx->tabs[found_idx].url);
               strcpy(target_title, win_ctx->tabs[found_idx].title);
@@ -2189,7 +2189,7 @@ int CEF_CALLBACK request_handler_on_open_urlfrom_tab(
     conv_ok = 1;
   }
 
-  char target_url_str[1024] = {0};
+  char target_url_str[4096] = {0};
   if (conv_ok && url_utf8.str && strlen(url_utf8.str) > 0) {
     strncpy(target_url_str, url_utf8.str, sizeof(target_url_str) - 1);
     cef_string_utf8_clear(&url_utf8);

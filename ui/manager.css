@@ -442,6 +442,20 @@ body {
   text-overflow: ellipsis;
 }
 
+.list-row-highlight {
+  flex: 2;
+  background: #fffbe6;
+  border-left: 3px solid #f59e0b;
+  color: #78350f;
+  font-size: 11.5px;
+  font-weight: 500;
+  padding: 4px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .list-row-snippet {
   flex: 3;
   color: #71717a;

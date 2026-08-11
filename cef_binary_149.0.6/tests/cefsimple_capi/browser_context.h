@@ -11,7 +11,7 @@ typedef struct _tab_info_t {
   cef_browser_t* browser;
   HWND hwnd;
   char title[256];
-  char url[1024];
+  char url[4096];
   int is_loaded;
   void* tab_handler;
 } tab_info_t;

@@ -253,9 +253,13 @@ function renderMainView() {
         row.onclick = () => openBookmarkUrl(bm.url);
         const timeAgo = formatTimeAgo(bm.context?.createdAt);
 
+        const highlightText = getHighlightText(bm);
+        const highlightHtml = highlightText ? `<span class="list-row-highlight" title="${highlightText}">✨ "${highlightText}"</span>` : '';
+
         row.innerHTML = `
           <img src="${bm.faviconUrl || ''}" class="card-favicon" onerror="this.style.display='none'">
           <span class="list-row-title">${bm.title}</span>
+          ${highlightHtml}
           <span class="list-row-snippet">${bm.textSnippet || bm.url}</span>
           <span class="list-row-date">${timeAgo}</span>
           <button class="card-delete-btn" title="삭제" onclick="deleteBookmarkManager('${bm.id}', event)">✕</button>

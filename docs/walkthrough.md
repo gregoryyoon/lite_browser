@@ -86,6 +86,20 @@ LiteBrowser 실행 시 Windows OS의 사용자 기본 로캘(UI Language)을 자
    - CEF `cef_request_handler_t` 구조체에 `on_open_urlfrom_tab` 콜백 핸들러(`request_handler_on_open_urlfrom_tab`)를 추가 바인딩했습니다.
    - 사용자가 웹페이지 내 일반 링크를 **Ctrl + 좌클릭** 또는 **휠클릭(Middle-click)**하는 이벤트를 가로채 target URL을 `CreateNewTab(win_ctx, target_url_str)`로 넘겨 기존 메인 창의 새 탭으로 오픈하고, `return 1`을 반환하여 Chromium 디폴트 팝업/새 창 생성을 원천 차단했습니다.
 
+### 2.7 긴 URL(네이버 리다이렉트 링크) 잘림 버그 수정 및 URL 버퍼 확장 (Long URL Buffer Expansion)
+1. **문제 원인 분석**:
+   - 네이버 검색 결과('한강밤핑' 등) 섬네일 클릭 시 호출되는 긴 리다이렉트/추적 URL(1,332자 이상) 인입 시, C API 내부 URL 버퍼 크기가 `1024`자로 제한되어 있어 쿼리 스트링의 리다이렉트 타겟 파라미터(`&u=https%3A%2F%2Fcontents...`)가 잘려(Truncated) 손상된 URL이 CEF에 전달됨.
+   - 손상된 URL을 수신한 네이버 서버가 리다이렉트 목표 지점을 정상 해석하지 못하고 디폴트 메인 페이지(`https://www.naver.com`)로 302/JS 리다이렉트하는 현상 발생.
+2. **구현 및 버퍼 확장**:
+   - C API 데이터 구조체 및 주요 핸들러의 URL 버퍼 규격을 **`1024`자에서 `4096`자**로 일괄 확장:
+     - [`browser_context.h`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/browser_context.h): `tab_info_t.url` 버퍼 크기 `4096`자로 확장.
+     - [`simple_life_span_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_life_span_handler.c): `life_span_handler_on_before_popup` 내 `target_url_str[4096]` 버퍼 확장.
+     - [`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_handler.c): `g_startup_url[4096]`, `on_open_urlfrom_tab` 내 `target_url_str[4096]`, `detach-tab`/`drag-end` 내 `target_url[4096]` 확장.
+     - `update_ui_tabs` 및 `update_ui_nav_state` 내 `escaped_url[4096]`, `tab_str[5000]`, `json[65536]`, `js_code[70000]` 버퍼 크기를 확장하여 JSON 잘림 오작동 원천 차단.
+     - [`simple_app.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_app.c): `create_browser_window` 내 `target_url[4096]` 확장.
+3. **검증**:
+   - 1,300자 이상의 긴 리다이렉트 URL 클릭 시에도 URL이 잘리지 않고 원래 연결 목적지(`https://contents.premium.naver.com/...`)로 정상 이동하는 것을 확인.
+
 ---
 
 ## 3. 차세대 북마크 & 지능형 주소창 UX (Smart Omnibox & Bookmark)

@@ -158,7 +158,7 @@ int CEF_CALLBACK life_span_handler_on_before_popup(
     conv_ok = 1;
   }
 
-  char target_url_str[1024] = {0};
+  char target_url_str[4096] = {0};
   if (conv_ok && url_utf8.str && strlen(url_utf8.str) > 0) {
     strncpy(target_url_str, url_utf8.str, sizeof(target_url_str) - 1);
     cef_string_utf8_clear(&url_utf8);
