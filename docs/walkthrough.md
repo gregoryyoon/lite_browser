@@ -206,3 +206,37 @@ cmake --build c:\projects\lite_browser\cef_binary_149.0.6\build --config Release
 - [`ui/index.html`](file:///c:/projects/lite_browser/ui/index.html) & [`ui/style.css`](file:///c:/projects/lite_browser/ui/style.css): 상단 주소창/탭바 네이티브 UI 레이아웃
 - [`ui/manager.html`](file:///c:/projects/lite_browser/ui/manager.html) & [`ui/manager.js`](file:///c:/projects/lite_browser/ui/manager.js): `lite://favorites` 대시보드
 - [`installer.nsi`](file:///c:/projects/lite_browser/installer.nsi): NSIS 설치 파일 빌드 스크립트
+- [`simple_download_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_download_handler.c) & [`simple_download_handler.h`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_download_handler.h): CEF 다운로드 진행률 추적 핸들러, 파일 중복 자동 순서 번호 부여, 영속 JSON 관리, IPC 액션
+- [`ui/downloads.html`](file:///c:/projects/lite_browser/ui/downloads.html), [`ui/downloads.js`](file:///c:/projects/lite_browser/ui/downloads.js), [`ui/downloads.css`](file:///c:/projects/lite_browser/ui/downloads.css): `lite://downloads` 다운로드 대시보드 UI
+
+---
+
+## 7. 다운로드 관리자 대시보드 시스템 (`lite://downloads`)
+
+### 7.1 개요
+Edge 브라우저의 `edge://downloads/` 디자인과 UX를 참고하여 다운로드 진행률 실시간 추적, 자동 다운로드 디렉토리 고정 및 중복 번호 부여, 영속 이력 관리, 파일 실존 검사 및 파일 관리 기능을 탑재했습니다.
+
+### 7.2 주요 구현 내역
+1. **사용자 기본 다운로드 폴더 고정 & 자동 다운로드**:
+   - `SHGetSpecialFolderPathA`를 사용해 `%USERPROFILE%\Downloads`로 저장 경로를 고정하고 `show_dialog = 0` 처리하여 Save As 대화상자 없이 즉시 자동 저장됩니다.
+2. **동일 파일명 자동 순서 번호 부여 (중복 방지)**:
+   - 동일 파일 존재 시 `filename (1).ext`, `filename (2).ext` 로 순서 번호를 자동으로 부여해 파일 덮어쓰기를 원천 방지합니다.
+3. **다운로드 진행 추적 및 영속성 (`downloads.json`)**:
+   - CEF `cef_download_handler_t` C API 인터페이스를 구현하고 `cef_client_t`에 바인딩했습니다.
+   - 전송 바이트, 총 바이트, 속도, 진행률(%), 상태(다운로드 중/완료/일시중지/취소/실패)를 `%USERPROFILE%\.lite-browser\downloads.json`에 기록하여 재기동 시에도 이력을 복원합니다.
+4. **대시보드 UI (`lite://downloads`) 및 파일 관리**:
+   - `lite://downloads`, `edge://downloads`, `chrome://downloads` 주소 이동 지원.
+   - 확장자별 스타일 아이콘, 카테고리 탭, 파일실존 검사(파일 미존재 시 뱃지 표시 및 열기 비활성화), 파일 실행, 탐색기 폴더에서 보기, 파일 물리 삭제, 이력 정리, 파일 정보 확인 모달 제공.
+5. **IPC 통신 및 실시간 푸시 엔진**:
+   - 프론트엔드 UI(`ui/downloads.js`)에서 Lite Browser의 네이티브 프레임 가로채기 방식인 `window.location.href = 'http://ui-action/...'`을 통해 안전하게 C 백엔드 명령을 호출합니다.
+   - 백엔드의 `BroadcastDownloadUpdate()`를 구동하여 다운로드 상태 갱신 시 대시보드 화면으로 최신 목록 데이터(`window.renderDownloads`)를 실시간 푸시(Push)합니다.
+6. **새 탭 개설 연동**:
+   - 주소창 우측 다운로드 버튼, `Ctrl+J` 단축키, 3점 메뉴 "다운로드 (Ctrl+J)" 실행 시 백엔드 `open-download-manager` IPC를 거쳐 `CreateNewTab`을 호출하여 활성 탭 바로 우측에 새로운 탭으로 다운로드 대시보드가 오픈됩니다.
+
+### 7.3 빌드 명령 (Debug 전용)
+```powershell
+# CMake Debug 빌드
+cmake --build c:\projects\lite_browser\cef_binary_149.0.6\build --config Debug --target cefsimple_capi
+```
+
+

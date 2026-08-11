@@ -14,6 +14,8 @@ set(CEFSIMPLE_CAPI_SRCS
   simple_browser_list.c
   simple_browser_list.h
   simple_display_handler.c
+  simple_download_handler.c
+  simple_download_handler.h
   simple_handler.c
   simple_handler.h
   simple_life_span_handler.c

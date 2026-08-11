@@ -205,6 +205,8 @@ window.updateAddress = function(url) {
       addressBar.value = '';
     } else if (url.indexOf('ui/manager.html') !== -1 || url.indexOf('lite://favorites') !== -1 || url.indexOf('edge://favorites') !== -1) {
       addressBar.value = 'lite://favorites';
+    } else if (url.indexOf('ui/downloads.html') !== -1 || url.indexOf('lite://downloads') !== -1 || url.indexOf('edge://downloads') !== -1) {
+      addressBar.value = 'lite://downloads';
     } else {
       addressBar.value = url;
     }
@@ -222,8 +224,9 @@ window.updateTabsList = function(tabs, activeId) {
   container.innerHTML = '';
   tabs.forEach(tab => {
     const isManager = tab.url && (tab.url.indexOf('ui/manager.html') !== -1 || tab.url.indexOf('lite://favorites') !== -1);
+    const isDownloads = tab.url && (tab.url.indexOf('ui/downloads.html') !== -1 || tab.url.indexOf('lite://downloads') !== -1);
     if (tab.id === activeId) {
-      currentTitle = isManager ? '즐겨찾기' : (tab.title || '');
+      currentTitle = isManager ? '즐겨찾기' : (isDownloads ? '다운로드' : (tab.title || ''));
     }
     const tabEl = document.createElement('div');
     tabEl.className = 'tab' + (tab.id === activeId ? ' active' : '');
@@ -698,6 +701,10 @@ function openBookmarkDashboard() {
   window.location.href = 'http://ui-action/open-bookmark-manager';
 }
 
+function openDownloadDashboard() {
+  window.location.href = 'http://ui-action/open-download-manager';
+}
+
 // ==================== SMART OMNIBOX ENGINE ====================
 
 let omniSelectedIndex = -1;
@@ -706,6 +713,13 @@ let omniHistoryResults = [];
 let omniRawQuery = '';
 
 document.addEventListener('DOMContentLoaded', () => {
+  document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && (e.key === 'j' || e.key === 'J')) {
+      e.preventDefault();
+      openDownloadDashboard();
+    }
+  });
+
   const addressBar = document.getElementById('address-bar');
   if (addressBar) {
     addressBar.addEventListener('input', handleOmniboxInput);

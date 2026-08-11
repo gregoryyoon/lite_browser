@@ -3,6 +3,7 @@
 // can be found in the LICENSE file.
 
 #include "tests/cefsimple_capi/simple_handler.h"
+#include "tests/cefsimple_capi/simple_download_handler.h"
 
 #include <stdarg.h>
 #include <stdatomic.h>
@@ -393,8 +394,10 @@ int CEF_CALLBACK simple_handler_release(cef_base_ref_counted_t *self) {
       handler->context_menu_handler->handler.base.release(
           &handler->context_menu_handler->handler.base);
     }
-
-    
+    if (handler->download_handler) {
+      handler->download_handler->handler.base.release(
+          &handler->download_handler->handler.base);
+    }
 
     // Destroy the browser list.
     browser_list_destroy(&handler->browser_list);
@@ -413,6 +416,18 @@ int CEF_CALLBACK simple_handler_release(cef_base_ref_counted_t *self) {
 //
 // Client handler getter implementations.
 //
+
+cef_download_handler_t *CEF_CALLBACK
+simple_handler_get_download_handler(cef_client_t *self) {
+  simple_handler_t *handler = (simple_handler_t *)self;
+  if (handler->download_handler) {
+    // Add reference before returning.
+    handler->download_handler->handler.base.add_ref(
+        &handler->download_handler->handler.base);
+    return &handler->download_handler->handler;
+  }
+  return NULL;
+}
 
 cef_context_menu_handler_t *CEF_CALLBACK
 simple_handler_get_context_menu_handler(cef_client_t *self) {
@@ -483,6 +498,9 @@ simple_handler_t *simple_handler_create(int is_alloy_style) {
       (simple_handler_t *)calloc(1, sizeof(simple_handler_t));
   CHECK(handler);
 
+  // Initialize download manager state from disk once
+  download_manager_init();
+
   // Initialize base structure.
   INIT_CEF_BASE_REFCOUNTED(&handler->client.base, cef_client_t, simple_handler);
 
@@ -492,6 +510,7 @@ simple_handler_t *simple_handler_create(int is_alloy_style) {
   handler->client.get_load_handler = simple_handler_get_load_handler;
   handler->client.get_request_handler = simple_handler_get_request_handler;
   handler->client.get_context_menu_handler = simple_handler_get_context_menu_handler;
+  handler->client.get_download_handler = simple_handler_get_download_handler;
 
   // Create sub-handlers.
   handler->display_handler = display_handler_create(handler);
@@ -504,6 +523,8 @@ simple_handler_t *simple_handler_create(int is_alloy_style) {
   CHECK(handler->request_handler);
   handler->context_menu_handler = context_menu_handler_create(handler);
   CHECK(handler->context_menu_handler);
+  handler->download_handler = download_handler_create(handler);
+  CHECK(handler->download_handler);
 
   // Initialize other fields.
   handler->is_alloy_style = is_alloy_style;
@@ -916,6 +937,18 @@ int CEF_CALLBACK request_handler_on_before_browse(
         cef_string_utf8_clear(&url_utf8);
         cef_string_userfree_free(url_userfree);
         return 1;
+      } else if (strncmp(url_utf8.str, "lite://downloads", 16) == 0 ||
+                 strncmp(url_utf8.str, "edge://downloads", 16) == 0 ||
+                 strncmp(url_utf8.str, "chrome://downloads", 18) == 0) {
+        char dl_url_buf[MAX_PATH + 32];
+        ResolveUIFilePath("ui/downloads.html", NULL, 0, dl_url_buf, sizeof(dl_url_buf));
+        cef_string_t dl_url = {};
+        cef_string_from_utf8(dl_url_buf, strlen(dl_url_buf), &dl_url);
+        frame->load_url(frame, &dl_url);
+        cef_string_clear(&dl_url);
+        cef_string_utf8_clear(&url_utf8);
+        cef_string_userfree_free(url_userfree);
+        return 1;
       }
     }
 
@@ -939,6 +972,82 @@ int CEF_CALLBACK request_handler_on_before_browse(
           if (cb) cb->go_forward(cb);
         } else if (strcmp(action, "reload") == 0) {
           if (cb) cb->reload(cb);
+        } else if (strcmp(action, "get-downloads") == 0) {
+          char *buf = (char*)malloc(1024 * 1024);
+          if (buf) {
+            download_manager_get_list_json(buf, 1024 * 1024);
+            cef_frame_t *active_frame = frame;
+            if (active_frame) {
+              char *js_code = (char*)malloc(1024 * 1024 + 128);
+              if (js_code) {
+                snprintf(js_code, 1024 * 1024 + 128, "if (window.renderDownloads) { window.renderDownloads(%s); }", buf);
+                cef_string_t js_str = {};
+                cef_string_from_utf8(js_code, strlen(js_code), &js_str);
+                active_frame->execute_java_script(active_frame, &js_str, NULL, 0);
+                cef_string_clear(&js_str);
+                free(js_code);
+              }
+            }
+            free(buf);
+          }
+        } else if (strncmp(action, "download-open-file?", 19) == 0) {
+          const char* query = action + 19;
+          char* path = get_query_param(query, "path");
+          if (path) {
+            download_manager_open_file(path);
+            free(path);
+          }
+        } else if (strncmp(action, "download-show-in-folder?", 24) == 0) {
+          const char* query = action + 24;
+          char* path = get_query_param(query, "path");
+          if (path) {
+            download_manager_show_in_folder(path);
+            free(path);
+          }
+        } else if (strncmp(action, "download-delete-file?", 21) == 0) {
+          const char* query = action + 21;
+          char* id_str = get_query_param(query, "id");
+          char* path = get_query_param(query, "path");
+          if (id_str && path) {
+            uint32_t id = (uint32_t)atoi(id_str);
+            download_manager_delete_file(id, path);
+          }
+          if (id_str) free(id_str);
+          if (path) free(path);
+        } else if (strncmp(action, "download-remove-history?", 24) == 0) {
+          const char* query = action + 24;
+          char* id_str = get_query_param(query, "id");
+          if (id_str) {
+            uint32_t id = (uint32_t)atoi(id_str);
+            download_manager_remove_history(id);
+            free(id_str);
+          }
+        } else if (strcmp(action, "download-clear-history") == 0) {
+          download_manager_clear_history();
+        } else if (strncmp(action, "download-pause?", 15) == 0) {
+          const char* query = action + 15;
+          char* id_str = get_query_param(query, "id");
+          if (id_str) {
+            uint32_t id = (uint32_t)atoi(id_str);
+            download_manager_pause(id);
+            free(id_str);
+          }
+        } else if (strncmp(action, "download-resume?", 16) == 0) {
+          const char* query = action + 16;
+          char* id_str = get_query_param(query, "id");
+          if (id_str) {
+            uint32_t id = (uint32_t)atoi(id_str);
+            download_manager_resume(id);
+            free(id_str);
+          }
+        } else if (strncmp(action, "download-cancel?", 16) == 0) {
+          const char* query = action + 16;
+          char* id_str = get_query_param(query, "id");
+          if (id_str) {
+            uint32_t id = (uint32_t)atoi(id_str);
+            download_manager_cancel(id);
+            free(id_str);
+          }
         } else if (strncmp(action, "show-menu?", 10) == 0) {
           int click_x = 0, click_y = 0;
           if (sscanf(action + 10, "x=%d&y=%d", &click_x, &click_y) == 2) {
@@ -953,6 +1062,7 @@ int CEF_CALLBACK request_handler_on_before_browse(
             HMENU hMenu = CreatePopupMenu();
             AppendMenuW(hMenu, MF_STRING, 1001, L"새 탭");
             AppendMenuW(hMenu, MF_STRING, 1002, L"새 창");
+            AppendMenuW(hMenu, MF_STRING, 1008, L"다운로드 (Ctrl+J)");
             AppendMenuW(hMenu, MF_STRING, 1007, L"마크다운 에디터 토글");
             AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
             AppendMenuW(hMenu, MF_STRING, 1003, L"인쇄...");
@@ -968,6 +1078,8 @@ int CEF_CALLBACK request_handler_on_before_browse(
               CreateNewTab(win_ctx, "lite://favorites");
             } else if (cmd == 1002) {
               create_browser_window("lite://favorites");
+            } else if (cmd == 1008) {
+              CreateNewTab(win_ctx, "lite://downloads");
             } else if (cmd == 1003) {
               if (cb) {
                 cef_browser_host_t* host = cb->get_host(cb);
@@ -1331,6 +1443,10 @@ int CEF_CALLBACK request_handler_on_before_browse(
         } else if (strcmp(action, "open-bookmark-manager") == 0) {
           if (win_ctx) {
             CreateNewTab(win_ctx, "lite://favorites");
+          }
+        } else if (strcmp(action, "open-download-manager") == 0) {
+          if (win_ctx) {
+            CreateNewTab(win_ctx, "lite://downloads");
           }
         } else if (strcmp(action, "load-bookmarks-v2") == 0) {
           char filepath[MAX_PATH];

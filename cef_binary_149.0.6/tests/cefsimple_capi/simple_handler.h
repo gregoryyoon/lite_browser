@@ -19,6 +19,7 @@ typedef struct _simple_life_span_handler_t simple_life_span_handler_t;
 typedef struct _simple_load_handler_t simple_load_handler_t;
 typedef struct _simple_request_handler_t simple_request_handler_t;
 typedef struct _simple_context_menu_handler_t simple_context_menu_handler_t;
+typedef struct _simple_download_handler_t simple_download_handler_t;
 
 typedef enum {
   BROWSER_TYPE_CONTENT = 0,
@@ -41,6 +42,7 @@ typedef struct _simple_handler_t {
   simple_load_handler_t *load_handler;
   simple_request_handler_t *request_handler;
   simple_context_menu_handler_t *context_menu_handler;
+  simple_download_handler_t *download_handler;
 
   // Pointer to the browser window context this handler belongs to.
   browser_window_t *window_ctx;
