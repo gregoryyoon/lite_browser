@@ -100,6 +100,16 @@ LiteBrowser 실행 시 Windows OS의 사용자 기본 로캘(UI Language)을 자
 3. **검증**:
    - 1,300자 이상의 긴 리다이렉트 URL 클릭 시에도 URL이 잘리지 않고 원래 연결 목적지(`https://contents.premium.naver.com/...`)로 정상 이동하는 것을 확인.
 
+### 2.8 네이버 메일 삭제 UI 미갱신 버그 수정 (`disable-web-security` 제거)
+1. **문제 원인 분석**:
+   - 네이버 홈 `my-iframe`(`https://www.naver.com/my.html`) 메일 탭에서 메일 삭제 시, AJAX 요청으로 서버 상 메일은 정상 삭제되지만 `iframe` ↔ 메인 프레임 간 `window.postMessage` 비동기 이벤트를 통해 UI를 리렌더링하는 과정에서 이벤트가 무시되는 현상 발생.
+   - 원인은 C 백엔드 `simple_app.c`의 `simple_app_on_before_command_line_processing` 수신기에서 `--disable-web-security` 커맨드 라인 플래그가 적용되어 있어, Chromium이 `postMessage` 이벤트의 `event.origin`을 오염/누락 전달함으로써 네이버 프론트엔드의 `if (event.origin !== 'https://www.naver.com') return;` 보안 검증을 통과하지 못한 것.
+2. **구현 및 해결책**:
+   - [`simple_app.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_app.c#L167-L175): `disable-web-security` 커맨드 라인 스위치 주입 코드 제거.
+   - 로컬 UI 통신(`ui/index.html`, `ui/editor.html`)은 `http://ui-action/...` URL 가로채기 방식이므로 보안 플래그 제거 후에도 100% 정상 작동함을 확인.
+3. **검증**:
+   - 네이버 홈 메인 프레임 내 메일 탭에서 메일 삭제 시 `event.origin` 검증이 정상 통과되어, 새로고침 없이 메일 리스트 항목이 화면에서 즉시 제거되는 것을 검증 완료.
+
 ---
 
 ## 3. 차세대 북마크 & 지능형 주소창 UX (Smart Omnibox & Bookmark)

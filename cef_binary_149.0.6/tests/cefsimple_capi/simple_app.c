@@ -168,11 +168,6 @@ void CEF_CALLBACK simple_app_on_before_command_line_processing(
     cef_app_t* self,
     const cef_string_t* process_type,
     cef_command_line_t* command_line) {
-  cef_string_t switch1 = {};
-  cef_string_from_ascii("disable-web-security", 20, &switch1);
-  command_line->append_switch(command_line, &switch1);
-  cef_string_clear(&switch1);
-
   cef_string_t switch2 = {};
   cef_string_from_ascii("allow-file-access-from-files", 28, &switch2);
   command_line->append_switch(command_line, &switch2);
