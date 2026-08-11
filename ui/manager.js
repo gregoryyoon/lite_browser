@@ -30,6 +30,23 @@ function renderDashboard() {
   renderMainView();
 }
 
+function getHighlightText(bm) {
+  if (bm.context?.selectedText && bm.context.selectedText.trim().length > 0) {
+    return bm.context.selectedText.trim();
+  }
+  if (bm.context?.pageAnchor) {
+    const anchor = bm.context.pageAnchor;
+    if (!anchor.startsWith('(y:') && anchor.length > 5) {
+      return anchor.replace(/\s*\(y:\d+\)$/, '').trim();
+    }
+  }
+  return '';
+}
+
+function hasHighlightAnchor(bm) {
+  return getHighlightText(bm).length > 0;
+}
+
 function renderSidebar() {
   const countAll = document.getElementById('count-all');
   const countRecent = document.getElementById('count-recent');
@@ -43,7 +60,7 @@ function renderSidebar() {
   const recentCount = managerBookmarks.filter(b => (now - (b.context?.createdAt || 0)) <= threeDaysMs).length;
   if (countRecent) countRecent.innerText = recentCount;
 
-  const highlightCount = managerBookmarks.filter(b => b.context?.pageAnchor && b.context.pageAnchor.length > 5).length;
+  const highlightCount = managerBookmarks.filter(hasHighlightAnchor).length;
   if (countHighlights) countHighlights.innerText = highlightCount;
 
   // Build Tag Map & Counts
@@ -118,7 +135,7 @@ function getFilteredBookmarks() {
     if (currentFilter === 'recent') {
       if ((now - (bm.context?.createdAt || 0)) > 3 * 24 * 60 * 60 * 1000) return false;
     } else if (currentFilter === 'highlights') {
-      if (!bm.context?.pageAnchor || bm.context.pageAnchor.length <= 5) return false;
+      if (!hasHighlightAnchor(bm)) return false;
     }
 
     // Tag filter
@@ -144,7 +161,8 @@ function getFilteredBookmarks() {
         const matchSnippet = (bm.textSnippet || '').toLowerCase().includes(q);
         const matchIntent = (bm.context?.searchIntent || '').toLowerCase().includes(q);
         const matchTags = (bm.extractedTags || []).some(t => t.toLowerCase().includes(q));
-        if (!matchTitle && !matchUrl && !matchSnippet && !matchIntent && !matchTags) return false;
+        const matchHighlight = getHighlightText(bm).toLowerCase().includes(q);
+        if (!matchTitle && !matchUrl && !matchSnippet && !matchIntent && !matchTags && !matchHighlight) return false;
       }
     }
 
@@ -198,6 +216,9 @@ function renderMainView() {
         const tagsHtml = (bm.extractedTags || []).map(t => `<span class="tag-chip">#${t}</span>`).join('');
         const intentHtml = bm.context?.searchIntent ? `<span class="intent-chip">🔍 ${bm.context.searchIntent}</span>` : '';
         const timeAgo = formatTimeAgo(bm.context?.createdAt);
+        
+        const highlightText = getHighlightText(bm);
+        const highlightHtml = highlightText ? `<div class="card-highlight-box" title="${highlightText}">✨ "${highlightText}"</div>` : '';
 
         card.innerHTML = `
           ${thumbHtml}
@@ -206,6 +227,7 @@ function renderMainView() {
               <img src="${bm.faviconUrl || ''}" class="card-favicon" onerror="this.style.display='none'">
               <span class="card-title" title="${bm.title}">${bm.title}</span>
             </div>
+            ${highlightHtml}
             <div class="card-snippet" title="${bm.textSnippet || ''}">${bm.textSnippet || '본문 요약이 없습니다.'}</div>
             <div class="card-meta-box">
               ${intentHtml}
