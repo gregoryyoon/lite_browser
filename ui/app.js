@@ -831,6 +831,8 @@ function renderOmniboxDropdown() {
     const item = document.createElement('div');
     item.className = 'omni-item' + (itemIndex === omniSelectedIndex ? ' selected' : '');
     item.onclick = () => {
+      const addressBar = document.getElementById('address-bar');
+      if (addressBar) addressBar.blur();
       window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(bm.url);
       closeOmniboxDropdown();
     };
@@ -864,6 +866,8 @@ function renderOmniboxDropdown() {
     const googleItem = document.createElement('div');
     googleItem.className = 'omni-google-item' + (omniSelectedIndex === googleItemIndex ? ' selected' : '');
     googleItem.onclick = () => {
+      const addressBar = document.getElementById('address-bar');
+      if (addressBar) addressBar.blur();
       const searchUrl = 'https://www.google.com/search?q=' + encodeURIComponent(omniRawQuery);
       window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(searchUrl);
       closeOmniboxDropdown();
@@ -881,6 +885,8 @@ function renderOmniboxDropdown() {
     const histItem = document.createElement('div');
     histItem.className = 'omni-history-item' + (histItemIndex === omniSelectedIndex ? ' selected' : '');
     histItem.onclick = () => {
+      const addressBar = document.getElementById('address-bar');
+      if (addressBar) addressBar.blur();
       window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(hist.url);
       closeOmniboxDropdown();
     };
@@ -937,6 +943,8 @@ function handleOmniboxKeydown(e) {
         window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(targetUrl);
       }
     }
+    const addressBar = document.getElementById('address-bar');
+    if (addressBar) addressBar.blur();
     closeOmniboxDropdown();
   } else if (e.key === 'Escape') {
     closeOmniboxDropdown();
@@ -946,10 +954,6 @@ function handleOmniboxKeydown(e) {
 function closeOmniboxDropdown() {
   const dropdown = document.getElementById('omnibox-dropdown');
   if (dropdown) dropdown.classList.add('hide');
-  const addressBar = document.getElementById('address-bar');
-  if (addressBar && document.activeElement === addressBar) {
-    addressBar.blur();
-  }
   closeAllPopups();
 }
 

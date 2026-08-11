@@ -105,6 +105,7 @@ LiteBrowser 실행 시 Windows OS의 사용자 기본 로캘(UI Language)을 자
   - **북마크**: 1순위(최근 30일간 다빈도 방문) ➔ 2순위(최근 추가된 북마크 생성일)
   - **방문 기록**: 1순위(최근 30일간 다빈도 접속) ➔ 2순위(최근 접속 시각)
 - **통합 검색 결과 순서**: 주소창 입력 시 북마크(상단 3개) ➔ 구글 검색(중간) ➔ 방문 기록(하단 3개) 순으로 인라인 카드 통합 렌더링.
+- **백스페이스 입력 시 주소창 포커스 유지**: 주소창 텍스트를 백스페이스 키로 모두 지워 `query`가 빈 문자열(`""`)이 될 때 `closeOmniboxDropdown()` 내부의 자동 `addressBar.blur()`를 분리 제거하여, 텍스트가 모두 지워져도 주소창 키 포커스가 이탈하지 않고 연달아 입력할 수 있도록 보정.
 
 ### 3.4 북마크 전용 대시보드 (`lite://favorites`)
 - **소스**: [`ui/manager.html`](file:///c:/projects/lite_browser/ui/manager.html), [`ui/manager.js`](file:///c:/projects/lite_browser/ui/manager.js)
