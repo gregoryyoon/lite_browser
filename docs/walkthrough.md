@@ -90,9 +90,17 @@ LiteBrowser 실행 시 Windows OS의 사용자 기본 로캘(UI Language)을 자
 
 ## 3. 차세대 북마크 & 지능형 주소창 UX (Smart Omnibox & Bookmark)
 
-### 3.1 맥락 자동 추출 엔진 (Context Ingestion Engine)
+### 3.1 맥락 자동 추출 및 문장 점수 기반 본문 요약 엔진 (Context & Extractive Summarization Engine)
 - **소스**: [`ui/extractor.js`](file:///c:/projects/lite_browser/ui/extractor.js)
-- **수집 항목**: `og:image` 썸네일, `og:description` 또는 본문 스니펫 요약, `document.referrer` 기반 유입 검색어(Search Intent) 역추적, TF-IDF 기반 상위 태그 3~5개 자동 추출, 드래그 선택 텍스트 앵커 및 스크롤 위치 보존.
+- **심층 iframe 추출 (`getDeepSelectionText` & `getDeepBodyText`)**:
+  - 네이버 블로그(`mainFrame`) 등 `iframe` 구조 페이지에서도 최상위 창과 자식 프레임을 심층 탐색하여 마우스 드래그 선택 문장 및 실체 본문 텍스트를 100% 수집.
+- **UI 노이즈 영역 제거 & 확장 불용어 사전**:
+  - `<nav>`, `<footer>`, `.pagination`, `button` 등 UI 노이즈 구역을 정제하고, `이전페이지`, `다음페이지`, `바로가기`, `페이지`, `보기`, `the`, `and` 등의 무의미한 UI 단어와 접속사를 원천 필터링.
+- **제목/헤딩 가중치(x4) 기반 스마트 태그 추출 (`extractSmartTags`)**:
+  - 문서 제목(`document.title`) 및 `<h1>`~`<h3>` 헤딩, `<strong>` 강조 어휘에 4배 가중치를 부여하여 핵심 주제어 태그 5개 정제.
+- **문장 중요도 점수 기반 스마트 본문 요약 (`extractSmartSummary`)**:
+  - 마침표/물음표/느낌표 기반 완전한 문장 분할 후 문단 위치, 제목 어휘, 스마트 태그 포함 여부 3가지 지표로 문장별 중요도 점수(Score)를 산출하여 상위 2~3개 고득점 문장을 이은 깔끔한 200자 요약문 생성.
+- **저장 항목**: `og:image` 썸네일, `og:description` 또는 스마트 본문 요약 스니펫, `document.referrer` 기반 유입 검색어(Search Intent), 키워드 태그, 드래그 선택 문장 앵커(`selectedText`) 및 스크롤 위치 보존.
 
 ### 3.2 원클릭 추가/제거 토글 UX
 - 별 버튼 클릭 시 팝업 모달 없이 `☆` ↔ `★` 아이콘 상태 변화만으로 북마크 추가 및 즉시 제거 토글 제공.
@@ -105,14 +113,22 @@ LiteBrowser 실행 시 Windows OS의 사용자 기본 로캘(UI Language)을 자
   - **북마크**: 1순위(최근 30일간 다빈도 방문) ➔ 2순위(최근 추가된 북마크 생성일)
   - **방문 기록**: 1순위(최근 30일간 다빈도 접속) ➔ 2순위(최근 접속 시각)
 - **통합 검색 결과 순서**: 주소창 입력 시 북마크(상단 3개) ➔ 구글 검색(중간) ➔ 방문 기록(하단 3개) 순으로 인라인 카드 통합 렌더링.
+- **키보드 드롭다운 선택 Enter 연동 보정 (`handleKey`)**:
+  - 드롭다운이 열리고 방향키로 항목이 선택된 상태(`isDropdownOpen && omniSelectedIndex >= 0`) 시 `handleKey` 입력을 리턴 처리하여 구글 검색 오버라이드를 차단하고 선택된 북마크/방문기록 URL로 정합 이동.
 - **백스페이스 입력 시 주소창 포커스 유지**: 주소창 텍스트를 백스페이스 키로 모두 지워 `query`가 빈 문자열(`""`)이 될 때 `closeOmniboxDropdown()` 내부의 자동 `addressBar.blur()`를 분리 제거하여, 텍스트가 모두 지워져도 주소창 키 포커스가 이탈하지 않고 연달아 입력할 수 있도록 보정.
 
-### 3.4 북마크 전용 대시보드 (`lite://favorites`)
-- **소스**: [`ui/manager.html`](file:///c:/projects/lite_browser/ui/manager.html), [`ui/manager.js`](file:///c:/projects/lite_browser/ui/manager.js)
+### 3.4 방문 기록 (History) 영속성 & C 백엔드 IPC 보정
+- **소스**: [`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_handler.c), [`ui/app.js`](file:///c:/projects/lite_browser/ui/app.js)
+- **C 백엔드 `ExecuteJsOnBrowser` 전송 타겟 보정**: `load-history` 및 `load-bookmarks-v2` 액션 수신 시 읽어온 JSON 데이터를 활성 콘텐츠 탭이 아닌 주소창 UI 브라우저(`win_ctx->ui_browser`)로 우선 전달하도록 보정하여 앱 재기동 시에도 로컬 `history.json` 파일 데이터가 100% 정상 복원 복구됨.
+- **시동 IPC 딜레이 부여**: `requestLoadBookmarks()` 시동 시 `load-history` 요청에 150ms 딜레이를 부여하여 내비게이션 간섭 방지.
+
+### 3.5 북마크 전용 대시보드 (`lite://favorites`)
+- **소스**: [`ui/manager.html`](file:///c:/projects/lite_browser/ui/manager.html), [`ui/manager.js`](file:///c:/projects/lite_browser/ui/manager.js), [`ui/manager.css`](file:///c:/projects/lite_browser/ui/manager.css)
 - **기능**: 브라우저 디폴트 스타트업 URL, Ctrl+Shift+O 단축키 연결. 사이드바 태그 리스트, Temporal Slider 타임라인 필터, Card/List 뷰 스위처 제공.
 - **대시보드 정렬 알고리즘**: 전체 북마크 목록을 1순위(최근 30일간 다빈도 방문) ➔ 2순위(최근 추가된 북마크 생성일) 순으로 정렬하여 그리드/리스트 뷰에 우선 렌더링.
+- **`✨ 하이라이트 앵커` 카드 UI 뱃지**: 본문 영역을 마우스 드래그한 문장이 함께 저장된 북마크 카드 상단에 황금색 뱃지 박스(`card-highlight-box`)를 노출하여 시각적 직관성 강화.
 
-### 3.5 동적 설치 경로 해결 (`ResolveUIFilePath`)
+### 3.6 동적 설치 경로 해결 (`ResolveUIFilePath`)
 - **소스**: [`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_handler.c)
 - `GetModuleFileNameA` 기반으로 실행 파일 상위 폴더 트리를 순회하여 `ui/manager.html` 등 에셋을 탐색하므로 어떠한 설치 경로에서도 하드코딩 에러 없이 100% 동작.
 
