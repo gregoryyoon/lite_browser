@@ -32,8 +32,8 @@ Section "Install"
   SetOutPath "$INSTDIR"
   
   ; Executables and DLLs
-  File "c:\projects\lite_browser\cef_binary_149.0.6\build\tests\cefsimple_capi\Release\cefsimple_capi.exe"
-  File /nonfatal "c:\projects\lite_browser\cef_binary_149.0.6\build\tests\cefsimple_capi\Release\cefsimple_capi.dll"
+  File "c:\projects\lite_browser\cef_binary_149.0.6\build\tests\cefsimple_capi\Release\lite_browser.exe"
+  File /nonfatal "c:\projects\lite_browser\cef_binary_149.0.6\build\tests\cefsimple_capi\Release\lite_browser.dll"
   File "c:\projects\lite_browser\cef_binary_149.0.6\build\tests\cefsimple_capi\Release\libcef.dll"
   File "c:\projects\lite_browser\cef_binary_149.0.6\build\tests\cefsimple_capi\Release\chrome_elf.dll"
   File "c:\projects\lite_browser\cef_binary_149.0.6\build\tests\cefsimple_capi\Release\d3dcompiler_47.dll"
@@ -64,8 +64,8 @@ Section "Install"
   WriteUninstaller "$INSTDIR\uninstall.exe"
   
   ; Shortcuts
-  CreateShortcut "$SMPROGRAMS\Lite Browser.lnk" "$INSTDIR\cefsimple_capi.exe"
-  CreateShortcut "$DESKTOP\Lite Browser.lnk" "$INSTDIR\cefsimple_capi.exe"
+  CreateShortcut "$SMPROGRAMS\Lite Browser.lnk" "$INSTDIR\lite_browser.exe"
+  CreateShortcut "$DESKTOP\Lite Browser.lnk" "$INSTDIR\lite_browser.exe"
   
   ; Add uninstall information to Add/Remove Programs
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
@@ -91,8 +91,8 @@ Section "Uninstall"
   RMDir /r "$INSTDIR\locales"
   RMDir /r "$INSTDIR\ui"
   
-  Delete "$INSTDIR\cefsimple_capi.exe"
-  Delete "$INSTDIR\cefsimple_capi.dll"
+  Delete "$INSTDIR\lite_browser.exe"
+  Delete "$INSTDIR\lite_browser.dll"
   Delete "$INSTDIR\libcef.dll"
   Delete "$INSTDIR\chrome_elf.dll"
   Delete "$INSTDIR\d3dcompiler_47.dll"

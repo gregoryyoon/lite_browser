@@ -289,3 +289,24 @@ cmake --build c:\projects\lite_browser\cef_binary_149.0.6\build --config Debug -
 3. **검증**:
    - Debug 빌드 (`cmake --build c:\projects\lite_browser\cef_binary_149.0.6\build --config Debug --target cefsimple_capi`) 결과 정상 종료 (Exit code 0).
 
+---
+
+## 11. 실행 파일명 변경 (Executable Output Renaming: `cefsimple_capi.exe` -> `lite_browser.exe`)
+
+### 11.1 개요
+기존 CEF sample 바이너리 이름인 `cefsimple_capi.exe`에서 브라우저 고유 명칭인 **`lite_browser.exe`**로 실행 파일 및 DLL 출력 명칭을 변경하였습니다.
+
+### 11.2 주요 작업 내용
+1. **CMake 설정 수정**:
+   - [`cef_binary_149.0.6/tests/cefsimple_capi/CMakeLists.txt`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/CMakeLists.txt): `set_target_properties(${CEF_TARGET} PROPERTIES OUTPUT_NAME "lite_browser")`를 추가하여 Debug 및 Release 모드 모두 `lite_browser.exe` 및 `lite_browser.dll`로 출력되도록 수정.
+   - 부트스트랩 바이너리 복사(`COPY_SINGLE_FILE`) 및 아이콘 커스텀 주입(`inject_icon.py`) 대상을 `lite_browser.exe`로 업데이트.
+2. **NSIS 인스톨러 스크립트 수정**:
+   - [`installer.nsi`](file:///c:/projects/lite_browser/installer.nsi): 설치 대상 바이너리를 `lite_browser.exe` / `lite_browser.dll`로 변경, 시작 메뉴 및 바탕화면 바로가기 target을 `lite_browser.exe`로 수정, 언인스톨 삭제 항목 갱신.
+3. **VSCode 환경설정 수정**:
+   - [`.vscode/launch.json`](file:///c:/projects/lite_browser/.vscode/launch.json): 디버거 실행 파일 경로를 `Debug/lite_browser.exe`로 반영.
+4. **빌드 & 패키징 검증**:
+   - Debug 빌드: `Debug/lite_browser.exe` 생성 확인 (Exit code 0).
+   - Release 빌드: `Release/lite_browser.exe` 생성 확인 (Exit code 0).
+   - NSIS 인스톨러: [`LiteBrowserInstaller.exe`](file:///c:/projects/lite_browser/LiteBrowserInstaller.exe) 재생성 완료 (Exit code 0).
+
+
