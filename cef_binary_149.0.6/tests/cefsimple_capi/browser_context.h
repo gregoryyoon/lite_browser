@@ -14,6 +14,17 @@ typedef struct _tab_info_t {
   char url[4096];
   int is_loaded;
   void* tab_handler;
+
+  // Dual tab split screen fields
+  int is_split;             // 0: single view, 1: dual split view
+  cef_browser_t* right_browser;
+  HWND right_hwnd;
+  char right_title[256];
+  char right_url[4096];
+  int right_is_loaded;
+  void* right_tab_handler;
+  int active_split;         // 0: left pane, 1: right pane
+  float split_ratio;        // ratio of left pane width (0.2 to 0.8, default 0.5)
 } tab_info_t;
 
 typedef struct _browser_window_t {
@@ -28,6 +39,11 @@ typedef struct _browser_window_t {
   int show_editor;
   int is_ui_expanded;
   int ui_expanded_height;
+
+  // Splitter resizer tracking
+  int is_resizing_splitter;
+  int drag_start_x;
+  float drag_start_ratio;
 } browser_window_t;
 
 #if defined(OS_WIN)

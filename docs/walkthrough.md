@@ -1,6 +1,6 @@
 # Lite Browser 전체 기능 & 시스템 구현 보고서 (Walkthrough)
 
-본 문서는 **Lite Browser** 프로젝트의 전체 아키텍처 및 주요 기능별 구현 내역(기본 언어 설정, 다중 탭 및 윈도우 관리, 차세대 북마크 & 지능형 주소창, 커스텀 아이콘 리소스 자동화 파이프라인, NSIS 인스톨러 패키징)을 통합하여 관리하는 전체 통합 기술 가이드입니다.
+본 문서는 **Lite Browser** 프로젝트의 전체 아키텍처 및 주요 기능별 구현 내역(기본 언어 설정, 다중 탭 및 윈도우 관리, 차세대 북마크 & 지능형 주소창, 커스텀 아이콘 리소스 자동화 파이프라인, 다운로드 관리자, 듀얼 탭/창 분할 시스템)을 통합하여 관리하는 전체 통합 기술 가이드입니다.
 
 ---
 
@@ -186,10 +186,11 @@ LiteBrowser 실행 시 Windows OS의 사용자 기본 로캘(UI Language)을 자
 
 ### 5.3 원클릭 빌드 & 패키징 실행 명령
 ```powershell
-# 1. CMake Release 빌드
-cmake --build c:\projects\lite_browser\cef_binary_149.0.6\build --config Release --target cefsimple_capi
+# 1. CMake Debug 빌드 (개발 및 테스트용)
+cmake --build c:\projects\lite_browser\cef_binary_149.0.6\build --config Debug --target cefsimple_capi
 
-# 2. NSIS 인스톨러 생성
+# 2. CMake Release 빌드 및 NSIS 인스톨러 패키징 (배포용)
+cmake --build c:\projects\lite_browser\cef_binary_149.0.6\build --config Release --target cefsimple_capi
 & "C:\Program Files (x86)\NSIS\makensis.exe" c:\projects\lite_browser\installer.nsi
 ```
 
@@ -197,13 +198,13 @@ cmake --build c:\projects\lite_browser\cef_binary_149.0.6\build --config Release
 
 ## 6. 주요 소스 파일 맵 (File Directory Map)
 
-- [`simple_app.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_app.c): Win32 메인 프로시저, `WM_GETMINMAXINFO` 보정, DPI 스케일링, 디폴트 URL
-- [`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_handler.c): `RemoveTabAt` 탭 삭제, `CreateNewTab` 상대 위치 삽입, `ResolveUIFilePath` 동적 경로 탐색, 컨텍스트 메뉴
-- [`simple_life_span_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_life_span_handler.c): 팝업 가로채기 리디렉션, 비동기 소멸 UAF 가드
-- [`simple_display_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_display_handler.c): 주소 변경, 타이틀 변경 이벤트 동기화
-- [`browser_context.h`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/browser_context.h): 동적 윈도우/탭 컨텍스트 구조체 정의
-- [`ui/app.js`](file:///c:/projects/lite_browser/ui/app.js): 주소창 포커스/blur, Omnibox 통합 그룹화 검색 엔진, History 자동 트래킹
-- [`ui/index.html`](file:///c:/projects/lite_browser/ui/index.html) & [`ui/style.css`](file:///c:/projects/lite_browser/ui/style.css): 상단 주소창/탭바 네이티브 UI 레이아웃
+- [`simple_app.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_app.c): Win32 메인 프로시저, `WM_GETMINMAXINFO` 보정, DPI 스케일링, 분할 레이아웃/리사이저, `WM_MOUSEACTIVATE` 포커스 감지
+- [`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_handler.c): `RemoveTabAt` 탭 삭제, `CreateNewTab` 상대 위치 삽입, `ResolveUIFilePath` 동적 경로 탐색, 듀얼 탭 IPC, Focus Handler (`cef_focus_handler_t`), `update_ui_tabs` 콤보 제목 연동
+- [`simple_life_span_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_life_span_handler.c): 팝업 가로채기 리디렉션, 비동기 소멸 UAF 가드, 듀얼 브라우저 등록 및 클린업
+- [`simple_display_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_display_handler.c): 주소 변경, 타이틀 변경 이벤트 동기화 (우측 분할 브라우저 감지 연동)
+- [`browser_context.h`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/browser_context.h): 동적 윈도우/탭 컨텍스트 구조체 정의 (`is_split`, `right_browser`, `right_hwnd`, `right_title`, `right_url`, `active_split`, `split_ratio`)
+- [`ui/app.js`](file:///c:/projects/lite_browser/ui/app.js): 주소창 포커스/blur, Omnibox 통합 그룹화 검색 엔진, 듀얼 탭 토글 `toggleDualSplit`, `.tab-split-badge` 분할 뱃지 연동
+- [`ui/index.html`](file:///c:/projects/lite_browser/ui/index.html) & [`ui/style.css`](file:///c:/projects/lite_browser/ui/style.css): 상단 주소창/탭바 네이티브 UI 레이아웃, 주소창 우측 듀얼 버튼 위치, 듀얼 분할 뱃지 스타일
 - [`ui/manager.html`](file:///c:/projects/lite_browser/ui/manager.html) & [`ui/manager.js`](file:///c:/projects/lite_browser/ui/manager.js): `lite://favorites` 대시보드
 - [`installer.nsi`](file:///c:/projects/lite_browser/installer.nsi): NSIS 설치 파일 빌드 스크립트
 - [`simple_download_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_download_handler.c) & [`simple_download_handler.h`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_download_handler.h): CEF 다운로드 진행률 추적 핸들러, 파일 중복 자동 순서 번호 부여, 영속 JSON 관리, IPC 액션
@@ -233,10 +234,35 @@ Edge 브라우저의 `edge://downloads/` 디자인과 UX를 참고하여 다운�
 6. **새 탭 개설 연동**:
    - 주소창 우측 다운로드 버튼, `Ctrl+J` 단축키, 3점 메뉴 "다운로드 (Ctrl+J)" 실행 시 백엔드 `open-download-manager` IPC를 거쳐 `CreateNewTab`을 호출하여 활성 탭 바로 우측에 새로운 탭으로 다운로드 대시보드가 오픈됩니다.
 
-### 7.3 빌드 명령 (Debug 전용)
+---
+
+## 8. 듀얼 탭 (창 분할) 시스템 (Dual Tab & Split Screen Subsystem)
+
+### 8.1 개요
+네이버웨일 브라우저의 듀얼 탭 UX를 기반으로, 한 탭 내에서 두 개의 페이지를 좌/우 가로 분할 탐색 및 제어할 수 있는 기능을 구현했습니다.
+
+### 8.2 주요 구현 내역
+1. **주소 표시창 우측 분할 버튼 위치 조정**:
+   - 툴바 주소 표시창(`address-container`) 바로 오른편에 듀얼 분할 버튼(`dual-split-btn`)을 배치하여 1클릭 분할 토글 UX를 제공합니다.
+2. **독립된 탭별 분할 상태 관리 (Per-Tab State Isolation)**:
+   - `tab_info_t` 구조체에 `is_split`, `right_browser`, `right_hwnd`, `right_title`, `right_url`, `active_split` (0: 좌측, 1: 우측), `split_ratio` (기본 0.5f) 필드를 추가하여 탭별 독립적인 분할 뷰 생명주기를 관리합니다.
+3. **단일 주소창 동기화 & 실시간 이중 포커스 센서**:
+   - 주소창은 1개로 유지되며 현재 마우스로 선택된 분할 화면(좌/우)의 URL, 제목, 뒤로/앞으로 가기, 새로고침, 차세대 북마크 수집 대상이 100% 동기화됩니다.
+   - Win32 `WM_MOUSEACTIVATE` / `WM_PARENTNOTIFY` 포인터 좌표 추적과 CEF `cef_focus_handler_t` (`on_set_focus`, `on_got_focus`) 콜백 센서를 이중 바인딩하여, 웹페이지 영역 마우스 클릭 시 **2px 브랜드 블루(`#0066cc`) 포커스 테두리**가 활성화된 화면으로 실시간 전환됩니다.
+4. **마우스 리사이저 바 (Interactive Splitter Bar)**:
+   - 6px 폭의 분할 바 호버 시 `IDC_SIZEWE` (↔) 마우스 커서로 전환되고, 드래그 시 분할 비율(`0.2f` ~ `0.8f`)을 자유롭게 조정할 수 있습니다.
+5. **우클릭 컨텍스트 메뉴 '다른 분할 화면에서 열기'**:
+   - 웹페이지 링크 우클릭 시 "다른 분할 화면에서 열기" 메뉴를 제공하며, 단일 탭 상태일 경우 자동으로 탭이 듀얼 분할 모드로 전환되며 오른쪽 화면에 링크를 로딩합니다.
+6. **`[좌측 제목 | 우측 제목]` 콤보 제목 & 듀얼 뱃지 아이콘 (`◫`)**:
+   - 탭이 분할되면 탭바에 `[좌측 페이지 제목 | 우측 페이지 제목]` 결합 텍스트가 표시되며, 탭 제목 좌측에 파란색 듀얼 분할 아이콘(`◫`) 뱃지가 노출됩니다.
+7. **전역 비활성 탭 HWND 일괄 `SW_HIDE` 보정 (잔상 방지)**:
+   - 탭 전환(`switch-tab`), 탭 삭제(`RemoveTabAt`), 로딩 상태 전환(`simple_load_handler`), 레이아웃 계산(`WM_SIZE`) 시 현재 선택되지 않은 모든 비활성 탭의 메인 HWND(`hwnd`) 및 우측 HWND(`right_hwnd`)를 일괄 `SW_HIDE` 처리하여 탭 전환 시 화면 잔상이 겹쳐 보이던 오작동을 원천 해결했습니다.
+
+---
+
+## 9. 빌드 및 테스트 가이드 (Development & Build Guide)
+
 ```powershell
-# CMake Debug 빌드
+# Debug 모드 빌드 (개발 및 기능 테스트)
 cmake --build c:\projects\lite_browser\cef_binary_149.0.6\build --config Debug --target cefsimple_capi
 ```
-
-

@@ -276,6 +276,190 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
     }
     return 0;
   }
+  case WM_MOUSEACTIVATE:
+  case WM_PARENTNOTIFY:
+  {
+    if (win_ctx && win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+      tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
+      if (active_tab->is_split && active_tab->right_browser) {
+        POINT pt;
+        GetCursorPos(&pt);
+        ScreenToClient(hwnd, &pt);
+
+        RECT r;
+        GetClientRect(hwnd, &r);
+        int ui_height = GetUIHeightForWindow(hwnd);
+        int content_y = ui_height + 1;
+        int total_w = r.right - 2;
+        int split_bar_w = 6;
+        float ratio = active_tab->split_ratio;
+        if (ratio < 0.2f || ratio > 0.8f) ratio = 0.5f;
+
+        int left_w = (int)((total_w - split_bar_w) * ratio);
+        int bar_x = 1 + left_w;
+
+        if (pt.y >= content_y) {
+          int target_split = (pt.x < bar_x + split_bar_w / 2) ? 0 : 1;
+          if (active_tab->active_split != target_split) {
+            active_tab->active_split = target_split;
+            update_ui_nav_state(win_ctx);
+            InvalidateRect(hwnd, NULL, FALSE);
+          }
+        }
+      }
+    }
+    if (message == WM_MOUSEACTIVATE) {
+      return MA_ACTIVATE;
+    }
+    break;
+  }
+  case WM_PAINT:
+  {
+    PAINTSTRUCT ps;
+    HDC hdc = BeginPaint(hwnd, &ps);
+    if (win_ctx && win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+      tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
+      if (active_tab->is_split && active_tab->right_browser) {
+        RECT r;
+        GetClientRect(hwnd, &r);
+        int ui_height = GetUIHeightForWindow(hwnd);
+        int content_y = ui_height + 1;
+        int content_h = r.bottom - content_y - 1;
+        int total_w = r.right - 2;
+        int split_bar_w = 6;
+        float ratio = active_tab->split_ratio;
+        if (ratio < 0.2f || ratio > 0.8f) ratio = 0.5f;
+
+        int left_w = (int)((total_w - split_bar_w) * ratio);
+        int right_w = total_w - split_bar_w - left_w;
+        int left_x = 1;
+        int right_x = 1 + left_w + split_bar_w;
+        int bar_x = 1 + left_w;
+
+        HBRUSH active_brush = CreateSolidBrush(RGB(0, 102, 204));
+        HBRUSH inactive_brush = CreateSolidBrush(RGB(220, 220, 225));
+        HBRUSH bar_brush = CreateSolidBrush(RGB(230, 230, 235));
+
+        RECT left_rect = {left_x, content_y, left_x + left_w, content_y + content_h};
+        RECT bar_rect = {bar_x, content_y, bar_x + split_bar_w, content_y + content_h};
+        RECT right_rect = {right_x, content_y, right_x + right_w, content_y + content_h};
+
+        FrameRect(hdc, &left_rect, (active_tab->active_split == 0) ? active_brush : inactive_brush);
+        RECT left_rect_inner = {left_x + 1, content_y + 1, left_x + left_w - 1, content_y + content_h - 1};
+        FrameRect(hdc, &left_rect_inner, (active_tab->active_split == 0) ? active_brush : inactive_brush);
+
+        FillRect(hdc, &bar_rect, bar_brush);
+
+        FrameRect(hdc, &right_rect, (active_tab->active_split == 1) ? active_brush : inactive_brush);
+        RECT right_rect_inner = {right_x + 1, content_y + 1, right_x + right_w - 1, content_y + content_h - 1};
+        FrameRect(hdc, &right_rect_inner, (active_tab->active_split == 1) ? active_brush : inactive_brush);
+
+        DeleteObject(active_brush);
+        DeleteObject(inactive_brush);
+        DeleteObject(bar_brush);
+      }
+    }
+    EndPaint(hwnd, &ps);
+    return 0;
+  }
+  case WM_SETCURSOR:
+  {
+    if (win_ctx && win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+      tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
+      if (active_tab->is_split && active_tab->right_browser) {
+        POINT pt;
+        GetCursorPos(&pt);
+        ScreenToClient(hwnd, &pt);
+
+        RECT r;
+        GetClientRect(hwnd, &r);
+        int ui_height = GetUIHeightForWindow(hwnd);
+        int content_y = ui_height + 1;
+        int content_h = r.bottom - content_y - 1;
+        int total_w = r.right - 2;
+        int split_bar_w = 6;
+        float ratio = active_tab->split_ratio;
+        if (ratio < 0.2f || ratio > 0.8f) ratio = 0.5f;
+
+        int left_w = (int)((total_w - split_bar_w) * ratio);
+        int bar_x = 1 + left_w;
+
+        if (pt.x >= bar_x - 1 && pt.x <= bar_x + split_bar_w + 1 &&
+            pt.y >= content_y && pt.y <= content_y + content_h) {
+          SetCursor(LoadCursor(NULL, IDC_SIZEWE));
+          return TRUE;
+        }
+      }
+    }
+    break;
+  }
+  case WM_LBUTTONDOWN:
+  {
+    if (win_ctx && win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+      tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
+      if (active_tab->is_split && active_tab->right_browser) {
+        int pt_x = (short)LOWORD(lParam);
+        int pt_y = (short)HIWORD(lParam);
+
+        RECT r;
+        GetClientRect(hwnd, &r);
+        int ui_height = GetUIHeightForWindow(hwnd);
+        int content_y = ui_height + 1;
+        int content_h = r.bottom - content_y - 1;
+        int total_w = r.right - 2;
+        int split_bar_w = 6;
+        float ratio = active_tab->split_ratio;
+        if (ratio < 0.2f || ratio > 0.8f) ratio = 0.5f;
+
+        int left_w = (int)((total_w - split_bar_w) * ratio);
+        int bar_x = 1 + left_w;
+
+        if (pt_x >= bar_x - 1 && pt_x <= bar_x + split_bar_w + 1 &&
+            pt_y >= content_y && pt_y <= content_y + content_h) {
+          SetCapture(hwnd);
+          win_ctx->is_resizing_splitter = 1;
+          win_ctx->drag_start_x = pt_x;
+          win_ctx->drag_start_ratio = ratio;
+          return 0;
+        }
+      }
+    }
+    break;
+  }
+  case WM_MOUSEMOVE:
+  {
+    if (win_ctx && win_ctx->is_resizing_splitter &&
+        win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+      tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
+      int cur_x = (short)LOWORD(lParam);
+
+      RECT r;
+      GetClientRect(hwnd, &r);
+      int total_w = r.right - 2;
+      int split_bar_w = 6;
+      int avail_w = total_w - split_bar_w;
+
+      if (avail_w > 0) {
+        int delta_x = cur_x - win_ctx->drag_start_x;
+        float new_ratio = win_ctx->drag_start_ratio + (float)delta_x / (float)avail_w;
+        if (new_ratio < 0.2f) new_ratio = 0.2f;
+        if (new_ratio > 0.8f) new_ratio = 0.8f;
+        active_tab->split_ratio = new_ratio;
+        SendMessage(hwnd, WM_SIZE, 0, MAKELPARAM(r.right, r.bottom));
+      }
+      return 0;
+    }
+    break;
+  }
+  case WM_LBUTTONUP:
+  {
+    if (win_ctx && win_ctx->is_resizing_splitter) {
+      ReleaseCapture();
+      win_ctx->is_resizing_splitter = 0;
+      return 0;
+    }
+    break;
+  }
   case WM_SIZE:
   {
     if (!win_ctx) return 0;
@@ -303,18 +487,75 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
 
     if (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count)
     {
-      cef_browser_t* content_browser = win_ctx->tabs[win_ctx->active_tab_index].browser;
-      if (content_browser)
+      tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
+      if (active_tab->is_split && active_tab->right_browser)
       {
-        cef_browser_host_t *host = content_browser->get_host(content_browser);
-        if (host)
-        {
-          HWND content_hwnd = host->get_window_handle(host);
-          if (content_hwnd)
-          {
-            MoveWindow(content_hwnd, 1, content_y, content_w, content_h, TRUE);
+        int split_bar_w = 6;
+        float ratio = active_tab->split_ratio;
+        if (ratio < 0.2f || ratio > 0.8f) ratio = 0.5f;
+
+        int left_w = (int)((content_w - split_bar_w) * ratio);
+        int right_w = content_w - split_bar_w - left_w;
+        int left_x = 1;
+        int right_x = 1 + left_w + split_bar_w;
+
+        if (active_tab->browser) {
+          cef_browser_host_t *host = active_tab->browser->get_host(active_tab->browser);
+          if (host) {
+            HWND left_hwnd = host->get_window_handle(host);
+            if (left_hwnd) {
+              MoveWindow(left_hwnd, left_x + 2, content_y + 2, left_w - 4, content_h - 4, TRUE);
+              ShowWindow(left_hwnd, SW_SHOW);
+            }
+            host->base.release(&host->base);
           }
-          host->base.release(&host->base);
+        }
+
+        cef_browser_host_t *r_host = active_tab->right_browser->get_host(active_tab->right_browser);
+        if (r_host) {
+          HWND right_hwnd = r_host->get_window_handle(r_host);
+          if (right_hwnd) {
+            MoveWindow(right_hwnd, right_x + 2, content_y + 2, right_w - 4, content_h - 4, TRUE);
+            ShowWindow(right_hwnd, SW_SHOW);
+          }
+          r_host->base.release(&r_host->base);
+        }
+
+        InvalidateRect(hwnd, NULL, FALSE);
+      }
+      else
+      {
+        cef_browser_t* content_browser = active_tab->browser;
+        if (content_browser)
+        {
+          cef_browser_host_t *host = content_browser->get_host(content_browser);
+          if (host)
+          {
+            HWND content_hwnd = host->get_window_handle(host);
+            if (content_hwnd)
+            {
+              MoveWindow(content_hwnd, 1, content_y, content_w, content_h, TRUE);
+              ShowWindow(content_hwnd, SW_SHOW);
+            }
+            host->base.release(&host->base);
+          }
+        }
+        if (active_tab->right_browser)
+        {
+          cef_browser_host_t *r_host = active_tab->right_browser->get_host(active_tab->right_browser);
+          if (r_host)
+          {
+            HWND right_hwnd = r_host->get_window_handle(r_host);
+            if (right_hwnd) ShowWindow(right_hwnd, SW_HIDE);
+            r_host->base.release(&r_host->base);
+          }
+        }
+      }
+
+      for (int k = 0; k < win_ctx->tab_count; k++) {
+        if (k != win_ctx->active_tab_index) {
+          if (win_ctx->tabs[k].hwnd) ShowWindow(win_ctx->tabs[k].hwnd, SW_HIDE);
+          if (win_ctx->tabs[k].right_hwnd) ShowWindow(win_ctx->tabs[k].right_hwnd, SW_HIDE);
         }
       }
     }

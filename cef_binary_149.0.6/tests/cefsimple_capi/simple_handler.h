@@ -20,6 +20,7 @@ typedef struct _simple_load_handler_t simple_load_handler_t;
 typedef struct _simple_request_handler_t simple_request_handler_t;
 typedef struct _simple_context_menu_handler_t simple_context_menu_handler_t;
 typedef struct _simple_download_handler_t simple_download_handler_t;
+typedef struct _simple_focus_handler_t simple_focus_handler_t;
 
 typedef enum {
   BROWSER_TYPE_CONTENT = 0,
@@ -43,6 +44,7 @@ typedef struct _simple_handler_t {
   simple_request_handler_t *request_handler;
   simple_context_menu_handler_t *context_menu_handler;
   simple_download_handler_t *download_handler;
+  simple_focus_handler_t *focus_handler;
 
   // Pointer to the browser window context this handler belongs to.
   browser_window_t *window_ctx;
@@ -158,6 +160,7 @@ void simple_handler_platform_show_window(simple_handler_t *handler,
 void update_ui_tabs(browser_window_t* win_ctx);
 void update_ui_nav_state(browser_window_t* win_ctx);
 void CreateNewTab(browser_window_t* win_ctx, const char* url);
+void CreateRightSplitBrowser(browser_window_t* win_ctx, tab_info_t* tab, const char* initial_url);
 
 // extern cef_browser_t *g_ui_browser;
 // extern cef_browser_t *g_content_browser;

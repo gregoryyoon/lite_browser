@@ -65,11 +65,17 @@ void CEF_CALLBACK life_span_handler_on_after_created(
       ShowWindow(hwnd, SW_HIDE);
       LogMsg("Set win_ctx->editor_browser = %p, hwnd = %p\n", browser, hwnd);
     } else {
-      // Find the tab that matches this handler instance
       int found_slot = -1;
+      int is_right_slot = 0;
       for (int i = 0; i < win_ctx->tab_count; i++) {
         if (win_ctx->tabs[i].tab_handler == handler->parent) {
           found_slot = i;
+          is_right_slot = 0;
+          break;
+        }
+        if (win_ctx->tabs[i].right_tab_handler == handler->parent) {
+          found_slot = i;
+          is_right_slot = 1;
           break;
         }
       }
@@ -79,6 +85,7 @@ void CEF_CALLBACK life_span_handler_on_after_created(
         for (int i = 0; i < win_ctx->tab_count; i++) {
           if (win_ctx->tabs[i].browser == NULL) {
             found_slot = i;
+            is_right_slot = 0;
             break;
           }
         }
@@ -86,24 +93,31 @@ void CEF_CALLBACK life_span_handler_on_after_created(
 
       if (found_slot != -1) {
         int i = found_slot;
-        win_ctx->tabs[i].browser = browser;
-        browser->base.add_ref(&browser->base);
-        win_ctx->tabs[i].hwnd = hwnd;
-        LogMsg("Assigned browser %p to tab %d via handler matching\n", browser, win_ctx->tabs[i].tab_id);
-
-        if (win_ctx->tabs[i].is_loaded) {
-          // Hide all other tabs and show this one
-          for (int k = 0; k < win_ctx->tab_count; k++) {
-            if (k != i && win_ctx->tabs[k].hwnd) {
-              ShowWindow(win_ctx->tabs[k].hwnd, SW_HIDE);
-            }
-          }
-          win_ctx->active_tab_index = i;
+        if (is_right_slot) {
+          win_ctx->tabs[i].right_browser = browser;
+          browser->base.add_ref(&browser->base);
+          win_ctx->tabs[i].right_hwnd = hwnd;
           ShowWindow(hwnd, SW_SHOW);
+          LogMsg("Assigned right browser %p to tab %d\n", browser, win_ctx->tabs[i].tab_id);
         } else {
-          // Defer showing this window (hide it for now to prevent white flash)
-          ShowWindow(hwnd, SW_HIDE);
-          LogMsg("Defer showing tab %d (HWND %p) until loaded\n", win_ctx->tabs[i].tab_id, hwnd);
+          win_ctx->tabs[i].browser = browser;
+          browser->base.add_ref(&browser->base);
+          win_ctx->tabs[i].hwnd = hwnd;
+          LogMsg("Assigned browser %p to tab %d via handler matching\n", browser, win_ctx->tabs[i].tab_id);
+
+          if (win_ctx->tabs[i].is_loaded) {
+            for (int k = 0; k < win_ctx->tab_count; k++) {
+              if (k != i) {
+                if (win_ctx->tabs[k].hwnd) ShowWindow(win_ctx->tabs[k].hwnd, SW_HIDE);
+                if (win_ctx->tabs[k].right_hwnd) ShowWindow(win_ctx->tabs[k].right_hwnd, SW_HIDE);
+              }
+            }
+            win_ctx->active_tab_index = i;
+            ShowWindow(hwnd, SW_SHOW);
+          } else {
+            ShowWindow(hwnd, SW_HIDE);
+            LogMsg("Defer showing tab %d (HWND %p) until loaded\n", win_ctx->tabs[i].tab_id, hwnd);
+          }
         }
       }
       // Notify UI about new tabs
@@ -148,51 +162,47 @@ int CEF_CALLBACK life_span_handler_on_before_popup(
     int* no_javascript_access) {
 
   simple_life_span_handler_t* handler = (simple_life_span_handler_t*)self;
-  browser_window_t *win_ctx = (handler && handler->parent) ? handler->parent->window_ctx : NULL;
+  LogMsg("life_span_handler_on_before_popup: target_url=%s\n", target_url && target_url->str ? "valid" : "null");
 
-  cef_string_utf8_t url_utf8 = {};
-  int conv_ok = 0;
-
-  if (target_url && target_url->str && target_url->length > 0) {
+  browser_window_t *win_ctx = handler->parent->window_ctx;
+  if (win_ctx && target_url && target_url->str) {
+    cef_string_utf8_t url_utf8 = {};
     cef_string_to_utf8(target_url->str, target_url->length, &url_utf8);
-    conv_ok = 1;
-  }
 
-  char target_url_str[4096] = {0};
-  if (conv_ok && url_utf8.str && strlen(url_utf8.str) > 0) {
-    strncpy(target_url_str, url_utf8.str, sizeof(target_url_str) - 1);
+    if (url_utf8.str && strlen(url_utf8.str) > 0) {
+      char target_url_str[4096];
+      strncpy(target_url_str, url_utf8.str, sizeof(target_url_str) - 1);
+      target_url_str[sizeof(target_url_str) - 1] = '\0';
+      cef_string_utf8_clear(&url_utf8);
+
+      CreateNewTab(win_ctx, target_url_str);
+      return 1;
+    }
     cef_string_utf8_clear(&url_utf8);
-  } else {
-    strcpy(target_url_str, "about:blank");
   }
 
-  if (win_ctx && win_ctx->tab_count < MAX_TABS) {
-    CreateNewTab(win_ctx, target_url_str);
-  }
-
-  // Always return 1 to cancel native Chromium popup window creation
-  return 1;
+  return 0;
 }
 
 void CEF_CALLBACK life_span_handler_on_before_close(
     cef_life_span_handler_t *self, cef_browser_t *browser) {
   simple_life_span_handler_t *handler = (simple_life_span_handler_t *)self;
 
-  LogMsg("life_span_handler_on_before_close: browser=%p, g_window_count=%d, list_count=%zu\n",
-         browser, g_window_count, browser_list_count(&handler->parent->browser_list));
+  LogMsg("life_span_handler_on_before_close: browser=%p\n", browser);
 
   browser_list_remove(&handler->parent->browser_list, browser);
 
   browser_window_t *win_ctx = handler->parent->window_ctx;
-
   if (win_ctx) {
-    if (win_ctx->ui_browser && browser->get_identifier(browser) ==
-                            win_ctx->ui_browser->get_identifier(win_ctx->ui_browser)) {
+    if (win_ctx->ui_browser &&
+        browser->get_identifier(browser) ==
+            win_ctx->ui_browser->get_identifier(win_ctx->ui_browser)) {
       win_ctx->ui_browser->base.release(&win_ctx->ui_browser->base);
       win_ctx->ui_browser = NULL;
       LogMsg("on_before_close: cleared ui_browser\n");
-    } else if (win_ctx->editor_browser && browser->get_identifier(browser) ==
-                            win_ctx->editor_browser->get_identifier(win_ctx->editor_browser)) {
+    } else if (win_ctx->editor_browser &&
+               browser->get_identifier(browser) ==
+                   win_ctx->editor_browser->get_identifier(win_ctx->editor_browser)) {
       win_ctx->editor_browser->base.release(&win_ctx->editor_browser->base);
       win_ctx->editor_browser = NULL;
       LogMsg("on_before_close: cleared editor_browser\n");
@@ -206,6 +216,16 @@ void CEF_CALLBACK life_span_handler_on_before_close(
           LogMsg("on_before_close: cleared content_browser tab %d\n", i);
           break;
         }
+        if (win_ctx->tabs[i].right_browser &&
+            browser->get_identifier(browser) ==
+                win_ctx->tabs[i].right_browser->get_identifier(win_ctx->tabs[i].right_browser)) {
+          win_ctx->tabs[i].right_browser->base.release(&win_ctx->tabs[i].right_browser->base);
+          win_ctx->tabs[i].right_browser = NULL;
+          win_ctx->tabs[i].right_hwnd = NULL;
+          win_ctx->tabs[i].right_tab_handler = NULL;
+          LogMsg("on_before_close: cleared right_browser tab %d\n", i);
+          break;
+        }
       }
     }
 
@@ -217,7 +237,7 @@ void CEF_CALLBACK life_span_handler_on_before_close(
       any_active = 1;
     }
     for (int i = 0; i < win_ctx->tab_count; i++) {
-      if (win_ctx->tabs[i].browser != NULL) {
+      if (win_ctx->tabs[i].browser != NULL || win_ctx->tabs[i].right_browser != NULL) {
         any_active = 1;
         break;
       }

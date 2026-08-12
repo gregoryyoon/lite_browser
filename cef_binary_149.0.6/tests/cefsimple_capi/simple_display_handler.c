@@ -47,19 +47,33 @@ void CEF_CALLBACK display_handler_on_title_change(cef_display_handler_t* self,
   browser_window_t *win_ctx = handler->parent->window_ctx;
   if (win_ctx) {
     for (int i = 0; i < win_ctx->tab_count; i++) {
+      int is_right = 0;
       if (win_ctx->tabs[i].browser &&
           browser->get_identifier(browser) ==
               win_ctx->tabs[i].browser->get_identifier(win_ctx->tabs[i].browser)) {
-        if (title_utf8.str) {
+        is_right = 0;
+      } else if (win_ctx->tabs[i].right_browser &&
+                 browser->get_identifier(browser) ==
+                     win_ctx->tabs[i].right_browser->get_identifier(win_ctx->tabs[i].right_browser)) {
+        is_right = 1;
+      } else {
+        continue;
+      }
+
+      if (title_utf8.str) {
+        if (is_right) {
+          strncpy(win_ctx->tabs[i].right_title, title_utf8.str, sizeof(win_ctx->tabs[i].right_title) - 1);
+          win_ctx->tabs[i].right_title[sizeof(win_ctx->tabs[i].right_title) - 1] = '\0';
+        } else {
           strncpy(win_ctx->tabs[i].title, title_utf8.str, sizeof(win_ctx->tabs[i].title) - 1);
           win_ctx->tabs[i].title[sizeof(win_ctx->tabs[i].title) - 1] = '\0';
         }
-
-        if (i == win_ctx->active_tab_index) {
-          simple_handler_platform_title_change(handler->parent, browser, title);
-        }
-        break;
       }
+
+      if (i == win_ctx->active_tab_index && !is_right) {
+        simple_handler_platform_title_change(handler->parent, browser, title);
+      }
+      break;
     }
     update_ui_tabs(win_ctx);
   }
@@ -88,15 +102,29 @@ display_handler_on_address_change(cef_display_handler_t* self,
 
     if (!is_ui_browser) {
       for (int i = 0; i < win_ctx->tab_count; i++) {
+        int is_right = 0;
         if (win_ctx->tabs[i].browser &&
             browser->get_identifier(browser) ==
                 win_ctx->tabs[i].browser->get_identifier(win_ctx->tabs[i].browser)) {
-          if (url_utf8.str) {
+          is_right = 0;
+        } else if (win_ctx->tabs[i].right_browser &&
+                   browser->get_identifier(browser) ==
+                       win_ctx->tabs[i].right_browser->get_identifier(win_ctx->tabs[i].right_browser)) {
+          is_right = 1;
+        } else {
+          continue;
+        }
+
+        if (url_utf8.str) {
+          if (is_right) {
+            strncpy(win_ctx->tabs[i].right_url, url_utf8.str, sizeof(win_ctx->tabs[i].right_url) - 1);
+            win_ctx->tabs[i].right_url[sizeof(win_ctx->tabs[i].right_url) - 1] = '\0';
+          } else {
             strncpy(win_ctx->tabs[i].url, url_utf8.str, sizeof(win_ctx->tabs[i].url) - 1);
             win_ctx->tabs[i].url[sizeof(win_ctx->tabs[i].url) - 1] = '\0';
           }
-          break;
         }
+        break;
       }
       update_ui_tabs(win_ctx);
       update_ui_nav_state(win_ctx);

@@ -27,6 +27,21 @@ function detachTab(id) {
   window.location.href = 'http://ui-action/detach-tab?id=' + id;
 }
 
+function toggleDualSplit() {
+  window.location.href = 'http://ui-action/toggle-dual-split';
+}
+
+window.updateDualSplitState = function(isSplit, activeSplit) {
+  const btn = document.getElementById('dual-split-btn');
+  if (btn) {
+    if (isSplit) {
+      btn.classList.add('active');
+    } else {
+      btn.classList.remove('active');
+    }
+  }
+};
+
 function handleKey(event) {
   if (event.key === 'Enter') {
     const dropdown = document.getElementById('omnibox-dropdown');
@@ -240,6 +255,14 @@ window.updateTabsList = function(tabs, activeId) {
       window.location.href = 'http://ui-action/show-tab-menu?id=' + tab.id + '&x=' + x + '&y=' + y;
     });
     
+    if (tab.is_split) {
+      const splitIcon = document.createElement('span');
+      splitIcon.className = 'tab-split-badge';
+      splitIcon.title = '듀얼 탭 분할 상태';
+      splitIcon.innerHTML = `<svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-8 16H5V5h6v14zm8 0h-6V5h6v14z"/></svg>`;
+      tabEl.appendChild(splitIcon);
+    }
+
     const titleEl = document.createElement('span');
     titleEl.className = 'tab-title';
     const displayTitle = isManager ? '즐겨찾기' : (tab.title || '새 탭');

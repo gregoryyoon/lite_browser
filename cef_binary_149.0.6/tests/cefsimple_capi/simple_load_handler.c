@@ -109,8 +109,9 @@ load_handler_on_loading_state_change(cef_load_handler_t* self,
       if (win_ctx->active_tab_index == found_idx && win_ctx->tabs[found_idx].hwnd) {
         // Hide all other tabs and show this newly active tab immediately on load start/change
         for (int k = 0; k < win_ctx->tab_count; k++) {
-          if (k != found_idx && win_ctx->tabs[k].hwnd) {
-            ShowWindow(win_ctx->tabs[k].hwnd, SW_HIDE);
+          if (k != found_idx) {
+            if (win_ctx->tabs[k].hwnd) ShowWindow(win_ctx->tabs[k].hwnd, SW_HIDE);
+            if (win_ctx->tabs[k].right_hwnd) ShowWindow(win_ctx->tabs[k].right_hwnd, SW_HIDE);
           }
         }
         ShowWindow(win_ctx->tabs[found_idx].hwnd, SW_SHOW);

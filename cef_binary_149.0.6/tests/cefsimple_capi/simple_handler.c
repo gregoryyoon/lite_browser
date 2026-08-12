@@ -362,6 +362,16 @@ simple_life_span_handler_t *life_span_handler_create(simple_handler_t *parent);
 simple_load_handler_t *load_handler_create(simple_handler_t *parent);
 simple_request_handler_t *request_handler_create(simple_handler_t *parent);
 simple_context_menu_handler_t *context_menu_handler_create(simple_handler_t *parent);
+simple_download_handler_t *download_handler_create(simple_handler_t *parent);
+
+typedef struct _simple_focus_handler_t {
+  cef_focus_handler_t handler;
+  atomic_int ref_count;
+  simple_handler_t *parent;
+} simple_focus_handler_t;
+
+simple_focus_handler_t *focus_handler_create(simple_handler_t *parent);
+cef_focus_handler_t *CEF_CALLBACK simple_handler_get_focus_handler(cef_client_t *self);
 
 //
 // Client handler implementation.
@@ -397,6 +407,10 @@ int CEF_CALLBACK simple_handler_release(cef_base_ref_counted_t *self) {
     if (handler->download_handler) {
       handler->download_handler->handler.base.release(
           &handler->download_handler->handler.base);
+    }
+    if (handler->focus_handler) {
+      handler->focus_handler->handler.base.release(
+          &handler->focus_handler->handler.base);
     }
 
     // Destroy the browser list.
@@ -489,6 +503,17 @@ simple_handler_get_request_handler(cef_client_t *self) {
   return NULL;
 }
 
+cef_focus_handler_t *CEF_CALLBACK
+simple_handler_get_focus_handler(cef_client_t *self) {
+  simple_handler_t *handler = (simple_handler_t *)self;
+  if (handler->focus_handler) {
+    handler->focus_handler->handler.base.add_ref(
+        &handler->focus_handler->handler.base);
+    return &handler->focus_handler->handler;
+  }
+  return NULL;
+}
+
 //
 // Public API implementation.
 //
@@ -511,6 +536,7 @@ simple_handler_t *simple_handler_create(int is_alloy_style) {
   handler->client.get_request_handler = simple_handler_get_request_handler;
   handler->client.get_context_menu_handler = simple_handler_get_context_menu_handler;
   handler->client.get_download_handler = simple_handler_get_download_handler;
+  handler->client.get_focus_handler = simple_handler_get_focus_handler;
 
   // Create sub-handlers.
   handler->display_handler = display_handler_create(handler);
@@ -525,6 +551,8 @@ simple_handler_t *simple_handler_create(int is_alloy_style) {
   CHECK(handler->context_menu_handler);
   handler->download_handler = download_handler_create(handler);
   CHECK(handler->download_handler);
+  handler->focus_handler = focus_handler_create(handler);
+  CHECK(handler->focus_handler);
 
   // Initialize other fields.
   handler->is_alloy_style = is_alloy_style;
@@ -672,17 +700,27 @@ void update_ui_tabs(browser_window_t* win_ctx) {
 
   char json[65536] = "[";
   for (int i = 0; i < win_ctx->tab_count; i++) {
-    char escaped_title[512] = {0};
+    char escaped_title[1024] = {0};
     char escaped_url[4096] = {0};
-    EscapeJsonString(win_ctx->tabs[i].title, escaped_title, sizeof(escaped_title));
+
+    if (win_ctx->tabs[i].is_split) {
+      const char* t1 = win_ctx->tabs[i].title[0] ? win_ctx->tabs[i].title : "새 탭";
+      const char* t2 = win_ctx->tabs[i].right_title[0] ? win_ctx->tabs[i].right_title : "북마크 대시보드";
+      char combo_title[1024];
+      snprintf(combo_title, sizeof(combo_title), "%s | %s", t1, t2);
+      EscapeJsonString(combo_title, escaped_title, sizeof(escaped_title));
+    } else {
+      EscapeJsonString(win_ctx->tabs[i].title, escaped_title, sizeof(escaped_title));
+    }
     EscapeJsonString(win_ctx->tabs[i].url, escaped_url, sizeof(escaped_url));
 
     char tab_str[5000];
     snprintf(tab_str, sizeof(tab_str), 
-             "{\"id\":%d,\"title\":\"%s\",\"url\":\"%s\"}%s", 
+             "{\"id\":%d,\"title\":\"%s\",\"url\":\"%s\",\"is_split\":%d}%s", 
              win_ctx->tabs[i].tab_id, 
              escaped_title, 
              escaped_url,
+             win_ctx->tabs[i].is_split,
              (i == win_ctx->tab_count - 1) ? "" : ",");
     
     if (strlen(json) + strlen(tab_str) < sizeof(json) - 5) {
@@ -695,7 +733,7 @@ void update_ui_tabs(browser_window_t* win_ctx) {
   snprintf(js_code, sizeof(js_code), "if (window.updateTabsList) { window.updateTabsList(%s, %d); }", 
            json, 
            (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) ? 
-           win_ctx->tabs[win_ctx->active_tab_index].tab_id : 0);
+           win_ctx->tabs[win_ctx->active_tab_index].tab_id : -1);
 
   cef_frame_t* frame = win_ctx->ui_browser->get_main_frame(win_ctx->ui_browser);
   if (frame) {
@@ -710,7 +748,18 @@ void update_ui_tabs(browser_window_t* win_ctx) {
 void update_ui_nav_state(browser_window_t* win_ctx) {
   if (!win_ctx || win_ctx->active_tab_index < 0 || win_ctx->active_tab_index >= win_ctx->tab_count) return;
 
-  cef_browser_t* cb = win_ctx->tabs[win_ctx->active_tab_index].browser;
+  tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
+  cef_browser_t* cb = NULL;
+  const char* active_url = active_tab->url;
+
+  if (active_tab->is_split && active_tab->active_split == 1 && active_tab->right_browser) {
+    cb = active_tab->right_browser;
+    active_url = active_tab->right_url;
+  } else {
+    cb = active_tab->browser;
+    active_url = active_tab->url;
+  }
+
   if (!cb || !win_ctx->ui_browser) return;
 
   int can_go_back = cb->can_go_back(cb);
@@ -718,13 +767,15 @@ void update_ui_nav_state(browser_window_t* win_ctx) {
   int is_loading = cb->is_loading(cb);
 
   char escaped_url[4096] = {0};
-  EscapeJsonString(win_ctx->tabs[win_ctx->active_tab_index].url, escaped_url, sizeof(escaped_url));
+  EscapeJsonString(active_url, escaped_url, sizeof(escaped_url));
 
   char js_code[5000];
   snprintf(js_code, sizeof(js_code), 
            "if (window.updateNavState) { window.updateNavState(%d, %d, %d); } "
-           "if (window.updateAddress) { window.updateAddress(\"%s\"); }", 
-           can_go_back, can_go_forward, is_loading, escaped_url);
+           "if (window.updateAddress) { window.updateAddress(\"%s\"); } "
+           "if (window.updateDualSplitState) { window.updateDualSplitState(%d, %d); }", 
+           can_go_back, can_go_forward, is_loading, escaped_url,
+           active_tab->is_split, active_tab->active_split);
 
   cef_frame_t* frame = win_ctx->ui_browser->get_main_frame(win_ctx->ui_browser);
   if (frame) {
@@ -773,8 +824,9 @@ static void RemoveTabAt(browser_window_t* win_ctx, int remove_idx, int close_cef
   win_ctx->active_tab_index = new_active;
 
   for (int k = 0; k < win_ctx->tab_count; k++) {
-    if (k != new_active && win_ctx->tabs[k].hwnd) {
-      ShowWindow(win_ctx->tabs[k].hwnd, SW_HIDE);
+    if (k != new_active) {
+      if (win_ctx->tabs[k].hwnd) ShowWindow(win_ctx->tabs[k].hwnd, SW_HIDE);
+      if (win_ctx->tabs[k].right_hwnd) ShowWindow(win_ctx->tabs[k].right_hwnd, SW_HIDE);
     }
   }
 
@@ -963,10 +1015,52 @@ int CEF_CALLBACK request_handler_on_before_browse(
       if (win_ctx) {
         cef_browser_t *cb = NULL;
         if (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
-          cb = win_ctx->tabs[win_ctx->active_tab_index].browser;
+          tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
+          if (active_tab->is_split && active_tab->active_split == 1 && active_tab->right_browser) {
+            cb = active_tab->right_browser;
+          } else {
+            cb = active_tab->browser;
+          }
         }
 
-        if (strcmp(action, "back") == 0) {
+        if (strcmp(action, "toggle-dual-split") == 0) {
+          if (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+            tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
+            if (!active_tab->is_split) {
+              CreateRightSplitBrowser(win_ctx, active_tab, "lite://favorites");
+            } else {
+              if (active_tab->active_split == 1 && active_tab->right_url[0]) {
+                if (active_tab->browser) {
+                  cef_frame_t* f = active_tab->browser->get_main_frame(active_tab->browser);
+                  if (f) {
+                    cef_string_t u = {};
+                    cef_string_from_utf8(active_tab->right_url, strlen(active_tab->right_url), &u);
+                    f->load_url(f, &u);
+                    cef_string_clear(&u);
+                    f->base.release(&f->base);
+                  }
+                }
+              }
+              if (active_tab->right_browser) {
+                cef_browser_host_t* host = active_tab->right_browser->get_host(active_tab->right_browser);
+                if (host) {
+                  host->close_browser(host, 1);
+                  host->base.release(&host->base);
+                }
+                if (active_tab->right_hwnd) ShowWindow(active_tab->right_hwnd, SW_HIDE);
+                active_tab->right_browser = NULL;
+                active_tab->right_hwnd = NULL;
+                active_tab->right_tab_handler = NULL;
+              }
+              active_tab->is_split = 0;
+              active_tab->active_split = 0;
+              RECT r;
+              GetClientRect(win_ctx->main_hwnd, &r);
+              PostMessage(win_ctx->main_hwnd, WM_SIZE, 0, MAKELPARAM(r.right, r.bottom));
+              update_ui_nav_state(win_ctx);
+            }
+          }
+        } else if (strcmp(action, "back") == 0) {
           if (cb) cb->go_back(cb);
         } else if (strcmp(action, "forward") == 0) {
           if (cb) cb->go_forward(cb);
@@ -2140,8 +2234,9 @@ int CEF_CALLBACK request_handler_on_before_browse(
           }
           if (found_idx != -1 && found_idx != win_ctx->active_tab_index) {
             for (int k = 0; k < win_ctx->tab_count; k++) {
-              if (k != found_idx && win_ctx->tabs[k].hwnd) {
-                ShowWindow(win_ctx->tabs[k].hwnd, SW_HIDE);
+              if (k != found_idx) {
+                if (win_ctx->tabs[k].hwnd) ShowWindow(win_ctx->tabs[k].hwnd, SW_HIDE);
+                if (win_ctx->tabs[k].right_hwnd) ShowWindow(win_ctx->tabs[k].right_hwnd, SW_HIDE);
               }
             }
 
@@ -2404,6 +2499,7 @@ void CEF_CALLBACK context_menu_on_before_context_menu(
     
     if (has_link) {
       AppendMenuW(hMenu, MF_STRING, 3001, L"새 탭에서 링크 열기");
+      AppendMenuW(hMenu, MF_STRING, 3004, L"다른 분할 화면에서 열기");
       AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
       AppendMenuW(hMenu, MF_STRING, 3002, L"링크 페이지 저장");
       AppendMenuW(hMenu, MF_STRING, 3003, L"링크 복사");
@@ -2457,6 +2553,34 @@ void CEF_CALLBACK context_menu_on_before_context_menu(
           browser_window_t* win_ctx = ctx_handler->parent->window_ctx;
           if (win_ctx) {
             CreateNewTab(win_ctx, link_url_str);
+          }
+        }
+      } else if (cmd == 3004) {
+        if (link_url_str) {
+          browser_window_t* win_ctx = ctx_handler->parent->window_ctx;
+          if (win_ctx && win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+            tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
+            if (!active_tab->is_split) {
+              CreateRightSplitBrowser(win_ctx, active_tab, link_url_str);
+            } else {
+              int target_side = 1 - active_tab->active_split;
+              cef_browser_t* target_browser = (target_side == 1) ? active_tab->right_browser : active_tab->browser;
+              if (!target_browser && target_side == 1) {
+                CreateRightSplitBrowser(win_ctx, active_tab, link_url_str);
+              } else if (target_browser) {
+                cef_frame_t* target_frame = target_browser->get_main_frame(target_browser);
+                if (target_frame) {
+                  cef_string_t url_str = {};
+                  cef_string_from_utf8(link_url_str, strlen(link_url_str), &url_str);
+                  target_frame->load_url(target_frame, &url_str);
+                  cef_string_clear(&url_str);
+                  target_frame->base.release(&target_frame->base);
+                }
+              }
+              active_tab->active_split = target_side;
+              update_ui_nav_state(win_ctx);
+              InvalidateRect(win_ctx->main_hwnd, NULL, FALSE);
+            }
           }
         }
       } else if (cmd == 3002) {
@@ -2632,4 +2756,129 @@ void CreateNewTab(browser_window_t* win_ctx, const char* url) {
       &content_window_info, &content_handler->client, &content_url,
       &browser_settings, NULL, NULL);
   cef_string_clear(&content_url);
+}
+
+void CreateRightSplitBrowser(browser_window_t* win_ctx, tab_info_t* tab, const char* initial_url) {
+  if (!win_ctx || !tab) return;
+
+  const char* target_url = (initial_url && strlen(initial_url) > 0) ? initial_url : "lite://favorites";
+
+  RECT rect;
+  GetClientRect(win_ctx->main_hwnd, &rect);
+  int width = rect.right;
+  int height = rect.bottom;
+
+  int ui_height = GetUIHeightForWindow(win_ctx->main_hwnd);
+  int content_y = ui_height + 1;
+  int content_h = height - content_y - 1;
+  int content_w = width - 2;
+
+  tab->is_split = 1;
+  if (tab->split_ratio <= 0.1f || tab->split_ratio >= 0.9f) {
+    tab->split_ratio = 0.5f;
+  }
+  tab->active_split = 1;
+  tab->right_is_loaded = 0;
+  strncpy(tab->right_url, target_url, sizeof(tab->right_url) - 1);
+  strcpy(tab->right_title, "북마크 대시보드");
+
+  int split_bar_w = 6;
+  int left_w = (int)((content_w - split_bar_w) * tab->split_ratio);
+  int right_w = content_w - split_bar_w - left_w;
+  int right_x = 1 + left_w + split_bar_w;
+
+  cef_browser_settings_t browser_settings = {};
+  browser_settings.size = sizeof(cef_browser_settings_t);
+
+  cef_window_info_t right_window_info = {};
+  right_window_info.size = sizeof(cef_window_info_t);
+  right_window_info.style = WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
+  right_window_info.parent_window = win_ctx->main_hwnd;
+  right_window_info.bounds.x = right_x + 2;
+  right_window_info.bounds.y = content_y + 2;
+  right_window_info.bounds.width = right_w - 4;
+  right_window_info.bounds.height = content_h - 4;
+  right_window_info.runtime_style = CEF_RUNTIME_STYLE_DEFAULT;
+
+  cef_string_t content_url = {};
+  cef_string_from_utf8(target_url, strlen(target_url), &content_url);
+
+  simple_handler_t *right_handler = simple_handler_create(0);
+  right_handler->window_ctx = win_ctx;
+  tab->right_tab_handler = right_handler;
+
+  cef_browser_host_create_browser(
+      &right_window_info, &right_handler->client, &content_url,
+      &browser_settings, NULL, NULL);
+  cef_string_clear(&content_url);
+
+  SendMessage(win_ctx->main_hwnd, WM_SIZE, 0, MAKELPARAM(width, height));
+  update_ui_nav_state(win_ctx);
+}
+
+IMPLEMENT_REFCOUNTING_SIMPLE(simple_focus_handler_t, focus_handler, ref_count)
+
+int CEF_CALLBACK focus_handler_on_set_focus(cef_focus_handler_t* self,
+                                             cef_browser_t* browser,
+                                             cef_focus_source_t source) {
+  simple_focus_handler_t* handler = (simple_focus_handler_t*)self;
+  browser_window_t *win_ctx = (handler && handler->parent) ? handler->parent->window_ctx : NULL;
+  if (win_ctx && win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+    tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
+    if (active_tab->is_split && active_tab->right_browser) {
+      int new_split = -1;
+      if (active_tab->browser &&
+          browser->get_identifier(browser) == active_tab->browser->get_identifier(active_tab->browser)) {
+        new_split = 0;
+      } else if (active_tab->right_browser &&
+                 browser->get_identifier(browser) == active_tab->right_browser->get_identifier(active_tab->right_browser)) {
+        new_split = 1;
+      }
+      if (new_split != -1 && active_tab->active_split != new_split) {
+        active_tab->active_split = new_split;
+        update_ui_nav_state(win_ctx);
+        InvalidateRect(win_ctx->main_hwnd, NULL, FALSE);
+      }
+    }
+  }
+  return 0;
+}
+
+void CEF_CALLBACK focus_handler_on_got_focus(cef_focus_handler_t* self,
+                                             cef_browser_t* browser) {
+  simple_focus_handler_t* handler = (simple_focus_handler_t*)self;
+  browser_window_t *win_ctx = (handler && handler->parent) ? handler->parent->window_ctx : NULL;
+  if (win_ctx && win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+    tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
+    if (active_tab->is_split && active_tab->right_browser) {
+      int new_split = -1;
+      if (active_tab->browser &&
+          browser->get_identifier(browser) == active_tab->browser->get_identifier(active_tab->browser)) {
+        new_split = 0;
+      } else if (active_tab->right_browser &&
+                 browser->get_identifier(browser) == active_tab->right_browser->get_identifier(active_tab->right_browser)) {
+        new_split = 1;
+      }
+      if (new_split != -1 && active_tab->active_split != new_split) {
+        active_tab->active_split = new_split;
+        update_ui_nav_state(win_ctx);
+        InvalidateRect(win_ctx->main_hwnd, NULL, FALSE);
+      }
+    }
+  }
+}
+
+simple_focus_handler_t *focus_handler_create(simple_handler_t *parent) {
+  simple_focus_handler_t *handler = (simple_focus_handler_t *)calloc(1, sizeof(simple_focus_handler_t));
+  CHECK(handler);
+
+  INIT_CEF_BASE_REFCOUNTED(&handler->handler.base, cef_focus_handler_t, focus_handler);
+
+  handler->handler.on_take_focus = NULL;
+  handler->handler.on_set_focus = focus_handler_on_set_focus;
+  handler->handler.on_got_focus = focus_handler_on_got_focus;
+  handler->parent = parent;
+
+  atomic_store(&handler->ref_count, 1);
+  return handler;
 }
