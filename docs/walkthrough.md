@@ -266,3 +266,25 @@ Edge 브라우저의 `edge://downloads/` 디자인과 UX를 참고하여 다운�
 # Debug 모드 빌드 (개발 및 기능 테스트)
 cmake --build c:\projects\lite_browser\cef_binary_149.0.6\build --config Debug --target cefsimple_capi
 ```
+
+---
+
+## 10. 마크다운 에디터 기능 제거 (Markdown Editor Feature Removal)
+
+### 10.1 개요
+초기 아키텍처에 구현되어 있던 **마크다운 에디터(Markdown Editor)** 기능이 실사용성이 떨어지고 불필요한 스타트업 리소스(숨겨진 자식 브라우저 동시 기동)를 소비함에 따라, 툴바 UI, 팝업 메뉴, C 백엔드 구조체/IPC 및 스타트업 초기화 로직 전반에서 제거하였습니다.
+
+### 10.2 주요 작업 내용
+1. **HTML/JS UI 제거**:
+   - [`ui/index.html`](file:///c:/projects/lite_browser/ui/index.html): 네비게이션 툴바 내 마크다운 에디터 토글 버튼 (`#editor-toggle-btn`) 삭제.
+   - [`ui/app.js`](file:///c:/projects/lite_browser/ui/app.js): `toggleEditor()` 액션 함수 삭제.
+   - [`ui/editor.html`](file:///c:/projects/lite_browser/ui/editor.html): 사용되지 않는 에디터 HTML 페이지 삭제.
+2. **C 백엔드 아키텍처 정리**:
+   - [`browser_context.h`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/browser_context.h): `browser_window_t` 내 `editor_browser`, `editor_hwnd`, `show_editor` 멤버 삭제.
+   - [`simple_handler.h`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_handler.h): `browser_type_t` 열거형 내 `BROWSER_TYPE_EDITOR` 항목 삭제.
+   - [`simple_app.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_app.c): `ResolveEditorPath` 제거, 앱 기동 시 에디터 자식 브라우저 생성 로직(Step 3) 제거, `WM_SIZE` 레이아웃 분할 계산 제거, 윈도우 소멸 시 에디터 브라우저 닫기 처리 제거.
+   - [`simple_life_span_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_life_span_handler.c): `on_after_created` 및 `on_before_close` 수명 주기 핸들러 내 `editor_browser` 참조/해제 코드 제거.
+   - [`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_handler.c): `show-menu` 메뉴 내 "마크다운 에디터 토글" (cmd 1007) 항목 삭제, `toggle-editor` 및 모든 `editor-*` IPC 통신 액션 루틴 제거.
+3. **검증**:
+   - Debug 빌드 (`cmake --build c:\projects\lite_browser\cef_binary_149.0.6\build --config Debug --target cefsimple_capi`) 결과 정상 종료 (Exit code 0).
+

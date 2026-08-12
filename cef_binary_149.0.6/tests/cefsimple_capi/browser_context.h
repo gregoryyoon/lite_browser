@@ -34,9 +34,6 @@ typedef struct _browser_window_t {
   tab_info_t tabs[MAX_TABS];
   int active_tab_index;
   int tab_count;
-  cef_browser_t* editor_browser;
-  HWND editor_hwnd;
-  int show_editor;
   int is_ui_expanded;
   int ui_expanded_height;
 
