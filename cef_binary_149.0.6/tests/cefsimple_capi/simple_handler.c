@@ -661,7 +661,7 @@ void update_ui_tabs(browser_window_t* win_ctx) {
 
     if (win_ctx->tabs[i].is_split) {
       const char* t1 = win_ctx->tabs[i].title[0] ? win_ctx->tabs[i].title : "새 탭";
-      const char* t2 = win_ctx->tabs[i].right_title[0] ? win_ctx->tabs[i].right_title : "북마크 대시보드";
+      const char* t2 = win_ctx->tabs[i].right_title[0] ? win_ctx->tabs[i].right_title : "북마크 관리자";
       char combo_title[1024];
       snprintf(combo_title, sizeof(combo_title), "%s | %s", t1, t2);
       EscapeJsonString(combo_title, escaped_title, sizeof(escaped_title));
@@ -2219,7 +2219,7 @@ void CreateRightSplitBrowser(browser_window_t* win_ctx, tab_info_t* tab, const c
   tab->active_split = 1;
   tab->right_is_loaded = 0;
   strncpy(tab->right_url, target_url, sizeof(tab->right_url) - 1);
-  strcpy(tab->right_title, "북마크 대시보드");
+  strcpy(tab->right_title, "북마크 관리자");
 
   int split_bar_w = 6;
   int left_w = (int)((content_w - split_bar_w) * tab->split_ratio);

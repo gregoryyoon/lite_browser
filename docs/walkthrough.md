@@ -149,6 +149,7 @@ LiteBrowser 실행 시 Windows OS의 사용자 기본 로캘(UI Language)을 자
 ### 3.5 북마크 전용 대시보드 (`lite://favorites`)
 - **소스**: [`ui/manager.html`](file:///c:/projects/lite_browser/ui/manager.html), [`ui/manager.js`](file:///c:/projects/lite_browser/ui/manager.js), [`ui/manager.css`](file:///c:/projects/lite_browser/ui/manager.css)
 - **기능**: 브라우저 디폴트 스타트업 URL, Ctrl+Shift+O 단축키 연결. 사이드바 태그 리스트, Temporal Slider 타임라인 필터, Card/List 뷰 스위처 제공.
+- **탭 제목 일원화**: 새 탭 및 `lite://favorites` 접속 시 탭 제목을 `북마크 관리자`로 일원화 표기.
 - **대시보드 정렬 알고리즘**: 전체 북마크 목록을 1순위(최근 30일간 다빈도 방문) ➔ 2순위(최근 추가된 북마크 생성일) 순으로 정렬하여 그리드/리스트 뷰에 우선 렌더링.
 - **`✨ 하이라이트 앵커` 카드 & 리스트 뷰 통합 뱃지**: 본문 영역을 마우스 드래그한 문장이 함께 저장된 북마크에 대해 카드형 뷰(`card-highlight-box`) 및 리스트형 뷰(`list-row-highlight`) 모두 100% 동일한 디자인 시스템(황금색 엠버 `3px` 테두리, `#fffbe6` 배경, `#78350f` 글자색)으로 일원화하여 직관 노출.
 
