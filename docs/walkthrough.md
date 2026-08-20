@@ -301,7 +301,7 @@ cmake --build c:\projects\lite_browser\cef_binary_149.0.6\build --config Debug -
    - [`cef_binary_149.0.6/tests/cefsimple_capi/CMakeLists.txt`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/CMakeLists.txt): `set_target_properties(${CEF_TARGET} PROPERTIES OUTPUT_NAME "lite_browser")`를 추가하여 Debug 및 Release 모드 모두 `lite_browser.exe` 및 `lite_browser.dll`로 출력되도록 수정.
    - 부트스트랩 바이너리 복사(`COPY_SINGLE_FILE`) 및 아이콘 커스텀 주입(`inject_icon.py`) 대상을 `lite_browser.exe`로 업데이트.
 2. **NSIS 인스톨러 스크립트 수정**:
-   - [`installer.nsi`](file:///c:/projects/lite_browser/installer.nsi): 설치 대상 바이너리를 `lite_browser.exe` / `lite_browser.dll`로 변경, 시작 메뉴 및 바탕화면 바로가기 target을 `lite_browser.exe`로 수정, 언인스톨 삭제 항목 갱신.
+- [`installer.nsi`](file:///c:/projects/lite_browser/installer.nsi): 설치 대상 바이너리를 `lite_browser.exe` / `lite_browser.dll`로 변경, 시작 메뉴 및 바탕화면 바로가기 target을 `lite_browser.exe`로 수정, 언인스톨 삭제 항목 갱신.
 3. **VSCode 환경설정 수정**:
    - [`.vscode/launch.json`](file:///c:/projects/lite_browser/.vscode/launch.json): 디버거 실행 파일 경로를 `Debug/lite_browser.exe`로 반영.
 4. **빌드 & 패키징 검증**:
@@ -309,4 +309,66 @@ cmake --build c:\projects\lite_browser\cef_binary_149.0.6\build --config Debug -
    - Release 빌드: `Release/lite_browser.exe` 생성 확인 (Exit code 0).
    - NSIS 인스톨러: [`LiteBrowserInstaller.exe`](file:///c:/projects/lite_browser/LiteBrowserInstaller.exe) 재생성 완료 (Exit code 0).
 
+---
 
+## 12. AI 에이전트 브라우저 서브시스템 (AI Agent Browser Subsystem)
+
+### 12.1 개요
+사용자 맞춤형 실시간 상호작용 AI 에이전트, 메인 윈도우 우측 독립 네이티브 도킹 사이드패널, Rust 기반 MCP Server, 멀티 AI Provider 추상화(Gemini 3.7 Flash 기본 탑재), Task Runtime 상태 머신(자율 복구 및 수동 개입), Windows DPAPI 암호화 로컬 보안 볼트(Vault), 그리고 벡터 DB / 시맨틱 기억 엔진 및 프라이버시 데이터 컨트롤을 구축했습니다.
+
+### 12.2 주요 구현 내역
+1. **독립 네이티브 자식 브라우저(HWND) 도킹 사이드패널 (`simple_app.c`, `simple_life_span_handler.c`, `ui/sidepanel.*`)**:
+   - **완전한 구조적 분리 (Architecture Decoupling)**: 듀얼 탭 분할 기능(`tabs[i].is_split`)에 종속되어 있던 구조에서 탈피하여, 메인 윈도우 레벨의 독립된 네이티브 자식 브라우저(`win_ctx->sidepanel_browser`, `BROWSER_TYPE_SIDEPANEL`)로 상시 도킹.
+   - **탭 전환 시 대화 지속성 (Session Persistence)**: 상단 탭을 전환하거나 새 탭을 열어도 우측 AI 사이드패널이 닫히거나 초기화되지 않고, 진행 중인 대화 내역 및 실행 상태가 끊김 없이 유지됨.
+   - **인터랙티브 스플리터 폭 조절 (Dynamic Resizing Splitter)**: 메인 콘텐츠 영역과 사이드패널 사이의 5px 스플리터 바 호버 시 `IDC_SIZEWE` 좌우 화살표 커서로 전환되고, 마우스 드래그를 통해 사이드패널 폭(기본 380px, 최소 260px ~ 최대 가용폭)을 자유롭게 조절.
+   - **1클릭 토글 & 툴바 상태 동기화**: 상단 네비게이션 툴바의 AI 버튼(`✨`, `#ai-agent-btn`) 및 `Ctrl+Shift+A` 단축키로 On/Off 토글이 작동하며, 열림 상태에 따라 버튼의 `.active` 하이라이트 스타일이 실시간 동기화됨.
+   - **실시간 사고 과정 및 상태 제어**: Thinking(CoT) 아코디언 뷰, 동작 스텝별 타임라인 카드, 실시간 상태 머신 뱃지(`IDLE`, `RUNNING`, `PAUSED`, `STUCK`, `WAITING`, `DONE`), 사용자 제어 버튼(일시정지/계속/중단/수동 직접 개입) 제공.
+
+2. **듀얼 분할 화면 연동 및 활성 화면(Active Split) 동적 타겟팅 (`simple_handler.c`)**:
+   - 듀얼 탭 분할 모드(`active_tab->is_split == 1`)에서 사용자가 마우스로 클릭하거나 포커스한 화면(`active_tab->active_split`: 0 좌측, 1 우측)을 동적으로 감지.
+   - AI DOM 추출 및 상호작용 도구(`ai-get-dom-summary`, `ai-click-element`, `ai-type-element`, `ai-scroll`, `ai-highlight-element`, `vault-autofill`)가 현재 활성화된 화면(`cb`)의 URL과 본문을 정확하게 타겟팅하여 조작 및 요약 수행.
+
+3. **심층 iframe 및 스마트 아티클 재귀 본문 추출 엔진 (`simple_handler.c`)**:
+   - 네이버 블로그(`<iframe id="mainFrame">`), 다음 카페, 포털 등 중첩 `iframe` 구조 페이지에서 `contentDocument`를 자동 재귀 탐색.
+   - 네이버 스마트에디터(`.se-main-container`, `.se_component_wrap`, `#postViewArea`), 주요 언론사 뉴스 본문(`#dic_area`, `#articleBody`, `.article_view`, `.news_body`, `.entry-content`, `article`, `main`) 셀렉터를 우선 타겟팅하여 최대 6,000자의 풍부하고 깨끗한 본문 텍스트를 즉시 추출.
+
+4. **AI Provider 플러그인 추상화 계층 (`ui/ai_providers.js`)**:
+   - 표준화된 `AIProviderInterface`를 바탕으로 다형성 어댑터 구현:
+     - **Google Gemini**: 기본 모델로 **`gemini-3.7-flash`** 적용 (Gemini 2.5 Pro/Flash 선택 가능), SSE 실시간 스트리밍 및 Function Calling 완벽 연동.
+     - **OpenAI**: `gpt-4o`, `gpt-4o-mini`, SSE 스트리밍 및 Tool Calling 연동.
+     - **Anthropic**: `claude-3-7-sonnet`, `claude-3-5-sonnet`, 사고 블록(Thinking Delta) 스트리밍 및 Tool Use 연동.
+     - **Ollama**: 로컬 LLM (`llama3.2`, `qwen2.5`) 연동.
+   - 사이드패널 설정 UI에서 API 키, 모델명, Base URL, 시스템 프롬프트를 자유롭게 구성/저장.
+
+5. **Task Runtime & 자율 복구 상태 머신 (`ui/task_runtime.js`)**:
+   - 복잡한 사용자 요청을 브라우저 세부 동작(`browser_navigate`, `browser_get_page_content`, `browser_click_element`, `browser_type_text`, `browser_scroll`, `browser_autofill_login`)으로 분해 실행.
+   - 동작 대상 DOM 요소에 반투명 파란색 펄스 링(Highlight Ring)을 렌더링하여 조작 위치를 시각적으로 안내.
+   - 오류 발생 시 최대 2회 스크롤/대기 후 재시도하는 자율 복구 루프를 수행하며, 실패 시 `WAITING` 상태로 전환되어 사용자에게 개입 안내 카드 노출.
+
+6. **보안 자격증명 로컬 볼트 (`simple_vault.c`, `simple_vault.h`)**:
+   - Windows DPAPI(`CryptProtectData` / `CryptUnprotectData`) 기반으로 `%USERPROFILE%\.lite-browser\vault.dat`에 계정 암호화 보관.
+   - **비밀번호 평문(Plaintext) 격리**: AI 엔진/프롬프트에는 비밀번호 텍스트가 절대 전달되지 않으며, C 백엔드가 웹 프레임에 직접 스크립트를 주입하여 로그인 폼을 대리 작성하고 LLM에는 성공/실패 상태값만 반환.
+
+7. **기억 및 벡터 DB 메모리 엔진 (`ui/agent_memory.js`)**:
+   - IndexedDB 기반으로 과거 방문 기록, 북마크, 대화 요약본을 n-gram 벡터로 인덱싱하고 코사인 유사도 검색을 통해 관련 컨텍스트를 AI 에이전트에 주입.
+   - 설정 UI를 통해 '방문기록 자동 인덱싱 비활성화' 및 '기억 데이터 전체 삭제'를 1클릭으로 실행하는 데이터 제어권 보장.
+
+8. **Rust 브라우저 제어 MCP Server (`mcp_server/`, `simple_mcp.c`, `simple_mcp.h`)**:
+   - `mcp_server/` 디렉토리에 표준 JSON-RPC 2.0 MCP 서버 구현 (Cargo 프로젝트).
+   - C 백엔드가 `lite_browser_mcp.exe` 프로세스를 관리하며, 바이너리 미존재 시에도 내장 네이티브 브릿지로 도구 호출을 중계하는 Fallback 설계 적용.
+
+### 12.3 주요 소스 파일 맵
+- [`ui/sidepanel.html`](file:///c:/projects/lite_browser/ui/sidepanel.html): AI 사이드패널 UI 마크업
+- [`ui/sidepanel.css`](file:///c:/projects/lite_browser/ui/sidepanel.css): 사이드패널 다크/라이트 테마 및 타임라인 스타일
+- [`ui/sidepanel.js`](file:///c:/projects/lite_browser/ui/sidepanel.js): 사이드패널 프론트엔드 오케스트레이터
+- [`ui/ai_providers.js`](file:///c:/projects/lite_browser/ui/ai_providers.js): Gemini 3.7 Flash, OpenAI, Claude, Ollama 다형성 Provider
+- [`ui/task_runtime.js`](file:///c:/projects/lite_browser/ui/task_runtime.js): 상태 머신 및 DOM 액션 실행 엔진
+- [`ui/agent_memory.js`](file:///c:/projects/lite_browser/ui/agent_memory.js): IndexedDB 벡터 메모리 & 데이터 컨트롤
+- [`simple_vault.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_vault.c) & [`simple_vault.h`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_vault.h): Windows DPAPI 로컬 보안 볼트
+- [`simple_mcp.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_mcp.c) & [`simple_mcp.h`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_mcp.h): MCP Server 프로세스 수명주기 및 브릿지
+- [`mcp_server/Cargo.toml`](file:///c:/projects/lite_browser/mcp_server/Cargo.toml) & [`mcp_server/src/main.rs`](file:///c:/projects/lite_browser/mcp_server/src/main.rs): Rust 브라우저 제어 MCP Server
+
+### 12.4 빌드 및 패키징 검증
+- Debug 빌드: `Debug/lite_browser.exe` 컴파일 및 링크 성공 (Exit code 0).
+- Release 빌드: `Release/lite_browser.exe` 컴파일 및 링크 성공 (Exit code 0).
+- NSIS 인스톨러: [`LiteBrowserInstaller.exe`](file:///c:/projects/lite_browser/LiteBrowserInstaller.exe) 패키징 완료 (Exit code 0).

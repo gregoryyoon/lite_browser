@@ -10,6 +10,7 @@
 #include <dwmapi.h>
 #include <shlobj.h>
 #include <shellapi.h>
+#include "tests/cefsimple_capi/simple_mcp.h"
 #pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "shell32.lib")
 #endif
@@ -96,6 +97,50 @@ static void ResolveUIPath(cef_string_t *out_url) {
 #else
   // Fallback for non-Windows (e.g. Linux/Mac)
   cef_string_from_ascii("file:///projects/lite_browser/ui/index.html", 43,
+                        out_url);
+#endif
+}
+
+// Resolves local path to ui/sidepanel.html
+static void ResolveSidepanelPath(cef_string_t *out_url) {
+#if defined(OS_WIN)
+  char exe_path[MAX_PATH];
+  GetModuleFileNameA(NULL, exe_path, MAX_PATH);
+
+  char path[MAX_PATH];
+  strcpy(path, exe_path);
+
+  int found = 0;
+  for (int i = 0; i < 8; i++) {
+    char *last_backslash = strrchr(path, '\\');
+    if (!last_backslash)
+      break;
+    *last_backslash = '\0';
+
+    char test_path[MAX_PATH];
+    snprintf(test_path, sizeof(test_path), "%s\\ui\\sidepanel.html", path);
+    DWORD attrib = GetFileAttributesA(test_path);
+    if (attrib != INVALID_FILE_ATTRIBUTES &&
+        !(attrib & FILE_ATTRIBUTE_DIRECTORY)) {
+      char file_url[MAX_PATH + 16];
+      snprintf(file_url, sizeof(file_url), "file:///%s/ui/sidepanel.html", path);
+      for (size_t j = 8; file_url[j]; j++) {
+        if (file_url[j] == '\\') {
+          file_url[j] = '/';
+        }
+      }
+      cef_string_from_ascii(file_url, strlen(file_url), out_url);
+      found = 1;
+      break;
+    }
+  }
+
+  if (!found) {
+    cef_string_from_ascii("file:///C:/projects/lite_browser/ui/sidepanel.html", 50,
+                          out_url);
+  }
+#else
+  cef_string_from_ascii("file:///projects/lite_browser/ui/sidepanel.html", 47,
                         out_url);
 #endif
 }
@@ -236,31 +281,38 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
   case WM_MOUSEACTIVATE:
   case WM_PARENTNOTIFY:
   {
-    if (win_ctx && win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
-      tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
-      if (active_tab->is_split && active_tab->right_browser) {
-        POINT pt;
-        GetCursorPos(&pt);
-        ScreenToClient(hwnd, &pt);
+    if (win_ctx) {
+      POINT pt;
+      GetCursorPos(&pt);
+      ScreenToClient(hwnd, &pt);
 
-        RECT r;
-        GetClientRect(hwnd, &r);
-        int ui_height = GetUIHeightForWindow(hwnd);
-        int content_y = ui_height + 1;
-        int total_w = r.right - 2;
-        int split_bar_w = 6;
-        float ratio = active_tab->split_ratio;
-        if (ratio < 0.2f || ratio > 0.8f) ratio = 0.5f;
+      RECT r;
+      GetClientRect(hwnd, &r);
+      int ui_height = GetUIHeightForWindow(hwnd);
+      int content_y = ui_height + 1;
+      int total_w = r.right - 2;
 
-        int left_w = (int)((total_w - split_bar_w) * ratio);
-        int bar_x = 1 + left_w;
+      int sp_w = (win_ctx->show_sidepanel && win_ctx->sidepanel_width > 0) ? win_ctx->sidepanel_width : 0;
+      int sp_splitter_w = (win_ctx->show_sidepanel) ? 5 : 0;
+      int main_area_w = total_w - sp_w - sp_splitter_w;
 
-        if (pt.y >= content_y) {
-          int target_split = (pt.x < bar_x + split_bar_w / 2) ? 0 : 1;
-          if (active_tab->active_split != target_split) {
-            active_tab->active_split = target_split;
-            update_ui_nav_state(win_ctx);
-            InvalidateRect(hwnd, NULL, FALSE);
+      if (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+        tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
+        if (active_tab->is_split && active_tab->right_browser) {
+          int split_bar_w = 6;
+          float ratio = active_tab->split_ratio;
+          if (ratio < 0.2f || ratio > 0.8f) ratio = 0.5f;
+
+          int left_w = (int)((main_area_w - split_bar_w) * ratio);
+          int bar_x = 1 + left_w;
+
+          if (pt.y >= content_y && pt.x < 1 + main_area_w) {
+            int target_split = (pt.x < bar_x + split_bar_w / 2) ? 0 : 1;
+            if (active_tab->active_split != target_split) {
+              active_tab->active_split = target_split;
+              update_ui_nav_state(win_ctx);
+              InvalidateRect(hwnd, NULL, FALSE);
+            }
           }
         }
       }
@@ -274,46 +326,63 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
   {
     PAINTSTRUCT ps;
     HDC hdc = BeginPaint(hwnd, &ps);
-    if (win_ctx && win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
-      tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
-      if (active_tab->is_split && active_tab->right_browser) {
-        RECT r;
-        GetClientRect(hwnd, &r);
-        int ui_height = GetUIHeightForWindow(hwnd);
-        int content_y = ui_height + 1;
-        int content_h = r.bottom - content_y - 1;
-        int total_w = r.right - 2;
-        int split_bar_w = 6;
-        float ratio = active_tab->split_ratio;
-        if (ratio < 0.2f || ratio > 0.8f) ratio = 0.5f;
+    if (win_ctx) {
+      RECT r;
+      GetClientRect(hwnd, &r);
+      int ui_height = GetUIHeightForWindow(hwnd);
+      int content_y = ui_height + 1;
+      int content_h = r.bottom - content_y - 1;
+      int total_w = r.right - 2;
 
-        int left_w = (int)((total_w - split_bar_w) * ratio);
-        int right_w = total_w - split_bar_w - left_w;
-        int left_x = 1;
-        int right_x = 1 + left_w + split_bar_w;
-        int bar_x = 1 + left_w;
+      int sp_w = (win_ctx->show_sidepanel && win_ctx->sidepanel_width > 0) ? win_ctx->sidepanel_width : 0;
+      int sp_splitter_w = (win_ctx->show_sidepanel) ? 5 : 0;
+      int main_area_w = total_w - sp_w - sp_splitter_w;
 
-        HBRUSH active_brush = CreateSolidBrush(RGB(0, 102, 204));
-        HBRUSH inactive_brush = CreateSolidBrush(RGB(220, 220, 225));
-        HBRUSH bar_brush = CreateSolidBrush(RGB(230, 230, 235));
+      // 1. Paint AI Sidepanel splitter bar
+      if (win_ctx->show_sidepanel) {
+        int sp_bar_x = 1 + main_area_w;
+        RECT sp_bar_rect = {sp_bar_x, content_y, sp_bar_x + sp_splitter_w, content_y + content_h};
+        HBRUSH sp_bar_brush = CreateSolidBrush(RGB(228, 230, 235));
+        FillRect(hdc, &sp_bar_rect, sp_bar_brush);
+        DeleteObject(sp_bar_brush);
+      }
 
-        RECT left_rect = {left_x, content_y, left_x + left_w, content_y + content_h};
-        RECT bar_rect = {bar_x, content_y, bar_x + split_bar_w, content_y + content_h};
-        RECT right_rect = {right_x, content_y, right_x + right_w, content_y + content_h};
+      // 2. Paint Dual Split tab borders
+      if (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+        tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
+        if (active_tab->is_split && active_tab->right_browser) {
+          int split_bar_w = 6;
+          float ratio = active_tab->split_ratio;
+          if (ratio < 0.2f || ratio > 0.8f) ratio = 0.5f;
 
-        FrameRect(hdc, &left_rect, (active_tab->active_split == 0) ? active_brush : inactive_brush);
-        RECT left_rect_inner = {left_x + 1, content_y + 1, left_x + left_w - 1, content_y + content_h - 1};
-        FrameRect(hdc, &left_rect_inner, (active_tab->active_split == 0) ? active_brush : inactive_brush);
+          int left_w = (int)((main_area_w - split_bar_w) * ratio);
+          int right_w = main_area_w - split_bar_w - left_w;
+          int left_x = 1;
+          int right_x = 1 + left_w + split_bar_w;
+          int bar_x = 1 + left_w;
 
-        FillRect(hdc, &bar_rect, bar_brush);
+          HBRUSH active_brush = CreateSolidBrush(RGB(0, 102, 204));
+          HBRUSH inactive_brush = CreateSolidBrush(RGB(220, 220, 225));
+          HBRUSH bar_brush = CreateSolidBrush(RGB(230, 230, 235));
 
-        FrameRect(hdc, &right_rect, (active_tab->active_split == 1) ? active_brush : inactive_brush);
-        RECT right_rect_inner = {right_x + 1, content_y + 1, right_x + right_w - 1, content_y + content_h - 1};
-        FrameRect(hdc, &right_rect_inner, (active_tab->active_split == 1) ? active_brush : inactive_brush);
+          RECT left_rect = {left_x, content_y, left_x + left_w, content_y + content_h};
+          RECT bar_rect = {bar_x, content_y, bar_x + split_bar_w, content_y + content_h};
+          RECT right_rect = {right_x, content_y, right_x + right_w, content_y + content_h};
 
-        DeleteObject(active_brush);
-        DeleteObject(inactive_brush);
-        DeleteObject(bar_brush);
+          FrameRect(hdc, &left_rect, (active_tab->active_split == 0) ? active_brush : inactive_brush);
+          RECT left_rect_inner = {left_x + 1, content_y + 1, left_x + left_w - 1, content_y + content_h - 1};
+          FrameRect(hdc, &left_rect_inner, (active_tab->active_split == 0) ? active_brush : inactive_brush);
+
+          FillRect(hdc, &bar_rect, bar_brush);
+
+          FrameRect(hdc, &right_rect, (active_tab->active_split == 1) ? active_brush : inactive_brush);
+          RECT right_rect_inner = {right_x + 1, content_y + 1, right_x + right_w - 1, content_y + content_h - 1};
+          FrameRect(hdc, &right_rect_inner, (active_tab->active_split == 1) ? active_brush : inactive_brush);
+
+          DeleteObject(active_brush);
+          DeleteObject(inactive_brush);
+          DeleteObject(bar_brush);
+        }
       }
     }
     EndPaint(hwnd, &ps);
@@ -321,30 +390,48 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
   }
   case WM_SETCURSOR:
   {
-    if (win_ctx && win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
-      tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
-      if (active_tab->is_split && active_tab->right_browser) {
-        POINT pt;
-        GetCursorPos(&pt);
-        ScreenToClient(hwnd, &pt);
+    if (win_ctx) {
+      POINT pt;
+      GetCursorPos(&pt);
+      ScreenToClient(hwnd, &pt);
 
-        RECT r;
-        GetClientRect(hwnd, &r);
-        int ui_height = GetUIHeightForWindow(hwnd);
-        int content_y = ui_height + 1;
-        int content_h = r.bottom - content_y - 1;
-        int total_w = r.right - 2;
-        int split_bar_w = 6;
-        float ratio = active_tab->split_ratio;
-        if (ratio < 0.2f || ratio > 0.8f) ratio = 0.5f;
+      RECT r;
+      GetClientRect(hwnd, &r);
+      int ui_height = GetUIHeightForWindow(hwnd);
+      int content_y = ui_height + 1;
+      int content_h = r.bottom - content_y - 1;
+      int total_w = r.right - 2;
 
-        int left_w = (int)((total_w - split_bar_w) * ratio);
-        int bar_x = 1 + left_w;
+      int sp_w = (win_ctx->show_sidepanel && win_ctx->sidepanel_width > 0) ? win_ctx->sidepanel_width : 0;
+      int sp_splitter_w = (win_ctx->show_sidepanel) ? 5 : 0;
+      int main_area_w = total_w - sp_w - sp_splitter_w;
 
-        if (pt.x >= bar_x - 1 && pt.x <= bar_x + split_bar_w + 1 &&
+      // Check AI Sidepanel splitter
+      if (win_ctx->show_sidepanel) {
+        int sp_bar_x = 1 + main_area_w;
+        if (pt.x >= sp_bar_x - 1 && pt.x <= sp_bar_x + sp_splitter_w + 1 &&
             pt.y >= content_y && pt.y <= content_y + content_h) {
           SetCursor(LoadCursor(NULL, IDC_SIZEWE));
           return TRUE;
+        }
+      }
+
+      // Check Dual Split splitter
+      if (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+        tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
+        if (active_tab->is_split && active_tab->right_browser) {
+          int split_bar_w = 6;
+          float ratio = active_tab->split_ratio;
+          if (ratio < 0.2f || ratio > 0.8f) ratio = 0.5f;
+
+          int left_w = (int)((main_area_w - split_bar_w) * ratio);
+          int bar_x = 1 + left_w;
+
+          if (pt.x >= bar_x - 1 && pt.x <= bar_x + split_bar_w + 1 &&
+              pt.y >= content_y && pt.y <= content_y + content_h) {
+            SetCursor(LoadCursor(NULL, IDC_SIZEWE));
+            return TRUE;
+          }
         }
       }
     }
@@ -352,32 +439,53 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
   }
   case WM_LBUTTONDOWN:
   {
-    if (win_ctx && win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
-      tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
-      if (active_tab->is_split && active_tab->right_browser) {
-        int pt_x = (short)LOWORD(lParam);
-        int pt_y = (short)HIWORD(lParam);
+    if (win_ctx) {
+      int pt_x = (short)LOWORD(lParam);
+      int pt_y = (short)HIWORD(lParam);
 
-        RECT r;
-        GetClientRect(hwnd, &r);
-        int ui_height = GetUIHeightForWindow(hwnd);
-        int content_y = ui_height + 1;
-        int content_h = r.bottom - content_y - 1;
-        int total_w = r.right - 2;
-        int split_bar_w = 6;
-        float ratio = active_tab->split_ratio;
-        if (ratio < 0.2f || ratio > 0.8f) ratio = 0.5f;
+      RECT r;
+      GetClientRect(hwnd, &r);
+      int ui_height = GetUIHeightForWindow(hwnd);
+      int content_y = ui_height + 1;
+      int content_h = r.bottom - content_y - 1;
+      int total_w = r.right - 2;
 
-        int left_w = (int)((total_w - split_bar_w) * ratio);
-        int bar_x = 1 + left_w;
+      int sp_w = (win_ctx->show_sidepanel && win_ctx->sidepanel_width > 0) ? win_ctx->sidepanel_width : 0;
+      int sp_splitter_w = (win_ctx->show_sidepanel) ? 5 : 0;
+      int main_area_w = total_w - sp_w - sp_splitter_w;
 
-        if (pt_x >= bar_x - 1 && pt_x <= bar_x + split_bar_w + 1 &&
+      // Check AI Sidepanel splitter drag
+      if (win_ctx->show_sidepanel) {
+        int sp_bar_x = 1 + main_area_w;
+        if (pt_x >= sp_bar_x - 1 && pt_x <= sp_bar_x + sp_splitter_w + 1 &&
             pt_y >= content_y && pt_y <= content_y + content_h) {
           SetCapture(hwnd);
-          win_ctx->is_resizing_splitter = 1;
-          win_ctx->drag_start_x = pt_x;
-          win_ctx->drag_start_ratio = ratio;
+          win_ctx->is_resizing_sidepanel = 1;
+          win_ctx->sidepanel_drag_start_x = pt_x;
+          win_ctx->sidepanel_drag_start_w = win_ctx->sidepanel_width;
           return 0;
+        }
+      }
+
+      // Check Dual Split splitter drag
+      if (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+        tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
+        if (active_tab->is_split && active_tab->right_browser) {
+          int split_bar_w = 6;
+          float ratio = active_tab->split_ratio;
+          if (ratio < 0.2f || ratio > 0.8f) ratio = 0.5f;
+
+          int left_w = (int)((main_area_w - split_bar_w) * ratio);
+          int bar_x = 1 + left_w;
+
+          if (pt_x >= bar_x - 1 && pt_x <= bar_x + split_bar_w + 1 &&
+              pt_y >= content_y && pt_y <= content_y + content_h) {
+            SetCapture(hwnd);
+            win_ctx->is_resizing_splitter = 1;
+            win_ctx->drag_start_x = pt_x;
+            win_ctx->drag_start_ratio = ratio;
+            return 0;
+          }
         }
       }
     }
@@ -385,6 +493,21 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
   }
   case WM_MOUSEMOVE:
   {
+    if (win_ctx && win_ctx->is_resizing_sidepanel) {
+      int cur_x = (short)LOWORD(lParam);
+      RECT r;
+      GetClientRect(hwnd, &r);
+      int total_w = r.right - 2;
+
+      int delta_x = cur_x - win_ctx->sidepanel_drag_start_x;
+      int new_w = win_ctx->sidepanel_drag_start_w - delta_x;
+      if (new_w < 260) new_w = 260;
+      if (new_w > total_w - 300) new_w = total_w - 300;
+      if (new_w < 260) new_w = 260;
+      win_ctx->sidepanel_width = new_w;
+      SendMessage(hwnd, WM_SIZE, 0, MAKELPARAM(r.right, r.bottom));
+      return 0;
+    }
     if (win_ctx && win_ctx->is_resizing_splitter &&
         win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
       tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
@@ -393,8 +516,11 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
       RECT r;
       GetClientRect(hwnd, &r);
       int total_w = r.right - 2;
+      int sp_w = (win_ctx->show_sidepanel && win_ctx->sidepanel_width > 0) ? win_ctx->sidepanel_width : 0;
+      int sp_splitter_w = (win_ctx->show_sidepanel) ? 5 : 0;
+      int main_area_w = total_w - sp_w - sp_splitter_w;
       int split_bar_w = 6;
-      int avail_w = total_w - split_bar_w;
+      int avail_w = main_area_w - split_bar_w;
 
       if (avail_w > 0) {
         int delta_x = cur_x - win_ctx->drag_start_x;
@@ -410,9 +536,10 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
   }
   case WM_LBUTTONUP:
   {
-    if (win_ctx && win_ctx->is_resizing_splitter) {
+    if (win_ctx && (win_ctx->is_resizing_splitter || win_ctx->is_resizing_sidepanel)) {
       ReleaseCapture();
       win_ctx->is_resizing_splitter = 0;
+      win_ctx->is_resizing_sidepanel = 0;
       return 0;
     }
     break;
@@ -426,8 +553,27 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
     int ui_height = GetUIHeightForWindow(hwnd);
     int content_y = ui_height + 1;
     int content_h = height - content_y - 1;
+    int total_w = width - 2;
 
-    int content_w = width - 2;
+    int sp_w = 0;
+    int sp_splitter_w = 0;
+    int sp_bar_x = 0;
+    int sp_x = 0;
+    int main_area_w = total_w;
+
+    if (win_ctx->show_sidepanel) {
+      sp_splitter_w = 5;
+      sp_w = (win_ctx->sidepanel_width > 0) ? win_ctx->sidepanel_width : (int)(380 * (ui_height / 72.0f));
+      if (sp_w < 260) sp_w = 260;
+      if (sp_w > total_w - 300) sp_w = total_w - 300;
+      if (sp_w < 260) sp_w = 260;
+      win_ctx->sidepanel_width = sp_w;
+
+      main_area_w = total_w - sp_w - sp_splitter_w;
+      if (main_area_w < 100) main_area_w = 100;
+      sp_bar_x = 1 + main_area_w;
+      sp_x = sp_bar_x + sp_splitter_w;
+    }
 
     if (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count)
     {
@@ -438,8 +584,8 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
         float ratio = active_tab->split_ratio;
         if (ratio < 0.2f || ratio > 0.8f) ratio = 0.5f;
 
-        int left_w = (int)((content_w - split_bar_w) * ratio);
-        int right_w = content_w - split_bar_w - left_w;
+        int left_w = (int)((main_area_w - split_bar_w) * ratio);
+        int right_w = main_area_w - split_bar_w - left_w;
         int left_x = 1;
         int right_x = 1 + left_w + split_bar_w;
 
@@ -478,7 +624,7 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
             HWND content_hwnd = host->get_window_handle(host);
             if (content_hwnd)
             {
-              MoveWindow(content_hwnd, 1, content_y, content_w, content_h, TRUE);
+              MoveWindow(content_hwnd, 1, content_y, main_area_w, content_h, TRUE);
               ShowWindow(content_hwnd, SW_SHOW);
             }
             host->base.release(&host->base);
@@ -501,6 +647,26 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
           if (win_ctx->tabs[k].hwnd) ShowWindow(win_ctx->tabs[k].hwnd, SW_HIDE);
           if (win_ctx->tabs[k].right_hwnd) ShowWindow(win_ctx->tabs[k].right_hwnd, SW_HIDE);
         }
+      }
+    }
+
+    // Position AI sidepanel browser
+    if (win_ctx->sidepanel_browser)
+    {
+      cef_browser_host_t *sp_host = win_ctx->sidepanel_browser->get_host(win_ctx->sidepanel_browser);
+      if (sp_host)
+      {
+        HWND sp_hwnd = sp_host->get_window_handle(sp_host);
+        if (sp_hwnd)
+        {
+          if (win_ctx->show_sidepanel) {
+            MoveWindow(sp_hwnd, sp_x, content_y, sp_w, content_h, TRUE);
+            ShowWindow(sp_hwnd, SW_SHOW);
+          } else {
+            ShowWindow(sp_hwnd, SW_HIDE);
+          }
+        }
+        sp_host->base.release(&sp_host->base);
       }
     }
 
@@ -598,6 +764,16 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
         }
       }
 
+      if (win_ctx->sidepanel_browser)
+      {
+        cef_browser_host_t* host = win_ctx->sidepanel_browser->get_host(win_ctx->sidepanel_browser);
+        if (host)
+        {
+          host->close_browser(host, 1);
+          host->base.release(&host->base);
+        }
+      }
+
       for (int i = 0; i < win_ctx->tab_count; i++)
       {
         if (win_ctx->tabs[i].browser)
@@ -617,6 +793,7 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
     if (g_window_count == 0)
     {
       LogMsg("WM_DESTROY: calling cef_quit_message_loop()\n");
+      mcp_server_shutdown();
       cef_quit_message_loop();
     }
     return 0;
@@ -767,7 +944,36 @@ browser_window_t* create_browser_window(const char* startup_url) {
       &browser_settings, NULL, NULL);
   cef_string_clear(&content_url);
 
+  // 3. Create Sidepanel child browser (Initially hidden)
+  int default_sp_w = (int)(380 * (ui_height / 72.0f));
+  cef_window_info_t sidepanel_window_info = {};
+  sidepanel_window_info.size = sizeof(cef_window_info_t);
+  sidepanel_window_info.style =
+      WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
+  sidepanel_window_info.parent_window = main_hwnd;
+  sidepanel_window_info.bounds.x = width - default_sp_w;
+  sidepanel_window_info.bounds.y = content_y;
+  sidepanel_window_info.bounds.width = default_sp_w;
+  sidepanel_window_info.bounds.height = content_h;
+  sidepanel_window_info.runtime_style = CEF_RUNTIME_STYLE_DEFAULT;
 
+  cef_string_t sp_url = {};
+  ResolveSidepanelPath(&sp_url);
+
+  simple_handler_t *sidepanel_handler = simple_handler_create(0);
+  sidepanel_handler->window_ctx = win_ctx;
+  sidepanel_handler->type = BROWSER_TYPE_SIDEPANEL;
+
+  win_ctx->sidepanel_browser = NULL;
+  win_ctx->sidepanel_hwnd = NULL;
+  win_ctx->show_sidepanel = 0;
+  win_ctx->sidepanel_width = default_sp_w;
+  win_ctx->sidepanel_handler = sidepanel_handler;
+
+  cef_browser_host_create_browser(
+      &sidepanel_window_info, &sidepanel_handler->client, &sp_url,
+      &browser_settings, NULL, NULL);
+  cef_string_clear(&sp_url);
 
   return win_ctx;
 }
@@ -868,7 +1074,36 @@ browser_window_t* create_browser_window_for_detached(cef_browser_t* detached_bro
     host->base.release(&host->base);
   }
 
+  // 3. Create Sidepanel child browser (Initially hidden)
+  int default_sp_w = (int)(380 * (ui_height / 72.0f));
+  cef_window_info_t sidepanel_window_info = {};
+  sidepanel_window_info.size = sizeof(cef_window_info_t);
+  sidepanel_window_info.style =
+      WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
+  sidepanel_window_info.parent_window = main_hwnd;
+  sidepanel_window_info.bounds.x = width - default_sp_w;
+  sidepanel_window_info.bounds.y = content_y;
+  sidepanel_window_info.bounds.width = default_sp_w;
+  sidepanel_window_info.bounds.height = content_h;
+  sidepanel_window_info.runtime_style = CEF_RUNTIME_STYLE_DEFAULT;
 
+  cef_string_t sp_url = {};
+  ResolveSidepanelPath(&sp_url);
+
+  simple_handler_t *sidepanel_handler = simple_handler_create(0);
+  sidepanel_handler->window_ctx = win_ctx;
+  sidepanel_handler->type = BROWSER_TYPE_SIDEPANEL;
+
+  win_ctx->sidepanel_browser = NULL;
+  win_ctx->sidepanel_hwnd = NULL;
+  win_ctx->show_sidepanel = 0;
+  win_ctx->sidepanel_width = default_sp_w;
+  win_ctx->sidepanel_handler = sidepanel_handler;
+
+  cef_browser_host_create_browser(
+      &sidepanel_window_info, &sidepanel_handler->client, &sp_url,
+      &browser_settings, NULL, NULL);
+  cef_string_clear(&sp_url);
 
   ShowWindow(main_hwnd, SW_SHOW);
   UpdateWindow(main_hwnd);

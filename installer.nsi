@@ -34,6 +34,7 @@ Section "Install"
   ; Executables and DLLs
   File "c:\projects\lite_browser\cef_binary_149.0.6\build\tests\cefsimple_capi\Release\lite_browser.exe"
   File /nonfatal "c:\projects\lite_browser\cef_binary_149.0.6\build\tests\cefsimple_capi\Release\lite_browser.dll"
+  File /nonfatal "c:\projects\lite_browser\mcp_server\target\release\lite_browser_mcp.exe"
   File "c:\projects\lite_browser\cef_binary_149.0.6\build\tests\cefsimple_capi\Release\libcef.dll"
   File "c:\projects\lite_browser\cef_binary_149.0.6\build\tests\cefsimple_capi\Release\chrome_elf.dll"
   File "c:\projects\lite_browser\cef_binary_149.0.6\build\tests\cefsimple_capi\Release\d3dcompiler_47.dll"

@@ -24,7 +24,8 @@ typedef struct _simple_focus_handler_t simple_focus_handler_t;
 
 typedef enum {
   BROWSER_TYPE_CONTENT = 0,
-  BROWSER_TYPE_UI = 1
+  BROWSER_TYPE_UI = 1,
+  BROWSER_TYPE_SIDEPANEL = 2
 } browser_type_t;
 
 // Client handler structure.

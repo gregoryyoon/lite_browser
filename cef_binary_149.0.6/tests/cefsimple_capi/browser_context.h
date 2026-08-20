@@ -41,6 +41,16 @@ typedef struct _browser_window_t {
   int is_resizing_splitter;
   int drag_start_x;
   float drag_start_ratio;
+
+  // Independent AI Side Panel
+  cef_browser_t* sidepanel_browser;
+  HWND sidepanel_hwnd;
+  int show_sidepanel;
+  int sidepanel_width;
+  void* sidepanel_handler;
+  int is_resizing_sidepanel;
+  int sidepanel_drag_start_x;
+  int sidepanel_drag_start_w;
 } browser_window_t;
 
 #if defined(OS_WIN)

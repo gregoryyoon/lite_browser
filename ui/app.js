@@ -31,10 +31,25 @@ function toggleDualSplit() {
   window.location.href = 'http://ui-action/toggle-dual-split';
 }
 
+function toggleAiSidepanel() {
+  window.location.href = 'http://ui-action/toggle-ai-sidepanel';
+}
+
 window.updateDualSplitState = function(isSplit, activeSplit) {
   const btn = document.getElementById('dual-split-btn');
   if (btn) {
     if (isSplit) {
+      btn.classList.add('active');
+    } else {
+      btn.classList.remove('active');
+    }
+  }
+};
+
+window.updateSidepanelState = function(isOpen) {
+  const btn = document.getElementById('ai-agent-btn');
+  if (btn) {
+    if (isOpen) {
       btn.classList.add('active');
     } else {
       btn.classList.remove('active');
@@ -222,6 +237,8 @@ window.updateAddress = function(url) {
       addressBar.value = 'lite://favorites';
     } else if (url.indexOf('ui/downloads.html') !== -1 || url.indexOf('lite://downloads') !== -1 || url.indexOf('edge://downloads') !== -1) {
       addressBar.value = 'lite://downloads';
+    } else if (url.indexOf('ui/sidepanel.html') !== -1 || url.indexOf('lite://sidepanel') !== -1) {
+      addressBar.value = 'lite://sidepanel';
     } else {
       addressBar.value = url;
     }
@@ -240,8 +257,9 @@ window.updateTabsList = function(tabs, activeId) {
   tabs.forEach(tab => {
     const isManager = tab.url && (tab.url.indexOf('ui/manager.html') !== -1 || tab.url.indexOf('lite://favorites') !== -1);
     const isDownloads = tab.url && (tab.url.indexOf('ui/downloads.html') !== -1 || tab.url.indexOf('lite://downloads') !== -1);
+    const isSidepanel = tab.url && (tab.url.indexOf('ui/sidepanel.html') !== -1 || tab.url.indexOf('lite://sidepanel') !== -1);
     if (tab.id === activeId) {
-      currentTitle = isManager ? '북마크 관리자' : (isDownloads ? '다운로드' : (tab.title || ''));
+      currentTitle = isManager ? '북마크 관리자' : (isDownloads ? '다운로드' : (isSidepanel ? 'AI 사이드패널' : (tab.title || '')));
     }
     const tabEl = document.createElement('div');
     tabEl.className = 'tab' + (tab.id === activeId ? ' active' : '');
@@ -736,6 +754,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.ctrlKey && (e.key === 'j' || e.key === 'J')) {
       e.preventDefault();
       openDownloadDashboard();
+    } else if (e.ctrlKey && e.shiftKey && (e.key === 'a' || e.key === 'A')) {
+      e.preventDefault();
+      toggleAiSidepanel();
     }
   });
 

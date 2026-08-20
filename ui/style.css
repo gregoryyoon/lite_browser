@@ -210,6 +210,15 @@ body {
   transform: scale(0.95);
 }
 
+#ai-agent-btn:hover:not(:disabled) {
+  background: rgba(37, 99, 235, 0.12);
+  color: #2563eb;
+}
+
+#ai-agent-btn:hover:not(:disabled) svg {
+  fill: #2563eb;
+}
+
 .nav-btn:disabled {
   color: #d4d4d8;
   cursor: not-allowed;

@@ -4,6 +4,8 @@
 
 #include "tests/cefsimple_capi/simple_handler.h"
 #include "tests/cefsimple_capi/simple_download_handler.h"
+#include "tests/cefsimple_capi/simple_vault.h"
+#include "tests/cefsimple_capi/simple_mcp.h"
 
 #include <stdarg.h>
 #include <stdatomic.h>
@@ -729,9 +731,11 @@ void update_ui_nav_state(browser_window_t* win_ctx) {
   snprintf(js_code, sizeof(js_code), 
            "if (window.updateNavState) { window.updateNavState(%d, %d, %d); } "
            "if (window.updateAddress) { window.updateAddress(\"%s\"); } "
-           "if (window.updateDualSplitState) { window.updateDualSplitState(%d, %d); }", 
+           "if (window.updateDualSplitState) { window.updateDualSplitState(%d, %d); } "
+           "if (window.updateSidepanelState) { window.updateSidepanelState(%d); }", 
            can_go_back, can_go_forward, is_loading, escaped_url,
-           active_tab->is_split, active_tab->active_split);
+           active_tab->is_split, active_tab->active_split,
+           win_ctx->show_sidepanel);
 
   cef_frame_t* frame = win_ctx->ui_browser->get_main_frame(win_ctx->ui_browser);
   if (frame) {
@@ -957,6 +961,18 @@ int CEF_CALLBACK request_handler_on_before_browse(
         cef_string_utf8_clear(&url_utf8);
         cef_string_userfree_free(url_userfree);
         return 1;
+      } else if (strncmp(url_utf8.str, "lite://sidepanel", 16) == 0 ||
+                 strncmp(url_utf8.str, "lite://ai", 9) == 0 ||
+                 strncmp(url_utf8.str, "lite://agent", 12) == 0) {
+        char sp_url_buf[MAX_PATH + 32];
+        ResolveUIFilePath("ui/sidepanel.html", NULL, 0, sp_url_buf, sizeof(sp_url_buf));
+        cef_string_t sp_url = {};
+        cef_string_from_utf8(sp_url_buf, strlen(sp_url_buf), &sp_url);
+        frame->load_url(frame, &sp_url);
+        cef_string_clear(&sp_url);
+        cef_string_utf8_clear(&url_utf8);
+        cef_string_userfree_free(url_userfree);
+        return 1;
       }
     }
 
@@ -979,7 +995,13 @@ int CEF_CALLBACK request_handler_on_before_browse(
           }
         }
 
-        if (strcmp(action, "toggle-dual-split") == 0) {
+        if (strcmp(action, "toggle-ai-sidepanel") == 0) {
+          win_ctx->show_sidepanel = !win_ctx->show_sidepanel;
+          RECT r;
+          GetClientRect(win_ctx->main_hwnd, &r);
+          PostMessage(win_ctx->main_hwnd, WM_SIZE, 0, MAKELPARAM(r.right, r.bottom));
+          update_ui_nav_state(win_ctx);
+        } else if (strcmp(action, "toggle-dual-split") == 0) {
           if (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
             tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
             if (!active_tab->is_split) {
@@ -1015,6 +1037,358 @@ int CEF_CALLBACK request_handler_on_before_browse(
               PostMessage(win_ctx->main_hwnd, WM_SIZE, 0, MAKELPARAM(r.right, r.bottom));
               update_ui_nav_state(win_ctx);
             }
+          }
+        } else if (strcmp(action, "vault-get-list") == 0) {
+          char buf[65536];
+          vault_get_list_json(buf, sizeof(buf));
+          if (frame) {
+            char js_code[65536 + 128];
+            snprintf(js_code, sizeof(js_code), "if (window.renderVaultList) { window.renderVaultList(%s); }", buf);
+            cef_string_t js_str = {};
+            cef_string_from_utf8(js_code, strlen(js_code), &js_str);
+            frame->execute_java_script(frame, &js_str, NULL, 0);
+            cef_string_clear(&js_str);
+          }
+        } else if (strncmp(action, "vault-save?", 11) == 0) {
+          const char* query = action + 11;
+          char* domain = get_query_param(query, "domain");
+          char* user = get_query_param(query, "user");
+          char* pass = get_query_param(query, "pass");
+          if (domain && pass) {
+            vault_save_credential(domain, user ? user : "", pass);
+          }
+          if (domain) free(domain);
+          if (user) free(user);
+          if (pass) free(pass);
+          if (frame) {
+            cef_string_t js_str = {};
+            cef_string_from_utf8("if (window.onVaultUpdated) window.onVaultUpdated(true);", 55, &js_str);
+            frame->execute_java_script(frame, &js_str, NULL, 0);
+            cef_string_clear(&js_str);
+          }
+        } else if (strncmp(action, "vault-delete?", 13) == 0) {
+          const char* query = action + 13;
+          char* domain = get_query_param(query, "domain");
+          if (domain) {
+            vault_delete_credential(domain);
+            free(domain);
+          }
+          if (frame) {
+            cef_string_t js_str = {};
+            cef_string_from_utf8("if (window.onVaultUpdated) window.onVaultUpdated(true);", 55, &js_str);
+            frame->execute_java_script(frame, &js_str, NULL, 0);
+            cef_string_clear(&js_str);
+          }
+        } else if (strcmp(action, "vault-clear") == 0) {
+          vault_clear_all();
+          if (frame) {
+            cef_string_t js_str = {};
+            cef_string_from_utf8("if (window.onVaultUpdated) window.onVaultUpdated(true);", 55, &js_str);
+            frame->execute_java_script(frame, &js_str, NULL, 0);
+            cef_string_clear(&js_str);
+          }
+        } else if (strncmp(action, "vault-autofill?", 15) == 0 || strcmp(action, "vault-autofill") == 0) {
+          const char* query = (strncmp(action, "vault-autofill?", 15) == 0) ? (action + 15) : "";
+          char* domain = get_query_param(query, "domain");
+          int success = 0;
+          if (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+            tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
+            const char* active_pane_url = (active_tab->is_split && active_tab->active_split == 1 && active_tab->right_url[0]) ? active_tab->right_url : active_tab->url;
+            const char* target_dom = (domain && strlen(domain) > 0) ? domain : active_pane_url;
+            if (cb) {
+              success = vault_execute_autofill(cb, target_dom);
+            }
+          }
+          if (domain) free(domain);
+          if (frame) {
+            char js_code[128];
+            snprintf(js_code, sizeof(js_code), "if (window.onVaultAutofillResult) window.onVaultAutofillResult(%s);", success ? "true" : "false");
+            cef_string_t js_str = {};
+            cef_string_from_utf8(js_code, strlen(js_code), &js_str);
+            frame->execute_java_script(frame, &js_str, NULL, 0);
+            cef_string_clear(&js_str);
+          }
+        } else if (strncmp(action, "ai-highlight-element?", 21) == 0) {
+          const char* query = action + 21;
+          char* selector = get_query_param(query, "selector");
+          if (selector && cb) {
+            char script[2048];
+            snprintf(script, sizeof(script),
+              "(function() {"
+              "  try {"
+              "    const old = document.getElementById('__lite_ai_highlight');"
+              "    if (old) old.remove();"
+              "    const el = document.querySelector('%s');"
+              "    if (el) {"
+              "      el.scrollIntoView({ behavior: 'smooth', block: 'center' });"
+              "      const rect = el.getBoundingClientRect();"
+              "      const ring = document.createElement('div');"
+              "      ring.id = '__lite_ai_highlight';"
+              "      ring.style.position = 'absolute';"
+              "      ring.style.top = (rect.top + window.scrollY - 3) + 'px';"
+              "      ring.style.left = (rect.left + window.scrollX - 3) + 'px';"
+              "      ring.style.width = (rect.width + 6) + 'px';"
+              "      ring.style.height = (rect.height + 6) + 'px';"
+              "      ring.style.border = '3px solid #2563eb';"
+              "      ring.style.borderRadius = '6px';"
+              "      ring.style.boxShadow = '0 0 15px rgba(37, 99, 235, 0.6)';"
+              "      ring.style.pointerEvents = 'none';"
+              "      ring.style.zIndex = '9999999';"
+              "      ring.style.transition = 'all 0.3s ease';"
+              "      document.body.appendChild(ring);"
+              "      setTimeout(() => { if (ring.parentNode) ring.parentNode.removeChild(ring); }, 3000);"
+              "    }"
+              "  } catch(e) {}"
+              "})();", selector);
+            cef_frame_t* f = cb->get_main_frame(cb);
+            if (f) {
+              cef_string_t js_str = {};
+              cef_string_from_utf8(script, strlen(script), &js_str);
+              f->execute_java_script(f, &js_str, NULL, 0);
+              cef_string_clear(&js_str);
+              f->base.release(&f->base);
+            }
+            free(selector);
+          }
+        } else if (strncmp(action, "ai-click-element?", 17) == 0) {
+          const char* query = action + 17;
+          char* selector = get_query_param(query, "selector");
+          char* text = get_query_param(query, "text");
+          if (cb) {
+            char script[2048];
+            snprintf(script, sizeof(script),
+              "(function() {"
+              "  try {"
+              "    let el = null;"
+              "    const sel = '%s';"
+              "    const txt = '%s';"
+              "    if (sel && sel.length > 0) el = document.querySelector(sel);"
+              "    if (!el && txt && txt.length > 0) {"
+              "      const all = Array.from(document.querySelectorAll('button, a, input[type=\"submit\"], [role=\"button\"]'));"
+              "      el = all.find(e => (e.innerText || e.value || '').trim().includes(txt));"
+              "    }"
+              "    if (el) {"
+              "      el.scrollIntoView({ behavior: 'smooth', block: 'center' });"
+              "      el.focus();"
+              "      el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));"
+              "      el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));"
+              "      el.click();"
+              "      return true;"
+              "    }"
+              "    return false;"
+              "  } catch(e) { return false; }"
+              "})();", selector ? selector : "", text ? text : "");
+            cef_frame_t* f = cb->get_main_frame(cb);
+            if (f) {
+              cef_string_t js_str = {};
+              cef_string_from_utf8(script, strlen(script), &js_str);
+              f->execute_java_script(f, &js_str, NULL, 0);
+              cef_string_clear(&js_str);
+              f->base.release(&f->base);
+            }
+          }
+          if (selector) free(selector);
+          if (text) free(text);
+        } else if (strncmp(action, "ai-type-element?", 16) == 0) {
+          const char* query = action + 16;
+          char* selector = get_query_param(query, "selector");
+          char* text = get_query_param(query, "text");
+          char* enter = get_query_param(query, "enter");
+          if (selector && text && cb) {
+            char script[4096];
+            snprintf(script, sizeof(script),
+              "(function() {"
+              "  try {"
+              "    const el = document.querySelector('%s');"
+              "    if (el) {"
+              "      el.scrollIntoView({ behavior: 'smooth', block: 'center' });"
+              "      el.focus();"
+              "      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {"
+              "        el.value = '%s';"
+              "      } else if (el.isContentEditable) {"
+              "        el.innerText = '%s';"
+              "      }"
+              "      el.dispatchEvent(new Event('input', { bubbles: true }));"
+              "      el.dispatchEvent(new Event('change', { bubbles: true }));"
+              "      if (%s) {"
+              "        el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, which: 13, bubbles: true }));"
+              "        el.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', keyCode: 13, which: 13, bubbles: true }));"
+              "        el.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', keyCode: 13, which: 13, bubbles: true }));"
+              "        if (el.form) el.form.submit();"
+              "      }"
+              "    }"
+              "  } catch(e) {}"
+              "})();", selector, text, text, (enter && strcmp(enter, "1") == 0) ? "true" : "false");
+            cef_frame_t* f = cb->get_main_frame(cb);
+            if (f) {
+              cef_string_t js_str = {};
+              cef_string_from_utf8(script, strlen(script), &js_str);
+              f->execute_java_script(f, &js_str, NULL, 0);
+              cef_string_clear(&js_str);
+              f->base.release(&f->base);
+            }
+          }
+          if (selector) free(selector);
+          if (text) free(text);
+          if (enter) free(enter);
+        } else if (strncmp(action, "ai-scroll?", 10) == 0) {
+          const char* query = action + 10;
+          char* dir = get_query_param(query, "direction");
+          char* amt = get_query_param(query, "amount");
+          int scroll_amt = amt ? atoi(amt) : 500;
+          if (cb) {
+            char script[256];
+            if (dir && strcmp(dir, "up") == 0) {
+              snprintf(script, sizeof(script), "window.scrollBy({ top: -%d, behavior: 'smooth' });", scroll_amt);
+            } else if (dir && strcmp(dir, "top") == 0) {
+              snprintf(script, sizeof(script), "window.scrollTo({ top: 0, behavior: 'smooth' });");
+            } else if (dir && strcmp(dir, "bottom") == 0) {
+              snprintf(script, sizeof(script), "window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });");
+            } else {
+              snprintf(script, sizeof(script), "window.scrollBy({ top: %d, behavior: 'smooth' });", scroll_amt);
+            }
+            cef_frame_t* f = cb->get_main_frame(cb);
+            if (f) {
+              cef_string_t js_str = {};
+              cef_string_from_utf8(script, strlen(script), &js_str);
+              f->execute_java_script(f, &js_str, NULL, 0);
+              cef_string_clear(&js_str);
+              f->base.release(&f->base);
+            }
+          }
+          if (dir) free(dir);
+          if (amt) free(amt);
+        } else if (strcmp(action, "ai-get-dom-summary") == 0) {
+          if (cb) {
+            const char* dom_collector = 
+              "(function() {"
+              "  try {"
+              "    function getDocData(doc) {"
+              "      if (!doc) return { title: '', text: '', buttons: [], inputs: [] };"
+              "      let text = '';"
+              "      try {"
+              "        const iframes = doc.querySelectorAll('iframe, frame');"
+              "        for (let ifr of iframes) {"
+              "          try {"
+              "            const idoc = ifr.contentDocument || ifr.contentWindow?.document;"
+              "            if (idoc) {"
+              "              const subData = getDocData(idoc);"
+              "              if (subData.text && subData.text.length > text.length) {"
+              "                text = subData.text;"
+              "              }"
+              "            }"
+              "          } catch(e) {}"
+              "        }"
+              "      } catch(e) {}"
+              "      const articleSelectors = ["
+              "        '.se-main-container', '.se_component_wrap', '#postViewArea', '.post-view',"
+              "        '#dic_area', '#articleBody', '.article_view', '.news_body',"
+              "        '.entry-content', '.post-content', '.article-body',"
+              "        'article', 'main', '[role=\"main\"]', '#content', '.content', '#main', 'body'"
+              "      ];"
+              "      for (const sel of articleSelectors) {"
+              "        try {"
+              "          const el = doc.querySelector(sel);"
+              "          if (el && el.innerText && el.innerText.trim().length > 100) {"
+              "            if (el.innerText.trim().length > text.length) {"
+              "              text = el.innerText.trim();"
+              "              break;"
+              "            }"
+              "          }"
+              "        } catch(e) {}"
+              "      }"
+              "      if (!text && doc.body) {"
+              "        text = doc.body.innerText || '';"
+              "      }"
+              "      const buttons = Array.from(doc.querySelectorAll('button, a, input[type=\"submit\"], [role=\"button\"]')).slice(0, 30).map((el) => {"
+              "        return {"
+              "          tag: el.tagName.toLowerCase(),"
+              "          text: (el.innerText || el.value || '').trim().slice(0, 50),"
+              "          id: el.id || '',"
+              "          selector: el.id ? ('#' + el.id) : (el.className ? ('.' + el.className.trim().split(/\\s+/)[0]) : el.tagName.toLowerCase())"
+              "        };"
+              "      }).filter(x => x.text.length > 0);"
+              "      const inputs = Array.from(doc.querySelectorAll('input:not([type=\"hidden\"]), textarea, select')).slice(0, 20).map((el) => {"
+              "        return {"
+              "          tag: el.tagName.toLowerCase(),"
+              "          type: el.type || '',"
+              "          name: el.name || '',"
+              "          placeholder: el.placeholder || '',"
+              "          selector: el.id ? ('#' + el.id) : (el.name ? ('[name=\"' + el.name + '\"]') : (el.type ? ('input[type=\"' + el.type + '\"]') : el.tagName.toLowerCase()))"
+              "        };"
+              "      });"
+              "      return {"
+              "        title: doc.title || '',"
+              "        text: text.replace(/\\s+/g, ' ').slice(0, 6000),"
+              "        buttons,"
+              "        inputs"
+              "      };"
+              "    }"
+              "    const docData = getDocData(document);"
+              "    const data = {"
+              "      title: document.title || docData.title || '',"
+              "      url: window.location.href,"
+              "      bodySnippet: docData.text,"
+              "      buttons: docData.buttons,"
+              "      inputs: docData.inputs"
+              "    };"
+              "    const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(data))));"
+              "    window.location.href = 'http://ui-action/ai-dom-result?data=' + encodeURIComponent(b64);"
+              "  } catch(e) { console.error(e); }"
+              "})();";
+            cef_frame_t* f = cb->get_main_frame(cb);
+            if (f) {
+              cef_string_t js_str = {};
+              cef_string_from_utf8(dom_collector, strlen(dom_collector), &js_str);
+              f->execute_java_script(f, &js_str, NULL, 0);
+              cef_string_clear(&js_str);
+              f->base.release(&f->base);
+            }
+          }
+        } else if (strncmp(action, "ai-dom-result?", 14) == 0) {
+          const char* query = action + 14;
+          char* data_b64 = get_query_param(query, "data");
+          if (data_b64) {
+            for (char* p = data_b64; *p; p++) {
+              if (*p == ' ') *p = '+';
+            }
+            size_t decoded_len = 0;
+            unsigned char* decoded = base64_decode(data_b64, &decoded_len);
+            if (decoded) {
+              cef_browser_t* target_b = win_ctx->sidepanel_browser;
+              if (!target_b && win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+                tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
+                target_b = (active_tab->is_split && active_tab->right_browser) ? active_tab->right_browser : active_tab->browser;
+              }
+              if (target_b) {
+                char* js_code = (char*)malloc(decoded_len + 128);
+                if (js_code) {
+                  snprintf(js_code, decoded_len + 128, "if (window.onAgentDomExtracted) { window.onAgentDomExtracted(%s); }", (char*)decoded);
+                  cef_frame_t* rf = target_b->get_main_frame(target_b);
+                  if (rf) {
+                    cef_string_t js_str = {};
+                    cef_string_from_utf8(js_code, strlen(js_code), &js_str);
+                    rf->execute_java_script(rf, &js_str, NULL, 0);
+                    cef_string_clear(&js_str);
+                    rf->base.release(&rf->base);
+                  }
+                  free(js_code);
+                }
+              }
+              free(decoded);
+            }
+            free(data_b64);
+          }
+        } else if (strcmp(action, "mcp-get-tools") == 0) {
+          char buf[16384];
+          mcp_get_tools_json(buf, sizeof(buf));
+          if (frame) {
+            char js_code[16384 + 128];
+            snprintf(js_code, sizeof(js_code), "if (window.onMcpToolsLoaded) { window.onMcpToolsLoaded(%s); }", buf);
+            cef_string_t js_str = {};
+            cef_string_from_utf8(js_code, strlen(js_code), &js_str);
+            frame->execute_java_script(frame, &js_str, NULL, 0);
+            cef_string_clear(&js_str);
           }
         } else if (strcmp(action, "back") == 0) {
           if (cb) cb->go_back(cb);

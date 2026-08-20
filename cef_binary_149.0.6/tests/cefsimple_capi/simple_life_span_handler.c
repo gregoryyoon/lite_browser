@@ -58,6 +58,16 @@ void CEF_CALLBACK life_span_handler_on_after_created(
       browser->base.add_ref(&browser->base);
       win_ctx->ui_hwnd = hwnd;
       LogMsg("Set win_ctx->ui_browser = %p, hwnd = %p\n", browser, hwnd);
+    } else if (handler->parent->type == BROWSER_TYPE_SIDEPANEL) {
+      win_ctx->sidepanel_browser = browser;
+      browser->base.add_ref(&browser->base);
+      win_ctx->sidepanel_hwnd = hwnd;
+      if (win_ctx->show_sidepanel) {
+        ShowWindow(hwnd, SW_SHOW);
+      } else {
+        ShowWindow(hwnd, SW_HIDE);
+      }
+      LogMsg("Set win_ctx->sidepanel_browser = %p, hwnd = %p\n", browser, hwnd);
     } else {
       int found_slot = -1;
       int is_right_slot = 0;
@@ -194,6 +204,14 @@ void CEF_CALLBACK life_span_handler_on_before_close(
       win_ctx->ui_browser->base.release(&win_ctx->ui_browser->base);
       win_ctx->ui_browser = NULL;
       LogMsg("on_before_close: cleared ui_browser\n");
+    } else if (win_ctx->sidepanel_browser &&
+               browser->get_identifier(browser) ==
+                   win_ctx->sidepanel_browser->get_identifier(win_ctx->sidepanel_browser)) {
+      win_ctx->sidepanel_browser->base.release(&win_ctx->sidepanel_browser->base);
+      win_ctx->sidepanel_browser = NULL;
+      win_ctx->sidepanel_hwnd = NULL;
+      win_ctx->sidepanel_handler = NULL;
+      LogMsg("on_before_close: cleared sidepanel_browser\n");
     } else {
       for (int i = 0; i < win_ctx->tab_count; i++) {
         if (win_ctx->tabs[i].browser &&
@@ -218,7 +236,7 @@ void CEF_CALLBACK life_span_handler_on_before_close(
     }
 
     int any_active = 0;
-    if (win_ctx->ui_browser != NULL) {
+    if (win_ctx->ui_browser != NULL || win_ctx->sidepanel_browser != NULL) {
       any_active = 1;
     }
     for (int i = 0; i < win_ctx->tab_count; i++) {
