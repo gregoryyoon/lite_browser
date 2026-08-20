@@ -328,13 +328,16 @@ cmake --build c:\projects\lite_browser\cef_binary_149.0.6\build --config Debug -
    - 듀얼 탭 분할 모드(`active_tab->is_split == 1`)에서 사용자가 마우스로 클릭하거나 포커스한 화면(`active_tab->active_split`: 0 좌측, 1 우측)을 동적으로 감지.
    - AI DOM 추출 및 상호작용 도구(`ai-get-dom-summary`, `ai-click-element`, `ai-type-element`, `ai-scroll`, `ai-highlight-element`, `vault-autofill`)가 현재 활성화된 화면(`cb`)의 URL과 본문을 정확하게 타겟팅하여 조작 및 요약 수행.
 
-3. **심층 iframe 및 스마트 아티클 재귀 본문 추출 엔진 (`simple_handler.c`)**:
-   - 네이버 블로그(`<iframe id="mainFrame">`), 다음 카페, 포털 등 중첩 `iframe` 구조 페이지에서 `contentDocument`를 자동 재귀 탐색.
-   - 네이버 스마트에디터(`.se-main-container`, `.se_component_wrap`, `#postViewArea`), 주요 언론사 뉴스 본문(`#dic_area`, `#articleBody`, `.article_view`, `.news_body`, `.entry-content`, `article`, `main`) 셀렉터를 우선 타겟팅하여 최대 6,000자의 풍부하고 깨끗한 본문 텍스트를 즉시 추출.
+3. **Chrome Gemini 스타일 5단계 본문 파싱 & 마크다운 추출 엔진 (`ui/content_extractor.js`, `simple_handler.c`)**:
+   - **1단계 (Smart Frame Candidate Scoring)**: 최상위 `document` 및 네이버 블로그(`<iframe id="mainFrame">`), 다음 카페 등 중첩 `iframe` 구조를 재귀 탐색하여 특수 아티클 컨테이너(`.se-main-container`, `#postViewArea`, `#dic_area`, `#articleBody`, `.entry-content`, `article`, `main`) 매칭 점수로 1위 프레임 자동 선정.
+   - **2단계 (Semantic & Visual Noise Filtering)**: DOM 복제본을 기반으로 `<nav>`, `<header>`, `<footer>`, `<aside>`, `<script>`, `<style>`, 광고 배너(`.ad`, `.banner`, `.sponsor`), 소셜 공유(`.sns-share`), 댓글창(`.comment`, `.reply`), 비가시 텍스트(`display: none`, `visibility: hidden`, `opacity < 0.05`)를 완벽 제거.
+   - **3단계 (Readability & Viewport Heuristic Scoring)**: 텍스트 길이, 쉼표 빈도, 링크 밀도(역가중치), `getBoundingClientRect()` 기준 뷰포트 중앙 배치 가중치(+30%)를 결합하여 최적 본문 컨테이너(Core Article Block)를 격리.
+   - **4단계 (Clean Markdown Serializer)**: 제목(`h1`~`h6`), 단락(`p`), 인용구(`blockquote`), 목록(`ul`/`ol`/`li`), 표(`table`/`tr`/`th`/`td`), 코드 블록(`pre`/`code`), 볼드/이탤릭 서식을 온전히 보존하는 경량 직렬화기 구동.
+   - **5단계 (Payload Packaging)**: 제목, URL, 작성자, 작성일, 대표 이미지, 구조화된 Markdown 본문(최대 8,000자), 인터랙티브 버튼/인풋 목록을 패키징하여 AI 사이드패널(Gemini 3.7 Flash)에 실시간 전달.
 
 4. **AI Provider 플러그인 추상화 계층 (`ui/ai_providers.js`)**:
    - 표준화된 `AIProviderInterface`를 바탕으로 다형성 어댑터 구현:
-     - **Google Gemini**: 기본 모델로 **`gemini-3.7-flash`** 적용 (Gemini 2.5 Pro/Flash 선택 가능), SSE 실시간 스트리밍 및 Function Calling 완벽 연동.
+     - **Google Gemini**: 기본 모델로 **`gemini-3.7-flash`** 적용 (`gemini-3.6-flash`, `gemini-3.5-flash`, `gemini-3.5-flash-lite`, `gemini-2.5-pro`, `gemini-2.5-flash` 자유 선택 지원), SSE 실시간 스트리밍 및 Function Calling 완벽 연동.
      - **OpenAI**: `gpt-4o`, `gpt-4o-mini`, SSE 스트리밍 및 Tool Calling 연동.
      - **Anthropic**: `claude-3-7-sonnet`, `claude-3-5-sonnet`, 사고 블록(Thinking Delta) 스트리밍 및 Tool Use 연동.
      - **Ollama**: 로컬 LLM (`llama3.2`, `qwen2.5`) 연동.
@@ -358,6 +361,7 @@ cmake --build c:\projects\lite_browser\cef_binary_149.0.6\build --config Debug -
    - C 백엔드가 `lite_browser_mcp.exe` 프로세스를 관리하며, 바이너리 미존재 시에도 내장 네이티브 브릿지로 도구 호출을 중계하는 Fallback 설계 적용.
 
 ### 12.3 주요 소스 파일 맵
+- [`ui/content_extractor.js`](file:///c:/projects/lite_browser/ui/content_extractor.js): 5단계 본문 파싱 & 마크다운 추출기 모듈
 - [`ui/sidepanel.html`](file:///c:/projects/lite_browser/ui/sidepanel.html): AI 사이드패널 UI 마크업
 - [`ui/sidepanel.css`](file:///c:/projects/lite_browser/ui/sidepanel.css): 사이드패널 다크/라이트 테마 및 타임라인 스타일
 - [`ui/sidepanel.js`](file:///c:/projects/lite_browser/ui/sidepanel.js): 사이드패널 프론트엔드 오케스트레이터

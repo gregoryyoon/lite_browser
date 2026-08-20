@@ -149,7 +149,7 @@ class TaskRuntime {
               setTimeout(() => {
                 if (this.pendingDomCallback) {
                   this.pendingDomCallback = null;
-                  resolve({ title: document.title || '현재 페이지', bodySnippet: '페이지 본문 내용을 읽을 수 없습니다.', buttons: [], inputs: [] });
+                  resolve({ title: '현재 페이지', bodySnippet: '페이지 본문 내용을 읽을 수 없습니다.', markdown: '', buttons: [], inputs: [] });
                 }
               }, 5000);
             });
