@@ -43,7 +43,7 @@ class GeminiProvider extends AIProviderInterface {
             parsedResponse = { content: msg.content };
           }
           contents.push({
-            role: 'function',
+            role: 'user',
             parts: [{
               functionResponse: {
                 name: msg.name || 'tool_response',
