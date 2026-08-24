@@ -337,7 +337,7 @@ cmake --build c:\projects\lite_browser\cef_binary_149.0.6\build --config Debug -
 
 4. **AI Provider 플러그인 추상화 계층 (`ui/ai_providers.js`)**:
    - 표준화된 `AIProviderInterface`를 바탕으로 다형성 어댑터 구현:
-     - **Google Gemini**: 기본 모델로 **`gemini-3.7-flash`** 적용 (`gemini-3.6-flash`, `gemini-3.5-flash`, `gemini-3.5-flash-lite`, `gemini-2.5-pro`, `gemini-2.5-flash` 자유 선택 지원), SSE 실시간 스트리밍 및 Function Calling 완벽 연동.
+     - **Google Gemini**: 기본 모델로 **`gemini-3.7-flash`** 적용 (`gemini-3.6-flash`, `gemini-3.5-flash`, `gemini-3.1-pro-preview` 선택 지원), SSE 실시간 스트리밍 및 Function Calling 완벽 연동.
      - **OpenAI**: `gpt-4o`, `gpt-4o-mini`, SSE 스트리밍 및 Tool Calling 연동.
      - **Anthropic**: `claude-3-7-sonnet`, `claude-3-5-sonnet`, 사고 블록(Thinking Delta) 스트리밍 및 Tool Use 연동.
      - **Ollama**: 로컬 LLM (`llama3.2`, `qwen2.5`) 연동.
@@ -376,3 +376,37 @@ cmake --build c:\projects\lite_browser\cef_binary_149.0.6\build --config Debug -
 - Debug 빌드: `Debug/lite_browser.exe` 컴파일 및 링크 성공 (Exit code 0).
 - Release 빌드: `Release/lite_browser.exe` 컴파일 및 링크 성공 (Exit code 0).
 - NSIS 인스톨러: [`LiteBrowserInstaller.exe`](file:///c:/projects/lite_browser/LiteBrowserInstaller.exe) 패키징 완료 (Exit code 0).
+
+---
+
+## 13. 결제/인증 팝업창 및 링크 새 탭 분기 제어 (Popup Window vs New Tab Routing)
+
+### 13.1 개요
+네이버페이, 토스, PG 결제창, 소셜 로그인(OAuth) 등 웹페이지 스크립트가 명시적인 팝업 창(`window.open` 규격/치수 지정)을 요청할 때와 사용자가 일반 링크를 새 탭으로 열 때를 정확히 분기하여, 결제/인증 팝업은 부모 창(`window.opener`)과의 상호작용이 유지되는 독립 네이티브 팝업 창으로 띄우고 일반 링크는 LiteBrowser의 새 탭으로 열리도록 라우팅 로직을 고도화했습니다.
+
+### 13.2 주요 구현 내역
+1. **명시적 팝업 윈도우 판별 엔진 ([`simple_life_span_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_life_span_handler.c))**:
+   - `life_span_handler_on_before_popup` 콜백에서 `target_disposition` (`CEF_WOD_NEW_POPUP`, `CEF_WOD_NEW_PICTURE_IN_PICTURE`) 및 `popupFeatures` (`isPopup`, `widthSet`, `heightSet`)를 종합 평가하여 실제 팝업 창 요청인지 검사.
+   - **팝업 창인 경우**: 전용 클라이언트 핸들러(`BROWSER_TYPE_POPUP`)를 할당하고 `return 0`(false)을 반환하여 CEF가 표준 OS 윈도우 프레임 및 원래 요청된 가로/세로 크기를 가진 독립 팝업 윈도우를 생성하도록 허용 (`window.opener` 통신 및 `window.close()` 정상 동작 보장).
+   - **일반 링크/새 탭인 경우**: `target_url`을 추출하여 LiteBrowser 메인 창의 새 탭(`CreateNewTab(win_ctx, target_url_str)`)으로 개설하고 `return 1`을 반환하여 불필요한 크로미움 기본 새 창 생성을 차단.
+2. **독립 팝업 브라우저 생명주기 분리 ([`simple_handler.h`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_handler.h), [`simple_display_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_display_handler.c), [`simple_load_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_load_handler.c))**:
+   - `browser_type_t` 열거형에 `BROWSER_TYPE_POPUP`을 신설.
+   - `on_after_created` 및 `on_before_close`에서 팝업 브라우저가 생성/종료될 때 메인 윈도우의 탭 배열(`win_ctx->tabs`) 슬롯을 덮어쓰거나 오염시키지 않도록 격리.
+   - 팝업 브라우저의 타이틀/URL 변경이나 로딩 상태 변경 시 메인 윈도우의 탭 바 및 주소 표시창이 불필요하게 갱신되거나 활성 탭이 숨겨지는 부작용을 방지.
+3. **전용 네이티브 팝업 윈도우 호스트 (`LiteBrowserPopupWnd` & `LiteBrowserPopupWndProc`)**:
+   - CEF 기본 크로미움 브라우저 UI(탭바/주소창)가 뜨는 것을 원천 방지하기 위해, `on_before_popup` 콜백 내에서 직접 Win32 독립 윈도우 클래스(`LiteBrowserPopupWnd`)를 등록 및 생성(`CreateWindowExW`).
+   - **웹페이지 요청 규격 완벽 반영 & DPI/타이틀바 외곽 자동 보정**: 웹페이지가 `window.open` 스크립트로 요청한 가로/세로 크기(`popupFeatures->width`, `popupFeatures->height`)를 웹 콘텐츠의 순수 Client 영역 크기로 인식하고, Windows OS의 `AdjustWindowRectExForDpi`를 통해 타이틀바와 테두리 두께만큼 외곽 윈도우 프레임을 추가 확보하여 웹페이지가 의도한 크기 그대로 1픽셀도 잘리지 않고 표시되도록 구현 (결제 인증 키패드 최소 480x750px 보장).
+   - **JavaScript 동적 크기 변경 지원 (`on_contents_bounds_change`)**: 웹페이지 스크립트가 실행 도중 `window.resizeTo()` 또는 `window.resizeBy()`를 호출하여 창 크기를 동적으로 변경할 때 네이티브 팝업 윈도우가 실시간으로 확대/축소되도록 `on_contents_bounds_change` 콜백 구현.
+   - 작업 표시줄(Taskbar) 영역을 제외한 모니터 작업 영역(`rcWork`)의 정중앙에 배치하고 화면 경계 밖으로 벗어나지 않도록 클램핑.
+   - `windowInfo`에 새로 생성한 `popup_hwnd`를 `parent_window`로 지정(`WS_CHILD`)하여, CEF가 불필요한 크로미움 브라우저 윈도우 대신 컴팩트한 전용 팝업 창 내부에 웹 콘텐츠를 호스팅하도록 바인딩.
+   - `WM_SIZE`로 팝업 창 리사이즈에 반응하고, `on_title_change`에서 `SetWindowTextW`를 통해 한글 깨짐 없이 `[웹페이지 제목] - Lite Browser` 형식으로 타이틀바 자동 동기화 및 브라우저 아이콘 주입.
+   - **팝업 비동기 종료 격리 및 안전 파괴 (`WM_USER_CLOSE_POPUP`)**: 팝업 창이 닫힐 때 `on_before_close` 콜백 내부에서 `DestroyWindow`를 동기 호출하지 않고 비동기 메시지(`WM_USER_CLOSE_POPUP`)로 분리 전송하여, CEF의 내부 윈도우 객체 정리 루틴과 Win32 윈도우 파괴 순서 충돌(`this->window_ == nullptr` 액세스 위반)을 완벽 차단. 또한 `life_span_handler_do_close`에서 `return 1`을 반환하여 메인 윈도우로의 `WM_CLOSE` 전파를 원천 방지.
+
+### 13.3 팝업창 종료 시 강제 종료/크래시 원인 분석 및 해결 요약
+
+| 문제 지점 | 기존 원인 | 해결 코드 및 아키텍처 개선 |
+| :--- | :--- | :--- |
+| **1. 메인 창 `WM_CLOSE` 전파** | 팝업 생성 시 `hWndParent`로 메인 창을 지정하여 CEF `do_close` 기본 동작(`return 0`)에 의해 메인 창으로 `WM_CLOSE`가 자동 전달됨 | 팝업을 부모 없는 독립 최상위 윈도우(`hWndParent = NULL`)로 생성하고, `life_span_handler_do_close`에서 `return 1`을 반환하여 메시지 전파 차단 |
+| **2. 브라우저 중복 해제 (댕글링 포인터)** | `on_after_created`와 `on_before_close`에서 콜백 인자로 전달된 브라우저를 임의로 `release`하거나 윈도우 소멸(`WM_NCDESTROY`) 시 이미 파괴된 브라우저 객체에 접근 | 팝업 컨텍스트(`pctx->browser`)를 Weak Reference로 전환하고 불필요한 `add_ref`/`release`를 완전히 제거하여 참조 카운트 1:1 보장 |
+| **3. CEF 내부 객체 파괴 충돌 (`nullptr` 위반)** | `on_before_close` 콜백 내부에서 동기식 `DestroyWindow`를 호출하여 CEF가 미처 윈도우 객체를 정리하기 전에 Win32 윈도우가 파괴됨 | `PostMessage(parent_wnd, WM_USER_CLOSE_POPUP, 0, 0)` 비동기 메시지로 분리하여 CEF 정리 루틴이 완전히 끝난 후 안전하게 Win32 윈도우가 파괴되도록 보장 |
+

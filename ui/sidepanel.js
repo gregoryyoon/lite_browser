@@ -45,12 +45,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const memoryCountLabel = document.getElementById('memory-count-label');
   const clearMemoryBtn = document.getElementById('clear-memory-btn');
 
-  // Runtime Controls & Intervention
-  const runtimeControls = document.getElementById('runtime-controls');
-  const ctrlPauseBtn = document.getElementById('ctrl-pause-btn');
-  const ctrlResumeBtn = document.getElementById('ctrl-resume-btn');
-  const ctrlTakeoverBtn = document.getElementById('ctrl-takeover-btn');
-  const ctrlStopBtn = document.getElementById('ctrl-stop-btn');
+  // Intervention DOM Elements
   const interventionCard = document.getElementById('intervention-card');
   const interventionMessage = document.getElementById('intervention-message');
   const interventionResumeBtn = document.getElementById('intervention-resume-btn');
@@ -125,30 +120,13 @@ document.addEventListener('DOMContentLoaded', () => {
     statusBadge.textContent = newState;
     statusBadge.className = `status-badge status-${newState.toLowerCase()}`;
 
-    if (newState === TaskState.RUNNING) {
-      runtimeControls.classList.add('active');
-      ctrlPauseBtn.classList.remove('hidden');
-      ctrlResumeBtn.classList.add('hidden');
-      interventionCard.classList.add('hidden');
-    } else if (newState === TaskState.PAUSED) {
-      ctrlPauseBtn.classList.add('hidden');
-      ctrlResumeBtn.classList.remove('hidden');
-    } else if (newState === TaskState.STUCK || newState === TaskState.WAITING) {
+    if (newState === TaskState.STUCK || newState === TaskState.WAITING) {
       interventionMessage.textContent = detail || '작업 수행 중 사용자 개입이 필요합니다.';
       interventionCard.classList.remove('hidden');
-    } else if (newState === TaskState.IDLE || newState === TaskState.DONE) {
-      runtimeControls.classList.remove('active');
+    } else {
       interventionCard.classList.add('hidden');
     }
   };
-
-  ctrlPauseBtn.addEventListener('click', () => window.taskRuntime.pause());
-  ctrlResumeBtn.addEventListener('click', () => window.taskRuntime.resume());
-  ctrlTakeoverBtn.addEventListener('click', () => window.taskRuntime.manualTakeover());
-  ctrlStopBtn.addEventListener('click', () => {
-    window.taskRuntime.stop();
-    if (abortController) abortController.abort();
-  });
 
   interventionResumeBtn.addEventListener('click', () => {
     interventionCard.classList.add('hidden');
@@ -249,6 +227,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const div = document.createElement('div');
     div.className = 'message-bubble message-assistant';
 
+    const statusNotice = document.createElement('div');
+    statusNotice.className = 'status-notice hidden';
+
     const thinkingBox = document.createElement('details');
     thinkingBox.className = 'thinking-box hidden';
     thinkingBox.innerHTML = '<summary>🧠 사고 과정 (Thinking)...</summary><div class="thinking-content"></div>';
@@ -256,6 +237,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const contentDiv = document.createElement('div');
     contentDiv.className = 'bubble-content';
 
+    div.appendChild(statusNotice);
     div.appendChild(thinkingBox);
     div.appendChild(contentDiv);
     messagesList.appendChild(div);
@@ -263,6 +245,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     return {
       container: div,
+      statusNotice,
       thinkingBox,
       thinkingContent: thinkingBox.querySelector('.thinking-content'),
       contentDiv
@@ -327,15 +310,26 @@ document.addEventListener('DOMContentLoaded', () => {
           tools,
           systemPrompt,
           signal: abortController.signal,
+          onStatus: (statusInfo) => {
+            if (statusInfo.type === 'rate_limit_retry') {
+              bubble.statusNotice.classList.remove('hidden');
+              bubble.statusNotice.innerHTML = `<span>⏳</span><span>${escapeHtml(statusInfo.message)}</span>`;
+              window.taskRuntime.setState(TaskState.RUNNING, statusInfo.message);
+              chatContainer.scrollTop = chatContainer.scrollHeight;
+            }
+          },
           onThinking: (chunk, full) => {
+            bubble.statusNotice.classList.add('hidden');
             bubble.thinkingBox.classList.remove('hidden');
             bubble.thinkingContent.textContent = full;
           },
           onChunk: (chunk, full) => {
+            bubble.statusNotice.classList.add('hidden');
             bubble.contentDiv.innerHTML = formatMarkdown(full);
             chatContainer.scrollTop = chatContainer.scrollHeight;
           },
           onToolCall: (tc) => {
+            bubble.statusNotice.classList.add('hidden');
             toolCalls.push(tc);
           }
         });
@@ -354,7 +348,12 @@ document.addEventListener('DOMContentLoaded', () => {
           tool_calls: toolCalls.length > 0 ? toolCalls.map((tc, idx) => ({
             id: tc.id || ('call_' + idx + '_' + Math.random().toString(36).substring(7)),
             type: 'function',
-            function: { name: tc.name, arguments: JSON.stringify(tc.args) }
+            function: { 
+              name: tc.name, 
+              arguments: JSON.stringify(tc.args),
+              thought_signature: tc.thought_signature || tc.thoughtSignature || undefined
+            },
+            thought_signature: tc.thought_signature || tc.thoughtSignature || undefined
           })) : undefined
         });
 

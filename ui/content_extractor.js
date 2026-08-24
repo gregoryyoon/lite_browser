@@ -345,9 +345,129 @@
       .trim();
   };
 
-  // 7. Stage 5: Full Pipeline Orchestrator
+  // 7. Specialized Extractor for YouTube Video Watch Pages
+  ContentExtractor.extractYouTube = function(doc, win) {
+    try {
+      const url = win ? win.location.href : (doc.location ? doc.location.href : window.location.href);
+      if (!/(?:youtube\.com|youtu\.be)/i.test(url)) return null;
+
+      // Extract Title
+      const titleEl = doc.querySelector('h1.ytd-watch-metadata yt-formatted-string, #title h1, h1.title, ytd-video-primary-info-renderer #title, #title.ytd-watch-metadata');
+      const title = (titleEl ? titleEl.innerText : '') || 
+                    ContentExtractor.getMeta(doc, 'og:title') || 
+                    doc.title.replace(/\s*-\s*YouTube$/i, '') || 'YouTube 동영상';
+
+      // Extract Channel / Author
+      const channelEl = doc.querySelector('#channel-name yt-formatted-string, #owner #channel-name a, ytd-channel-name a, #upload-info a, #owner-name a');
+      const author = (channelEl ? channelEl.innerText : '') || 
+                     ContentExtractor.getMeta(doc, 'author') || 'YouTube Channel';
+
+      // Extract View Count & Date
+      const infoEl = doc.querySelector('#info-container #info, ytd-watch-info-text #info, #info-text');
+      const publishedTime = (infoEl ? infoEl.innerText.replace(/\n+/g, ' | ') : '') || 
+                            ContentExtractor.getMeta(doc, 'article:published_time') || '';
+
+      // Extract Thumbnail Image
+      const image = ContentExtractor.getMeta(doc, 'og:image') || '';
+
+      // Extract Description
+      let descText = '';
+      const descEl = doc.querySelector('#description-inner, #description-inline-expander, ytd-expandable-video-description-body-renderer #description-body, #description');
+      if (descEl) {
+        descText = (descEl.innerText || '').trim();
+      } else {
+        descText = ContentExtractor.getMeta(doc, 'og:description') || ContentExtractor.getMeta(doc, 'description') || '';
+      }
+
+      // Extract Chapters / Timestamps
+      const chapters = [];
+      const chapterEls = doc.querySelectorAll('ytd-macro-markers-list-item-renderer, ytd-chapter-renderer');
+      chapterEls.forEach(el => {
+        const timeEl = el.querySelector('#time, .macro-markers-time, #endpoint');
+        const titleEl = el.querySelector('#title, .macro-markers-title');
+        if (timeEl && titleEl) {
+          const t = timeEl.innerText.trim();
+          const h = titleEl.innerText.trim();
+          if (t && h) chapters.push(`- \`${t}\` ${h}`);
+        }
+      });
+
+      if (chapters.length === 0 && descText) {
+        const timestampRegex = /(?:^|\n)\s*(\d{1,2}:\d{2}(?::\d{2})?)\s*[-–—:]?\s*([^\n\r]+)/g;
+        let match;
+        while ((match = timestampRegex.exec(descText)) !== null) {
+          const t = match[1].trim();
+          const h = match[2].trim().slice(0, 80);
+          chapters.push(`- \`${t}\` ${h}`);
+        }
+      }
+
+      // Format clean, high-density Markdown
+      let md = `# 🎬 ${title}\n\n`;
+      md += `- **채널**: ${author}\n`;
+      if (publishedTime) md += `- **정보**: ${publishedTime}\n`;
+      md += `- **URL**: ${url}\n\n`;
+
+      if (chapters.length > 0) {
+        md += `### ⏱️ 동영상 챕터 및 주요 타임라인\n`;
+        md += chapters.slice(0, 30).join('\n') + `\n\n`;
+      }
+
+      if (descText) {
+        const cleanDesc = descText.slice(0, 3500);
+        md += `### 📝 동영상 상세 설명\n${cleanDesc}\n\n`;
+      }
+
+      // Extract Interactive Buttons
+      const buttons = Array.from(doc.querySelectorAll('button[aria-label], ytd-button-renderer button, #search-icon-legacy, .ytp-play-button'))
+        .filter(el => ContentExtractor.isElementVisible(el, win))
+        .slice(0, 20)
+        .map(el => ({
+          tag: 'button',
+          text: (el.getAttribute('aria-label') || el.innerText || el.title || '').trim().slice(0, 40),
+          id: el.id || '',
+          selector: el.id ? ('#' + el.id) : (el.className ? ('.' + el.className.trim().split(/\s+/)[0]) : 'button')
+        }))
+        .filter(x => x.text.length > 0);
+
+      // Search input
+      const inputs = Array.from(doc.querySelectorAll('input#search, input[name="search_query"], textarea'))
+        .filter(el => ContentExtractor.isElementVisible(el, win))
+        .slice(0, 5)
+        .map(el => ({
+          tag: 'input',
+          type: el.type || 'text',
+          name: el.name || 'search',
+          placeholder: el.placeholder || '검색',
+          selector: el.id ? ('#' + el.id) : 'input#search'
+        }));
+
+      return {
+        title,
+        url,
+        author,
+        publishedTime,
+        image,
+        bodySnippet: md,
+        markdown: md,
+        buttons,
+        inputs
+      };
+    } catch(e) {
+      console.warn('[YouTube Extractor Warning]', e);
+      return null;
+    }
+  };
+
+  // 8. Stage 5: Full Pipeline Orchestrator
   ContentExtractor.extract = function() {
     try {
+      // 0. Specialized YouTube Watch Page extraction
+      const ytResult = ContentExtractor.extractYouTube(document, window);
+      if (ytResult) {
+        return ytResult;
+      }
+
       // 1. Find best document & window (handling nested frames)
       const best = ContentExtractor.findBestContentDoc();
       const targetDoc = best.doc || document;

@@ -93,7 +93,7 @@ load_handler_on_loading_state_change(cef_load_handler_t* self,
   LogMsg("load_handler_on_loading_state_change: isLoading=%d, canGoBack=%d, canGoForward=%d\n", isLoading, canGoBack, canGoForward);
 
   browser_window_t *win_ctx = handler->parent->window_ctx;
-  if (win_ctx) {
+  if (win_ctx && handler->parent->type != BROWSER_TYPE_POPUP) {
     int found_idx = -1;
     for (int i = 0; i < win_ctx->tab_count; i++) {
       if (win_ctx->tabs[i].browser &&

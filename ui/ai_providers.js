@@ -17,6 +17,71 @@ class AIProviderInterface {
   }
 }
 
+// Helper for resilient fetch with exponential backoff on 429 Rate Limit
+async function fetchWithBackoff(url, fetchOptions, providerName = 'AI', onStatus = null) {
+  const signal = fetchOptions.signal;
+  const maxRetries = 3;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    if (signal?.aborted) {
+      throw new DOMException('Aborted by user', 'AbortError');
+    }
+
+    const response = await fetch(url, fetchOptions);
+
+    if (response.ok) {
+      return response;
+    }
+
+    const errText = await response.text();
+
+    if (response.status === 429 && attempt < maxRetries) {
+      let delayMs = 1500 * Math.pow(2, attempt);
+      const retryMatch = errText.match(/retry in\s+([\d\.]+)\s*(ms|s)/i);
+      if (retryMatch) {
+        const val = parseFloat(retryMatch[1]);
+        const unit = retryMatch[2].toLowerCase();
+        delayMs = Math.max(1000, unit === 's' ? val * 1000 : val) + 500;
+      }
+
+      const retrySec = (delayMs / 1000).toFixed(1);
+      const retryMsg = `⚠️ [${providerName} 429] 요청 한도(Rate Limit)에 도달했습니다. ${retrySec}초 후 자동으로 재시도합니다... (${attempt + 1}/${maxRetries})`;
+      console.warn(retryMsg);
+
+      if (onStatus) {
+        onStatus({
+          type: 'rate_limit_retry',
+          provider: providerName,
+          status: 429,
+          attempt: attempt + 1,
+          maxRetries,
+          delayMs,
+          message: retryMsg,
+          rawError: errText
+        });
+      }
+
+      await new Promise((resolve, reject) => {
+        let timer = null;
+        const onAbort = () => {
+          if (timer) clearTimeout(timer);
+          reject(new DOMException('Aborted by user', 'AbortError'));
+        };
+        if (signal?.aborted) return onAbort();
+        if (signal) signal.addEventListener('abort', onAbort, { once: true });
+        timer = setTimeout(() => {
+          if (signal) signal.removeEventListener('abort', onAbort);
+          resolve();
+        }, delayMs);
+      });
+
+      continue;
+    }
+
+    throw new Error(`${providerName} API 오류 (${response.status}): ${errText}`);
+  }
+}
+
 // 1. Google Gemini Provider
 class GeminiProvider extends AIProviderInterface {
   constructor(config = {}) {
@@ -24,7 +89,7 @@ class GeminiProvider extends AIProviderInterface {
     this.model = config.model || 'gemini-3.7-flash';
   }
 
-  async chatStream({ messages, tools, systemPrompt, onChunk, onThinking, onToolCall, onComplete, onError, signal }) {
+  async chatStream({ messages, tools, systemPrompt, onChunk, onThinking, onToolCall, onStatus, onComplete, onError, signal }) {
     try {
       if (!this.apiKey) throw new Error('Gemini API 키가 설정되지 않았습니다. 설정(⚙️)에서 입력해주세요.');
 
@@ -71,12 +136,19 @@ class GeminiProvider extends AIProviderInterface {
               } catch (e) {
                 args = {};
               }
-              parts.push({
+              const partObj = {
                 functionCall: {
                   name: fn.name,
                   args: args
                 }
-              });
+              };
+              const sig = tc.thought_signature || tc.thoughtSignature || fn.thought_signature || fn.thoughtSignature;
+              if (sig) {
+                partObj.thought_signature = sig;
+              } else {
+                partObj.thought_signature = 'skip_thought_signature_validator';
+              }
+              parts.push(partObj);
             }
           }
           if (parts.length > 0) {
@@ -124,17 +196,12 @@ class GeminiProvider extends AIProviderInterface {
         body.tools = geminiTools;
       }
 
-      const response = await fetch(url, {
+      const response = await fetchWithBackoff(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
         signal
-      });
-
-      if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`Gemini API 오류 (${response.status}): ${errText}`);
-      }
+      }, 'Gemini', onStatus);
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -173,7 +240,8 @@ class GeminiProvider extends AIProviderInterface {
                 if (part.functionCall && onToolCall) {
                   onToolCall({
                     name: part.functionCall.name,
-                    args: part.functionCall.args || {}
+                    args: part.functionCall.args || {},
+                    thought_signature: part.thought_signature || part.thoughtSignature || (part.functionCall ? (part.functionCall.thought_signature || part.functionCall.thoughtSignature) : null) || null
                   });
                 }
               }
@@ -204,7 +272,7 @@ class OpenAIProvider extends AIProviderInterface {
     this.baseUrl = config.baseUrl || 'https://api.openai.com/v1';
   }
 
-  async chatStream({ messages, tools, systemPrompt, onChunk, onThinking, onToolCall, onComplete, onError, signal }) {
+  async chatStream({ messages, tools, systemPrompt, onChunk, onThinking, onToolCall, onStatus, onComplete, onError, signal }) {
     try {
       if (!this.apiKey) throw new Error('OpenAI API 키가 설정되지 않았습니다. 설정(⚙️)에서 입력해주세요.');
 
@@ -250,7 +318,7 @@ class OpenAIProvider extends AIProviderInterface {
         tools: openaiTools
       };
 
-      const response = await fetch(url, {
+      const response = await fetchWithBackoff(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -258,12 +326,7 @@ class OpenAIProvider extends AIProviderInterface {
         },
         body: JSON.stringify(body),
         signal
-      });
-
-      if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`OpenAI API 오류 (${response.status}): ${errText}`);
-      }
+      }, 'OpenAI', onStatus);
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -340,7 +403,7 @@ class AnthropicProvider extends AIProviderInterface {
     this.model = config.model || 'claude-3-7-sonnet-20250219';
   }
 
-  async chatStream({ messages, tools, systemPrompt, onChunk, onThinking, onToolCall, onComplete, onError, signal }) {
+  async chatStream({ messages, tools, systemPrompt, onChunk, onThinking, onToolCall, onStatus, onComplete, onError, signal }) {
     try {
       if (!this.apiKey) throw new Error('Anthropic API 키가 설정되지 않았습니다. 설정(⚙️)에서 입력해주세요.');
 
@@ -398,7 +461,7 @@ class AnthropicProvider extends AIProviderInterface {
         stream: true
       };
 
-      const response = await fetch(url, {
+      const response = await fetchWithBackoff(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -408,12 +471,7 @@ class AnthropicProvider extends AIProviderInterface {
         },
         body: JSON.stringify(body),
         signal
-      });
-
-      if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`Anthropic API 오류 (${response.status}): ${errText}`);
-      }
+      }, 'Anthropic', onStatus);
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();

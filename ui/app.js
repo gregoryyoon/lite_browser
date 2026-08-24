@@ -156,6 +156,17 @@ function saveHistoryToBackend() {
   }
 }
 
+function getItemVisitCount(item) {
+  if (!item) return 1;
+  if (typeof item.visitCount === 'number' && item.visitCount > 0) {
+    return item.visitCount;
+  }
+  if (Array.isArray(item.visitTimestamps) && item.visitTimestamps.length > 0) {
+    return item.visitTimestamps.length;
+  }
+  return 1;
+}
+
 function addHistoryEntry(url, title) {
   if (!url || !/^https?:\/\//i.test(url)) return;
   if (url.includes('ui-action') || url.includes('lite-browser') || url.includes('lite://') || url.includes('ui/')) return;
@@ -171,6 +182,7 @@ function addHistoryEntry(url, title) {
     if (title && title !== url) {
       item.title = title;
     }
+    item.visitCount = (item.visitCount || (item.visitTimestamps ? item.visitTimestamps.length : 0)) + 1;
     if (!item.visitTimestamps || !Array.isArray(item.visitTimestamps)) {
       item.visitTimestamps = [item.visitedAt || now];
     }
@@ -185,6 +197,7 @@ function addHistoryEntry(url, title) {
       url: url,
       title: entryTitle,
       visitedAt: now,
+      visitCount: 1,
       visitTimestamps: [now]
     });
   }
@@ -199,6 +212,7 @@ function addHistoryEntry(url, title) {
   if (bookmarksData && bookmarksData.bookmarks) {
     const bm = bookmarksData.bookmarks.find(b => b.url === url);
     if (bm) {
+      bm.visitCount = (bm.visitCount || (bm.visitTimestamps ? bm.visitTimestamps.length : 0)) + 1;
       if (!bm.visitTimestamps || !Array.isArray(bm.visitTimestamps)) {
         bm.visitTimestamps = [];
       }
@@ -893,6 +907,7 @@ function renderOmniboxDropdown() {
 
     const tagsHtml = (bm.extractedTags || []).map(t => `<span class="omni-tag-chip">#${t}</span>`).join(' ');
     const timeAgoStr = formatTimeAgo(bm.context?.createdAt);
+    const visitCount = getItemVisitCount(bm);
     const searchIntent = bm.context?.searchIntent;
     const snippetText = bm.textSnippet;
 
@@ -903,7 +918,7 @@ function renderOmniboxDropdown() {
           <span class="omni-badge">북마크</span>
           <span class="omni-title-text">${bm.title}</span>
         </div>
-        <div class="omni-date">📅 ${timeAgoStr} 저장</div>
+        <div class="omni-date">📅 ${timeAgoStr} 저장 · 👁️ ${visitCount}회 방문</div>
       </div>
       <div class="omni-row-meta">
         ${tagsHtml ? `<span class="omni-tags-list">🏷️ ${tagsHtml}</span>` : ''}
@@ -946,6 +961,7 @@ function renderOmniboxDropdown() {
     };
 
     const timeAgoStr = formatTimeAgo(hist.visitedAt);
+    const visitCount = getItemVisitCount(hist);
 
     histItem.innerHTML = `
       <div class="omni-history-content">
@@ -955,7 +971,7 @@ function renderOmniboxDropdown() {
         <span class="omni-history-sep">-</span>
         <span class="omni-history-url">${hist.url}</span>
       </div>
-      <div class="omni-history-date">📅 ${timeAgoStr} 방문</div>
+      <div class="omni-history-date">📅 ${timeAgoStr} 방문 · 👁️ ${visitCount}회 방문</div>
     `;
     dropdown.appendChild(histItem);
   });

@@ -44,6 +44,31 @@ void CEF_CALLBACK display_handler_on_title_change(cef_display_handler_t* self,
   }
   LogMsg("display_handler_on_title_change: title=%s\n", title_utf8.str ? title_utf8.str : "(null)");
 
+  if (handler->parent->type == BROWSER_TYPE_POPUP) {
+    cef_browser_host_t* host = browser->get_host(browser);
+    if (host) {
+      HWND popup_hwnd = host->get_window_handle(host);
+      host->base.release(&host->base);
+      if (popup_hwnd) {
+        HWND top_hwnd = GetAncestor(popup_hwnd, GA_ROOT);
+        if (!top_hwnd) top_hwnd = popup_hwnd;
+        if (top_hwnd && title && title->str && title->length > 0) {
+          cef_string_wide_t title_wide = {};
+          cef_string_to_wide(title->str, title->length, &title_wide);
+          if (title_wide.str && wcslen(title_wide.str) > 0) {
+            wchar_t window_title[1024];
+            _snwprintf(window_title, sizeof(window_title) / sizeof(window_title[0]) - 1, L"%s - Lite Browser", title_wide.str);
+            window_title[sizeof(window_title) / sizeof(window_title[0]) - 1] = L'\0';
+            SetWindowTextW(top_hwnd, window_title);
+          }
+          cef_string_wide_clear(&title_wide);
+        }
+      }
+    }
+    cef_string_utf8_clear(&title_utf8);
+    return;
+  }
+
   browser_window_t *win_ctx = handler->parent->window_ctx;
   if (win_ctx) {
     for (int i = 0; i < win_ctx->tab_count; i++) {
@@ -95,7 +120,7 @@ display_handler_on_address_change(cef_display_handler_t* self,
   LogMsg("display_handler_on_address_change: url=%s\n", url_utf8.str ? url_utf8.str : "(null)");
 
   browser_window_t *win_ctx = handler->parent->window_ctx;
-  if (win_ctx) {
+  if (win_ctx && handler->parent->type != BROWSER_TYPE_POPUP) {
     int is_ui_browser = (win_ctx->ui_browser &&
                          browser->get_identifier(browser) ==
                              win_ctx->ui_browser->get_identifier(win_ctx->ui_browser));
@@ -134,6 +159,71 @@ display_handler_on_address_change(cef_display_handler_t* self,
   cef_string_utf8_clear(&url_utf8);
 }
 
+int CEF_CALLBACK display_handler_on_contents_bounds_change(
+    struct _cef_display_handler_t* self,
+    struct _cef_browser_t* browser,
+    const cef_rect_t* new_bounds) {
+  simple_display_handler_t* handler = (simple_display_handler_t*)self;
+  if (handler->parent->type == BROWSER_TYPE_POPUP && new_bounds) {
+    cef_browser_host_t* host = browser->get_host(browser);
+    if (host) {
+      HWND browser_hwnd = host->get_window_handle(host);
+      host->base.release(&host->base);
+      if (browser_hwnd) {
+        HWND top_hwnd = GetAncestor(browser_hwnd, GA_ROOT);
+        if (top_hwnd) {
+          UINT dpi = GetDpiForWindow(top_hwnd);
+          if (dpi == 0) dpi = 96;
+          float dpi_scale = (float)dpi / 96.0f;
+
+          int client_w = new_bounds->width;
+          int client_h = new_bounds->height;
+          if (client_w < 480) client_w = 480;
+          if (client_h < 750) client_h = 750;
+
+          int phys_w = (int)(client_w * dpi_scale + 0.5f);
+          int phys_h = (int)(client_h * dpi_scale + 0.5f);
+
+          RECT wr = {0, 0, phys_w, phys_h};
+          typedef BOOL (WINAPI *AdjustWindowRectExForDpiFn)(LPRECT, DWORD, BOOL, DWORD, UINT);
+          HMODULE hUser32 = GetModuleHandleA("user32.dll");
+          AdjustWindowRectExForDpiFn pAdjustWindowRectExForDpi = hUser32 ? (AdjustWindowRectExForDpiFn)GetProcAddress(hUser32, "AdjustWindowRectExForDpi") : NULL;
+          if (pAdjustWindowRectExForDpi) {
+            pAdjustWindowRectExForDpi(&wr, WS_OVERLAPPEDWINDOW, FALSE, 0, dpi);
+          } else {
+            AdjustWindowRectEx(&wr, WS_OVERLAPPEDWINDOW, FALSE, 0);
+          }
+          int win_w = wr.right - wr.left;
+          int win_h = wr.bottom - wr.top;
+
+          HMONITOR hMonitor = MonitorFromWindow(top_hwnd, MONITOR_DEFAULTTONEAREST);
+          MONITORINFO mi = {0};
+          mi.cbSize = sizeof(MONITORINFO);
+          GetMonitorInfo(hMonitor, &mi);
+          RECT work_rc = mi.rcWork;
+          int work_w = work_rc.right - work_rc.left;
+          int work_h = work_rc.bottom - work_rc.top;
+
+          if (win_h > work_h - 20) win_h = work_h - 20;
+          if (win_w > work_w - 20) win_w = work_w - 20;
+
+          int popup_x = work_rc.left + (work_w - win_w) / 2;
+          int popup_y = work_rc.top + (work_h - win_h) / 2;
+
+          if (popup_y < work_rc.top) popup_y = work_rc.top;
+          if (popup_y + win_h > work_rc.bottom) popup_y = work_rc.bottom - win_h;
+          if (popup_x < work_rc.left) popup_x = work_rc.left;
+          if (popup_x + win_w > work_rc.right) popup_x = work_rc.right - win_w;
+
+          SetWindowPos(top_hwnd, NULL, popup_x, popup_y, win_w, win_h, SWP_NOZORDER | SWP_NOACTIVATE);
+          return 1;
+        }
+      }
+    }
+  }
+  return 0;
+}
+
 simple_display_handler_t* display_handler_create(simple_handler_t* parent) {
   simple_display_handler_t* handler =
       (simple_display_handler_t*)calloc(1, sizeof(simple_display_handler_t));
@@ -146,6 +236,7 @@ simple_display_handler_t* display_handler_create(simple_handler_t* parent) {
   // Set callbacks.
   handler->handler.on_title_change = display_handler_on_title_change;
   handler->handler.on_address_change = display_handler_on_address_change;
+  handler->handler.on_contents_bounds_change = display_handler_on_contents_bounds_change;
 
   // Store parent reference (no ref count - parent owns us).
   handler->parent = parent;

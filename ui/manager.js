@@ -184,6 +184,17 @@ function getFilteredBookmarks() {
   return filtered;
 }
 
+function getItemVisitCount(item) {
+  if (!item) return 1;
+  if (typeof item.visitCount === 'number' && item.visitCount > 0) {
+    return item.visitCount;
+  }
+  if (Array.isArray(item.visitTimestamps) && item.visitTimestamps.length > 0) {
+    return item.visitTimestamps.length;
+  }
+  return 1;
+}
+
 function renderMainView() {
   const filtered = getFilteredBookmarks();
   const cardGrid = document.getElementById('card-grid');
@@ -216,6 +227,7 @@ function renderMainView() {
         const tagsHtml = (bm.extractedTags || []).map(t => `<span class="tag-chip">#${t}</span>`).join('');
         const intentHtml = bm.context?.searchIntent ? `<span class="intent-chip">🔍 ${bm.context.searchIntent}</span>` : '';
         const timeAgo = formatTimeAgo(bm.context?.createdAt);
+        const visitCount = getItemVisitCount(bm);
         
         const highlightText = getHighlightText(bm);
         const highlightHtml = highlightText ? `<div class="card-highlight-box" title="${highlightText}">✨ "${highlightText}"</div>` : '';
@@ -235,7 +247,7 @@ function renderMainView() {
             </div>
           </div>
           <div class="card-footer">
-            <span>${timeAgo}</span>
+            <span>${timeAgo} · 👁️ ${visitCount}회 방문</span>
             <button class="card-delete-btn" title="삭제" onclick="deleteBookmarkManager('${bm.id}', event)">✕</button>
           </div>
         `;
@@ -252,6 +264,7 @@ function renderMainView() {
         row.className = 'list-row';
         row.onclick = () => openBookmarkUrl(bm.url);
         const timeAgo = formatTimeAgo(bm.context?.createdAt);
+        const visitCount = getItemVisitCount(bm);
 
         const highlightText = getHighlightText(bm);
         const highlightHtml = highlightText ? `<span class="list-row-highlight" title="${highlightText}">✨ "${highlightText}"</span>` : '';
@@ -261,7 +274,7 @@ function renderMainView() {
           <span class="list-row-title">${bm.title}</span>
           ${highlightHtml}
           <span class="list-row-snippet">${bm.textSnippet || bm.url}</span>
-          <span class="list-row-date">${timeAgo}</span>
+          <span class="list-row-date" title="${timeAgo} · ${visitCount}회 방문">${timeAgo} · 👁️ ${visitCount}회</span>
           <button class="card-delete-btn" title="삭제" onclick="deleteBookmarkManager('${bm.id}', event)">✕</button>
         `;
         listTable.appendChild(row);

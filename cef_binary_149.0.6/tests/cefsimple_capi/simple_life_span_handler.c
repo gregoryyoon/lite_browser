@@ -32,6 +32,67 @@ static void LogMsg(const char *format, ...) {
 }
 
 //
+// Dedicated Popup Window Context and WndProc
+//
+typedef struct {
+  HWND hwnd;
+  HWND browser_hwnd;
+  cef_browser_t* browser;
+  browser_window_t* win_ctx;
+} popup_window_ctx_t;
+
+#define WM_USER_CLOSE_POPUP (WM_USER + 901)
+
+static LRESULT CALLBACK LiteBrowserPopupWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
+  popup_window_ctx_t* ctx = (popup_window_ctx_t*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
+
+  switch (message) {
+  case WM_SIZE: {
+    if (ctx && ctx->browser_hwnd) {
+      int w = LOWORD(lParam);
+      int h = HIWORD(lParam);
+      SetWindowPos(ctx->browser_hwnd, NULL, 0, 0, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+    return 0;
+  }
+  case WM_CLOSE: {
+    LogMsg("LiteBrowserPopupWndProc: WM_CLOSE received for hwnd=%p\n", hwnd);
+    if (ctx && ctx->browser) {
+      cef_browser_host_t* host = ctx->browser->get_host(ctx->browser);
+      if (host) {
+        LogMsg("LiteBrowserPopupWndProc: calling host->try_close_browser for browser=%p\n", ctx->browser);
+        host->try_close_browser(host);
+        host->base.release(&host->base);
+        return 0; // Let CEF close asynchronously, on_before_close will destroy window
+      }
+    }
+    LogMsg("LiteBrowserPopupWndProc: calling DestroyWindow(hwnd=%p)\n", hwnd);
+    DestroyWindow(hwnd);
+    return 0;
+  }
+  case WM_USER_CLOSE_POPUP: {
+    LogMsg("LiteBrowserPopupWndProc: WM_USER_CLOSE_POPUP received, calling DestroyWindow(hwnd=%p)\n", hwnd);
+    DestroyWindow(hwnd);
+    return 0;
+  }
+  case WM_DESTROY: {
+    LogMsg("LiteBrowserPopupWndProc: WM_DESTROY received for hwnd=%p\n", hwnd);
+    break;
+  }
+  case WM_NCDESTROY: {
+    LogMsg("LiteBrowserPopupWndProc: WM_NCDESTROY received for hwnd=%p\n", hwnd);
+    if (ctx) {
+      ctx->browser = NULL;
+      free(ctx);
+      SetWindowLongPtr(hwnd, GWLP_USERDATA, (LONG_PTR)NULL);
+    }
+    return 0;
+  }
+  }
+  return DefWindowProcW(hwnd, message, wParam, lParam);
+}
+
+//
 // Life span handler implementation.
 //
 
@@ -68,6 +129,22 @@ void CEF_CALLBACK life_span_handler_on_after_created(
         ShowWindow(hwnd, SW_HIDE);
       }
       LogMsg("Set win_ctx->sidepanel_browser = %p, hwnd = %p\n", browser, hwnd);
+    } else if (handler->parent->type == BROWSER_TYPE_POPUP) {
+      LogMsg("Created BROWSER_TYPE_POPUP browser=%p, hwnd=%p\n", browser, hwnd);
+      if (hwnd) {
+        HWND parent_wnd = GetParent(hwnd);
+        if (parent_wnd) {
+          popup_window_ctx_t* pctx = (popup_window_ctx_t*)GetWindowLongPtr(parent_wnd, GWLP_USERDATA);
+          if (pctx) {
+            pctx->browser_hwnd = hwnd;
+            pctx->browser = browser;
+
+            RECT rc;
+            GetClientRect(parent_wnd, &rc);
+            SetWindowPos(hwnd, NULL, 0, 0, rc.right, rc.bottom, SWP_NOZORDER | SWP_SHOWWINDOW);
+          }
+        }
+      }
     } else {
       int found_slot = -1;
       int is_right_slot = 0;
@@ -133,19 +210,22 @@ void CEF_CALLBACK life_span_handler_on_after_created(
     GetClientRect(win_ctx->main_hwnd, &r);
     PostMessage(win_ctx->main_hwnd, WM_SIZE, 0, MAKELPARAM(r.right, r.bottom));
   }
-
-  browser->base.release(&browser->base);
 }
 
 int CEF_CALLBACK life_span_handler_do_close(cef_life_span_handler_t *self,
                                              cef_browser_t *browser) {
   simple_life_span_handler_t *handler = (simple_life_span_handler_t *)self;
 
+  if (handler->parent && handler->parent->type == BROWSER_TYPE_POPUP) {
+    // Return 1 (true) to indicate that popup close is handled by client,
+    // preventing CEF from sending WM_CLOSE to any parent/root windows.
+    return 1;
+  }
+
   if (browser_list_count(&handler->parent->browser_list) == 1) {
     handler->parent->is_closing = 1;
   }
 
-  browser->base.release(&browser->base);
   return 0;
 }
 
@@ -166,9 +246,141 @@ int CEF_CALLBACK life_span_handler_on_before_popup(
     int* no_javascript_access) {
 
   simple_life_span_handler_t* handler = (simple_life_span_handler_t*)self;
-  LogMsg("life_span_handler_on_before_popup: target_url=%s\n", target_url && target_url->str ? "valid" : "null");
-
   browser_window_t *win_ctx = handler->parent->window_ctx;
+
+  int is_popup = 0;
+  if (target_disposition == CEF_WOD_NEW_POPUP ||
+      target_disposition == CEF_WOD_NEW_PICTURE_IN_PICTURE) {
+    is_popup = 1;
+  } else if (popupFeatures && (popupFeatures->isPopup || popupFeatures->widthSet || popupFeatures->heightSet)) {
+    is_popup = 1;
+  }
+
+  LogMsg("life_span_handler_on_before_popup: target_url=%s, target_disposition=%d, is_popup=%d\n",
+         target_url && target_url->str ? "valid" : "null", target_disposition, is_popup);
+
+  if (is_popup) {
+    // Explicit popup window requested (e.g. payment gateway, OAuth login dialog).
+    // Create dedicated native popup window and host child browser inside it.
+    UINT dpi = 96;
+    if (win_ctx && win_ctx->main_hwnd) {
+      dpi = GetDpiForWindow(win_ctx->main_hwnd);
+    }
+    if (dpi == 0) dpi = 96;
+    float dpi_scale = (float)dpi / 96.0f;
+
+    int client_w = 480;
+    int client_h = 750;
+    if (popupFeatures) {
+      if (popupFeatures->widthSet && popupFeatures->width > 50) {
+        client_w = popupFeatures->width;
+      }
+      if (popupFeatures->heightSet && popupFeatures->height > 50) {
+        client_h = popupFeatures->height;
+      }
+    }
+    if (client_w < 480) client_w = 480;
+    if (client_h < 750) client_h = 750;
+
+    int phys_client_w = (int)(client_w * dpi_scale + 0.5f);
+    int phys_client_h = (int)(client_h * dpi_scale + 0.5f);
+
+    RECT wr = {0, 0, phys_client_w, phys_client_h};
+    typedef BOOL (WINAPI *AdjustWindowRectExForDpiFn)(LPRECT, DWORD, BOOL, DWORD, UINT);
+    HMODULE hUser32 = GetModuleHandleA("user32.dll");
+    AdjustWindowRectExForDpiFn pAdjustWindowRectExForDpi = hUser32 ? (AdjustWindowRectExForDpiFn)GetProcAddress(hUser32, "AdjustWindowRectExForDpi") : NULL;
+    if (pAdjustWindowRectExForDpi) {
+      pAdjustWindowRectExForDpi(&wr, WS_OVERLAPPEDWINDOW, FALSE, 0, dpi);
+    } else {
+      AdjustWindowRectEx(&wr, WS_OVERLAPPEDWINDOW, FALSE, 0);
+    }
+    int win_w = wr.right - wr.left;
+    int win_h = wr.bottom - wr.top;
+
+    HMONITOR hMonitor = MonitorFromWindow(win_ctx && win_ctx->main_hwnd ? win_ctx->main_hwnd : NULL, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi = {0};
+    mi.cbSize = sizeof(MONITORINFO);
+    GetMonitorInfo(hMonitor, &mi);
+    RECT work_rc = mi.rcWork;
+    int work_w = work_rc.right - work_rc.left;
+    int work_h = work_rc.bottom - work_rc.top;
+
+    if (win_h > work_h - 20) {
+      win_h = work_h - 20;
+    }
+    if (win_w > work_w - 20) {
+      win_w = work_w - 20;
+    }
+
+    int popup_x = work_rc.left + (work_w - win_w) / 2;
+    int popup_y = work_rc.top + (work_h - win_h) / 2;
+
+    if (popup_y < work_rc.top) {
+      popup_y = work_rc.top;
+    }
+    if (popup_y + win_h > work_rc.bottom) {
+      popup_y = work_rc.bottom - win_h;
+      if (popup_y < work_rc.top) popup_y = work_rc.top;
+    }
+    if (popup_x < work_rc.left) {
+      popup_x = work_rc.left;
+    }
+    if (popup_x + win_w > work_rc.right) {
+      popup_x = work_rc.right - win_w;
+      if (popup_x < work_rc.left) popup_x = work_rc.left;
+    }
+
+    HINSTANCE hInstance = GetModuleHandle(NULL);
+    static int s_popup_class_registered = 0;
+    if (!s_popup_class_registered) {
+      WNDCLASSEXW wcex = {0};
+      wcex.cbSize = sizeof(WNDCLASSEXW);
+      wcex.style = CS_HREDRAW | CS_VREDRAW;
+      wcex.lpfnWndProc = LiteBrowserPopupWndProc;
+      wcex.hInstance = hInstance;
+      wcex.hIcon = (HICON)LoadImage(hInstance, MAKEINTRESOURCE(120), IMAGE_ICON, 32, 32, LR_DEFAULTCOLOR);
+      wcex.hCursor = LoadCursor(NULL, IDC_ARROW);
+      wcex.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+      wcex.lpszClassName = L"LiteBrowserPopupWnd";
+      wcex.hIconSm = (HICON)LoadImage(hInstance, MAKEINTRESOURCE(120), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR);
+      RegisterClassExW(&wcex);
+      s_popup_class_registered = 1;
+    }
+
+    HWND popup_hwnd = CreateWindowExW(
+        0, L"LiteBrowserPopupWnd", L"Lite Browser",
+        WS_OVERLAPPEDWINDOW | WS_VISIBLE | WS_CLIPCHILDREN,
+        popup_x, popup_y, win_w, win_h,
+        NULL, NULL, hInstance, NULL);
+
+    popup_window_ctx_t* pctx = (popup_window_ctx_t*)calloc(1, sizeof(popup_window_ctx_t));
+    if (pctx) {
+      pctx->hwnd = popup_hwnd;
+      pctx->win_ctx = win_ctx;
+      SetWindowLongPtr(popup_hwnd, GWLP_USERDATA, (LONG_PTR)pctx);
+    }
+
+    simple_handler_t* popup_handler = simple_handler_create(0);
+    popup_handler->type = BROWSER_TYPE_POPUP;
+    popup_handler->window_ctx = win_ctx;
+    *client = &popup_handler->client;
+
+    if (windowInfo) {
+      RECT client_rc;
+      GetClientRect(popup_hwnd, &client_rc);
+      windowInfo->style = WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
+      windowInfo->parent_window = popup_hwnd;
+      windowInfo->bounds.x = 0;
+      windowInfo->bounds.y = 0;
+      windowInfo->bounds.width = client_rc.right;
+      windowInfo->bounds.height = client_rc.bottom;
+      windowInfo->runtime_style = CEF_RUNTIME_STYLE_DEFAULT;
+    }
+
+    return 0; // Return 0 (false) to let CEF create the child browser in popup_hwnd
+  }
+
+  // Regular link navigation / new tab request -> open as tab in LiteBrowser
   if (win_ctx && target_url && target_url->str) {
     cef_string_utf8_t url_utf8 = {};
     cef_string_to_utf8(target_url->str, target_url->length, &url_utf8);
@@ -185,14 +397,31 @@ int CEF_CALLBACK life_span_handler_on_before_popup(
     cef_string_utf8_clear(&url_utf8);
   }
 
-  return 0;
+  return 1;
 }
 
 void CEF_CALLBACK life_span_handler_on_before_close(
     cef_life_span_handler_t *self, cef_browser_t *browser) {
   simple_life_span_handler_t *handler = (simple_life_span_handler_t *)self;
 
-  LogMsg("life_span_handler_on_before_close: browser=%p\n", browser);
+  LogMsg("life_span_handler_on_before_close: browser=%p, type=%d\n", browser, handler->parent ? handler->parent->type : -1);
+
+  if (handler->parent && handler->parent->type == BROWSER_TYPE_POPUP) {
+    LogMsg("on_before_close: popup browser %p closed\n", browser);
+    cef_browser_host_t* host = browser->get_host(browser);
+    if (host) {
+      HWND browser_hwnd = host->get_window_handle(host);
+      host->base.release(&host->base);
+      if (browser_hwnd) {
+        HWND parent_wnd = GetParent(browser_hwnd);
+        if (parent_wnd && IsWindow(parent_wnd)) {
+          LogMsg("on_before_close: posting WM_USER_CLOSE_POPUP to parent_wnd=%p\n", parent_wnd);
+          PostMessage(parent_wnd, WM_USER_CLOSE_POPUP, 0, 0);
+        }
+      }
+    }
+    return;
+  }
 
   browser_list_remove(&handler->parent->browser_list, browser);
 
@@ -254,15 +483,15 @@ void CEF_CALLBACK life_span_handler_on_before_close(
 
 #if defined(_WIN32)
   if (g_window_count == 0) {
+    LogMsg("on_before_close: calling cef_quit_message_loop() because g_window_count == 0\n");
     cef_quit_message_loop();
   }
 #else
   if (browser_list_count(&handler->parent->browser_list) == 0) {
+    LogMsg("on_before_close: calling cef_quit_message_loop() because browser_list_count == 0\n");
     cef_quit_message_loop();
   }
 #endif
-
-  browser->base.release(&browser->base);
 }
 
 simple_life_span_handler_t *life_span_handler_create(simple_handler_t *parent) {
