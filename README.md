@@ -48,9 +48,14 @@ HTML5/CSS3/JavaScript 기반의 현대적 라이트 테마 UI와 순수 Win32 �
 - 탭을 외부 바탕화면으로 드래그 시 **`setPointerCapture`**를 채택하여 OS 드롭 금지 제약을 우회하고, 마우스를 떼는 순간 새 독립 윈도우 생성.
 - 웹 페이지 리로드 없이 Win32 `SetParent` API를 통해 네이티브 자식 브라우저 HWND를 즉각 이관.
 
-### 5. 🔖 오옴니박스 북마크 UX & 다운로드 관리자
-- 주소창 입력 시 북마크 및 방문 기록 동적 탐색 및 키워드 추출기 탑재.
+### 5. 🔖 스마트 오옴니박스 & 북마크 대시보드
+- 주소창 입력 시 북마크 및 방문 기록 동적 자동완성 및 **방문 횟수(`방문 N회`) 표시** UX.
+- YouTube 및 통합 키워드 추출기 (`extractor.js`) 연동 및 Gemini 3.x AI API 하이브리드 바인딩 (`thought_signature` / HTTP 429 지연 자동 재시도).
 - 백엔드 CEF 다운로드 핸들러 연동: 파일 중복 순서 자동 부여, 진행률 추적 및 JSON 기반 저장소 관리.
+
+### 6. 🔌 Rust MCP (Model Context Protocol) 서버 연동
+- AI 에이전트와의 브라우저 제어 동기화를 위한 Rust 기반 **MCP Server (`mcp_server/`)** 탑재.
+- 브라우저 상태 조회 및 액션 자동화 인터페이스 제공.
 
 ---
 
@@ -140,6 +145,7 @@ c:\projects\lite_browser\
 │   ├── app.js                     # 탭 관리, UI 이벤트 및 백엔드 IPC 처리
 │   ├── manager.html / css / js    # 북마크 & 오옴니박스 매니저
 │   └── extractor.js               # 웹 키워드 및 북마크 추출기
+├── mcp_server\                     # Rust 기반 MCP (Model Context Protocol) 서버 모듈
 ├── cef_binary_149.0.6\            # CEF 149.0.6 바이너리 배포본
 │   └── tests\cefsimple_capi\      # C CAPI 메인 백엔드 소스 디렉토리
 │       ├── CMakeLists.txt         # C CAPI CMake 타겟 및 빌드 설정
