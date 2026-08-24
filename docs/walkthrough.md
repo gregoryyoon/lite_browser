@@ -335,23 +335,24 @@ cmake --build c:\projects\lite_browser\cef_binary_149.0.6\build --config Debug -
    - 듀얼 탭 분할 모드(`active_tab->is_split == 1`)에서 사용자가 마우스로 클릭하거나 포커스한 화면(`active_tab->active_split`: 0 좌측, 1 우측)을 동적으로 감지.
    - AI DOM 추출 및 상호작용 도구(`ai-get-dom-summary`, `ai-click-element`, `ai-type-element`, `ai-scroll`, `ai-highlight-element`, `vault-autofill`)가 현재 활성화된 화면(`cb`)의 URL과 본문을 정확하게 타겟팅하여 조작 및 요약 수행.
 
-3. **Chrome Gemini 스타일 5단계 본문 파싱 & 마크다운 추출 엔진 (`ui/content_extractor.js`, `simple_handler.c`)**:
+3. **Chrome Gemini 스타일 5단계 본문 파싱 & YouTube 특화 마크다운 추출 엔진 (`ui/content_extractor.js`, `simple_handler.c`)**:
    - **1단계 (Smart Frame Candidate Scoring)**: 최상위 `document` 및 네이버 블로그(`<iframe id="mainFrame">`), 다음 카페 등 중첩 `iframe` 구조를 재귀 탐색하여 특수 아티클 컨테이너(`.se-main-container`, `#postViewArea`, `#dic_area`, `#articleBody`, `.entry-content`, `article`, `main`) 매칭 점수로 1위 프레임 자동 선정.
    - **2단계 (Semantic & Visual Noise Filtering)**: DOM 복제본을 기반으로 `<nav>`, `<header>`, `<footer>`, `<aside>`, `<script>`, `<style>`, 광고 배너(`.ad`, `.banner`, `.sponsor`), 소셜 공유(`.sns-share`), 댓글창(`.comment`, `.reply`), 비가시 텍스트(`display: none`, `visibility: hidden`, `opacity < 0.05`)를 완벽 제거.
    - **3단계 (Readability & Viewport Heuristic Scoring)**: 텍스트 길이, 쉼표 빈도, 링크 밀도(역가중치), `getBoundingClientRect()` 기준 뷰포트 중앙 배치 가중치(+30%)를 결합하여 최적 본문 컨테이너(Core Article Block)를 격리.
    - **4단계 (Clean Markdown Serializer)**: 제목(`h1`~`h6`), 단락(`p`), 인용구(`blockquote`), 목록(`ul`/`ol`/`li`), 표(`table`/`tr`/`th`/`td`), 코드 블록(`pre`/`code`), 볼드/이탤릭 서식을 온전히 보존하는 경량 직렬화기 구동.
-   - **5단계 (Payload Packaging)**: 제목, URL, 작성자, 작성일, 대표 이미지, 구조화된 Markdown 본문(최대 8,000자), 인터랙티브 버튼/인풋 목록을 패키징하여 AI 사이드패널(Gemini 3.7 Flash)에 실시간 전달.
+   - **5단계 (YouTube 특화 초경량 전처리 & 페이로드 패키징)**: `youtube.com` 접속 시 수십만 토큰에 달하는 추천 목록 및 댓글 노이즈를 원천 차단하고, 영상 제목, 채널명, 더보기 본문 설명, 챕터/타임라인(`00:00 - ...`), 조작 버튼만 500~1,500 토큰 수준의 초경량 Markdown으로 선별 추출하여 전송.
 
-4. **AI Provider 플러그인 추상화 계층 (`ui/ai_providers.js`)**:
+4. **AI Provider 플러그인 추상화 계층 & 429 내결함성 (`ui/ai_providers.js`)**:
    - 표준화된 `AIProviderInterface`를 바탕으로 다형성 어댑터 구현:
      - **Google Gemini**: 기본 모델로 **`gemini-3.7-flash`** 적용 (`gemini-3.6-flash`, `gemini-3.5-flash`, `gemini-3.1-pro-preview` 선택 지원), SSE 실시간 스트리밍 및 Function Calling 완벽 연동.
-     - **OpenAI**: `gpt-4o`, `gpt-4o-mini`, SSE 스트리밍 및 Tool Calling 연동.
-     - **Anthropic**: `claude-3-7-sonnet`, `claude-3-5-sonnet`, 사고 블록(Thinking Delta) 스트리밍 및 Tool Use 연동.
-     - **Ollama**: 로컬 LLM (`llama3.2`, `qwen2.5`) 연동.
+     - **Gemini 3.x 사고 상태(Stateful Reasoning) 연동**: 다중 턴 Function Calling 시 `thought_signature` 보존 및 에코백, 공식 `role: 'user'` 규격 적용으로 400 스키마 에러 원천 해결.
+     - **429 Rate Limit 자동 지수 백오프 재시도 & 실시간 UI 안내**: API 호출 중 429(Rate Limit / Quota Exceeded) 발생 시 `Please retry in ~ms` 또는 지수 백오프(1.5초, 3.0초, 6.0초)로 최대 3회 자동 재시도하며, 실시간 안내 배너(⏳) 표시 및 중단 버튼(■) 즉시 취소 지원.
+     - **OpenAI / Anthropic / Ollama**: `gpt-4o`, `claude-3-7-sonnet`, `llama3.2` 다형성 Provider 지원.
    - 사이드패널 설정 UI에서 API 키, 모델명, Base URL, 시스템 프롬프트를 자유롭게 구성/저장.
 
-5. **Task Runtime & 자율 복구 상태 머신 (`ui/task_runtime.js`)**:
+5. **Task Runtime & 간결한 사이드패널 UI (`ui/task_runtime.js`, `ui/sidepanel.*`)**:
    - 복잡한 사용자 요청을 브라우저 세부 동작(`browser_navigate`, `browser_get_page_content`, `browser_click_element`, `browser_type_text`, `browser_scroll`, `browser_autofill_login`)으로 분해 실행.
+   - 불필요한 번잡한 버튼 바를 정리하고 프롬프트 입력창 우측의 원클릭 전송/중단(■) 토글 버튼으로 인터랙션을 단일화.
    - 동작 대상 DOM 요소에 반투명 파란색 펄스 링(Highlight Ring)을 렌더링하여 조작 위치를 시각적으로 안내.
    - 오류 발생 시 최대 2회 스크롤/대기 후 재시도하는 자율 복구 루프를 수행하며, 실패 시 `WAITING` 상태로 전환되어 사용자에게 개입 안내 카드 노출.
 
