@@ -1740,7 +1740,7 @@ int CEF_CALLBACK request_handler_on_before_browse(
             HMENU hMenu = CreatePopupMenu();
             AppendMenuW(hMenu, MF_STRING, 1001, L"새 탭");
             AppendMenuW(hMenu, MF_STRING, 1002, L"새 창");
-            AppendMenuW(hMenu, MF_STRING, 1008, L"다운로드 (Ctrl+J)");
+            AppendMenuW(hMenu, MF_STRING, 1008, L"다운로드 관리자 (Ctrl+J)");
             AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
             AppendMenuW(hMenu, MF_STRING, 1003, L"인쇄...");
             AppendMenuW(hMenu, MF_STRING, 1004, L"개발자 도구 (Inspect)");

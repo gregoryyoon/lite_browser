@@ -273,7 +273,7 @@ window.updateTabsList = function(tabs, activeId) {
     const isDownloads = tab.url && (tab.url.indexOf('ui/downloads.html') !== -1 || tab.url.indexOf('lite://downloads') !== -1);
     const isSidepanel = tab.url && (tab.url.indexOf('ui/sidepanel.html') !== -1 || tab.url.indexOf('lite://sidepanel') !== -1);
     if (tab.id === activeId) {
-      currentTitle = isManager ? '북마크 관리자' : (isDownloads ? '다운로드' : (isSidepanel ? 'AI 사이드패널' : (tab.title || '')));
+      currentTitle = isManager ? '북마크 관리자' : (isDownloads ? '다운로드 관리자' : (isSidepanel ? 'AI 사이드패널' : (tab.title || '')));
     }
     const tabEl = document.createElement('div');
     tabEl.className = 'tab' + (tab.id === activeId ? ' active' : '');
@@ -297,7 +297,7 @@ window.updateTabsList = function(tabs, activeId) {
 
     const titleEl = document.createElement('span');
     titleEl.className = 'tab-title';
-    const displayTitle = isManager ? '북마크 관리자' : (tab.title || '새 탭');
+    const displayTitle = isManager ? '북마크 관리자' : (isDownloads ? '다운로드 관리자' : (isSidepanel ? 'AI 사이드패널' : (tab.title || '새 탭')));
     titleEl.innerText = displayTitle;
     titleEl.title = displayTitle;
     tabEl.appendChild(titleEl);
