@@ -493,4 +493,25 @@ flowchart TD
 ### 14.5 빌드 검증
 - Debug 빌드: `Debug/lite_browser.exe` 및 `Debug/lite_browser.dll` 컴파일 완료 (Exit code 0).
 
+---
+
+## 15. 크롬/엣지 스타일 탭 비율 균등 축소 및 가려짐 방지 시스템 (Chrome/Edge Style Proportional Tab Auto-Shrinking)
+
+### 15.1 개요
+사용자가 탭을 지속적으로 생성하여 탭의 개수가 많아질 때 탭이 화면 밖으로 넘쳐 가려지는 문제를 해결하기 위해, 별도의 가로 스크롤바나 복잡한 드롭다운 없이 **모든 탭의 가로 크기를 균등한 비율로 자동 축소(`flex: 1 1 0px`, `min-width: 32px`, `max-width: 200px`)**하여 모든 탭이 한 화면에 온전히 노출되도록 개선했습니다.
+
+### 15.2 핵심 구현 내역
+1. **균등 비율 자동 축소 플렉스 레이아웃 ([`ui/style.css`](file:///c:/projects/lite_browser/ui/style.css))**:
+   - `.tabs-container`에 `min-width: 0; overflow: hidden;`을 부여하고, `.tab`에 `flex: 1 1 0px` 및 `min-width: 32px`를 적용하여 탭이 1개일 때부터 40개 이상일 때까지 화면 너비에 맞춰 모든 탭이 동일한 폭으로 매끄럽게 축소/확장되도록 구현.
+   - 탭 제목(`tab-title`)에 `text-overflow: ellipsis`를 적용하여 좁아진 폭에 맞춰 텍스트가 자연스럽게 말줄임 처리됨.
+2. **반응형 닫기(X) 버튼 제어 (Container Queries)**:
+   - `@container (max-width: 75px)`를 적용하여 탭이 좁아지면 비활성 탭의 닫기(X) 버튼을 자동으로 숨겨 탭 텍스트 가시성을 확보하고, 마우스 호버 시에만 닫기 버튼이 노출되도록 크롬/엣지 표준 UX 구현.
+   - 활성(Active) 탭은 항상 닫기 버튼을 유지하여 즉각적인 탭 닫기 조작성 보장.
+3. **전체 제목 툴팁 호버 지원 ([`ui/app.js`](file:///c:/projects/lite_browser/ui/app.js))**:
+   - 탭이 아무리 좁아져 제목이 말줄임표로 줄어들더라도, 마우스 커서를 올리면 `tabEl.title` 툴팁을 통해 전체 페이지 제목을 즉시 확인할 수 있도록 설정.
+
+### 15.3 빌드 및 검증
+- Debug 빌드 완료: `Debug/lite_browser.exe` (Exit code 0).
+
+
 
