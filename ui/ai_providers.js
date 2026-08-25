@@ -7,12 +7,14 @@
 class AIProviderInterface {
   constructor(config = {}) {
     this.apiKey = config.apiKey || '';
+    this.authType = config.authType || 'apikey';
+    this.subscriptionToken = config.subscriptionToken || '';
     this.model = config.model || '';
     this.baseUrl = config.baseUrl || '';
     this.temperature = config.temperature ?? 0.7;
   }
 
-  async chatStream({ messages, tools, systemPrompt, onChunk, onThinking, onToolCall, onComplete, onError, signal }) {
+  async chatStream({ messages, tools, systemPrompt, onChunk, onThinking, onToolCall, onStatus, onComplete, onError, signal }) {
     throw new Error('chatStream method must be implemented by subclasses');
   }
 }
@@ -91,9 +93,26 @@ class GeminiProvider extends AIProviderInterface {
 
   async chatStream({ messages, tools, systemPrompt, onChunk, onThinking, onToolCall, onStatus, onComplete, onError, signal }) {
     try {
-      if (!this.apiKey) throw new Error('Gemini API 키가 설정되지 않았습니다. 설정(⚙️)에서 입력해주세요.');
+      let url = '';
+      const headers = { 'Content-Type': 'application/json' };
 
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:streamGenerateContent?alt=sse&key=${encodeURIComponent(this.apiKey)}`;
+      if (this.authType === 'subscription') {
+        if (!this.subscriptionToken) {
+          throw new Error('Google/Gemini 구독 계정이 연결되지 않았습니다. 설정(⚙️)에서 로그인해주세요.');
+        }
+
+        if (this.subscriptionToken.startsWith('ya29.')) {
+          url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:streamGenerateContent?alt=sse`;
+          headers['Authorization'] = `Bearer ${this.subscriptionToken}`;
+        } else if (this.apiKey) {
+          url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:streamGenerateContent?alt=sse&key=${encodeURIComponent(this.apiKey)}`;
+        } else {
+          throw new Error('Google Gemini API 통신을 위해 Google OAuth Access Token(ya29...) 또는 Gemini API Key가 필요합니다. 설정(⚙️)에서 [API Key] 또는 [수동 액세스 토큰]을 등록해주세요.');
+        }
+      } else {
+        if (!this.apiKey) throw new Error('Gemini API 키가 설정되지 않았습니다. 설정(⚙️)에서 입력해주세요.');
+        url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:streamGenerateContent?alt=sse&key=${encodeURIComponent(this.apiKey)}`;
+      }
 
       // Convert messages to Gemini format
       const contents = [];
@@ -198,7 +217,7 @@ class GeminiProvider extends AIProviderInterface {
 
       const response = await fetchWithBackoff(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: headers,
         body: JSON.stringify(body),
         signal
       }, 'Gemini', onStatus);
@@ -274,7 +293,14 @@ class OpenAIProvider extends AIProviderInterface {
 
   async chatStream({ messages, tools, systemPrompt, onChunk, onThinking, onToolCall, onStatus, onComplete, onError, signal }) {
     try {
-      if (!this.apiKey) throw new Error('OpenAI API 키가 설정되지 않았습니다. 설정(⚙️)에서 입력해주세요.');
+      const headers = { 'Content-Type': 'application/json' };
+      if (this.authType === 'subscription') {
+        if (!this.subscriptionToken) throw new Error('OpenAI ChatGPT 구독 계정이 연결되지 않았습니다. 설정(⚙️)에서 로그인해주세요.');
+        headers['Authorization'] = `Bearer ${this.subscriptionToken}`;
+      } else {
+        if (!this.apiKey) throw new Error('OpenAI API 키가 설정되지 않았습니다. 설정(⚙️)에서 입력해주세요.');
+        headers['Authorization'] = `Bearer ${this.apiKey}`;
+      }
 
       const url = `${this.baseUrl}/chat/completions`;
       const fullMessages = [];
@@ -320,10 +346,7 @@ class OpenAIProvider extends AIProviderInterface {
 
       const response = await fetchWithBackoff(url, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.apiKey}`
-        },
+        headers: headers,
         body: JSON.stringify(body),
         signal
       }, 'OpenAI', onStatus);
@@ -405,7 +428,19 @@ class AnthropicProvider extends AIProviderInterface {
 
   async chatStream({ messages, tools, systemPrompt, onChunk, onThinking, onToolCall, onStatus, onComplete, onError, signal }) {
     try {
-      if (!this.apiKey) throw new Error('Anthropic API 키가 설정되지 않았습니다. 설정(⚙️)에서 입력해주세요.');
+      const headers = {
+        'Content-Type': 'application/json',
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      };
+
+      if (this.authType === 'subscription') {
+        if (!this.subscriptionToken) throw new Error('Anthropic Claude 구독 계정이 연결되지 않았습니다. 설정(⚙️)에서 로그인해주세요.');
+        headers['Authorization'] = `Bearer ${this.subscriptionToken}`;
+      } else {
+        if (!this.apiKey) throw new Error('Anthropic API 키가 설정되지 않았습니다. 설정(⚙️)에서 입력해주세요.');
+        headers['x-api-key'] = this.apiKey;
+      }
 
       const url = 'https://api.anthropic.com/v1/messages';
       const anthropicTools = tools ? tools.map(t => ({
@@ -463,12 +498,7 @@ class AnthropicProvider extends AIProviderInterface {
 
       const response = await fetchWithBackoff(url, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': this.apiKey,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-access': 'true'
-        },
+        headers: headers,
         body: JSON.stringify(body),
         signal
       }, 'Anthropic', onStatus);
@@ -612,6 +642,9 @@ class AIProviderFactory {
   static getSettings() {
     const defaultSettings = {
       provider: 'gemini',
+      geminiAuthMode: 'subscription',
+      openaiAuthMode: 'subscription',
+      anthropicAuthMode: 'subscription',
       geminiKey: '',
       geminiModel: 'gemini-3.7-flash',
       openaiKey: '',
@@ -645,11 +678,15 @@ class AIProviderFactory {
       case 'openai':
         return new OpenAIProvider({
           apiKey: settings.openaiKey,
+          authType: settings.authType || settings.openaiAuthMode || 'apikey',
+          subscriptionToken: settings.subscriptionToken || '',
           model: settings.openaiModel
         });
       case 'anthropic':
         return new AnthropicProvider({
           apiKey: settings.anthropicKey,
+          authType: settings.authType || settings.anthropicAuthMode || 'apikey',
+          subscriptionToken: settings.subscriptionToken || '',
           model: settings.anthropicModel
         });
       case 'ollama':
@@ -661,6 +698,8 @@ class AIProviderFactory {
       default:
         return new GeminiProvider({
           apiKey: settings.geminiKey,
+          authType: settings.authType || settings.geminiAuthMode || 'apikey',
+          subscriptionToken: settings.subscriptionToken || '',
           model: settings.geminiModel || 'gemini-3.7-flash'
         });
     }

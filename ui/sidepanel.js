@@ -56,10 +56,108 @@ document.addEventListener('DOMContentLoaded', () => {
   let abortController = null;
   let isGenerating = false;
 
+  // Auth Mode Toggles
+  const authToggleBtns = document.querySelectorAll('.auth-toggle-btn');
+  authToggleBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const prov = btn.getAttribute('data-provider');
+      const mode = btn.getAttribute('data-mode');
+      document.querySelectorAll(`.auth-toggle-btn[data-provider="${prov}"]`).forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      setAuthModeUI(prov, mode);
+    });
+  });
+
+  function setAuthModeUI(provider, mode) {
+    const apikeyBox = document.getElementById(`${provider}-apikey-box`);
+    const subBox = document.getElementById(`${provider}-sub-box`);
+    if (apikeyBox && subBox) {
+      apikeyBox.classList.toggle('hidden', mode === 'subscription');
+      subBox.classList.toggle('hidden', mode !== 'subscription');
+    }
+    document.querySelectorAll(`.auth-toggle-btn[data-provider="${provider}"]`).forEach(b => {
+      b.classList.toggle('active', b.getAttribute('data-mode') === mode);
+    });
+  }
+
+  function requestAuthStatus() {
+    window.location.href = 'http://ui-action/auth-get-status';
+  }
+
+  window.renderAuthStatus = function(statusList) {
+    if (!Array.isArray(statusList)) return;
+    statusList.forEach(item => {
+      const prov = item.provider;
+      const statusDiv = document.getElementById(`${prov}-sub-status`);
+      const loginBtn = document.querySelector(`.auth-login-btn[data-provider="${prov}"]`);
+      const logoutBtn = document.querySelector(`.auth-logout-btn[data-provider="${prov}"]`);
+
+      if (statusDiv) {
+        if (item.connected) {
+          statusDiv.innerHTML = `
+            <span class="auth-badge-connected">✅ ${escapeHtml(item.tier || '구독 연결됨')}</span>
+            <p class="auth-hint"><strong>${escapeHtml(item.email || '계정 연결 완료')}</strong></p>
+          `;
+          if (loginBtn) loginBtn.classList.add('hidden');
+          if (logoutBtn) logoutBtn.classList.remove('hidden');
+        } else {
+          statusDiv.innerHTML = `
+            <span class="auth-badge-unconnected">⚠️ 구독 미연결</span>
+            <p class="auth-hint">구독 계정으로 로그인하여 API 키 없이 사용하세요.</p>
+          `;
+          if (loginBtn) loginBtn.classList.remove('hidden');
+          if (logoutBtn) logoutBtn.classList.add('hidden');
+        }
+      }
+    });
+  };
+
+  window.onAuthUpdated = function() {
+    requestAuthStatus();
+  };
+
+  window.addEventListener('focus', () => {
+    requestAuthStatus();
+  });
+
+  document.querySelectorAll('.auth-login-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const prov = btn.getAttribute('data-provider');
+      window.location.href = `http://ui-action/auth-login?provider=${prov}`;
+    });
+  });
+
+  document.querySelectorAll('.auth-logout-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const prov = btn.getAttribute('data-provider');
+      window.location.href = `http://ui-action/auth-delete-session?provider=${prov}`;
+    });
+  });
+
+  document.querySelectorAll('.auth-save-token-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const prov = btn.getAttribute('data-provider');
+      const tokenInput = document.getElementById(`${prov}-sub-token`);
+      const token = tokenInput ? tokenInput.value.trim() : '';
+      if (!token) {
+        alert('토큰을 입력해주세요.');
+        return;
+      }
+      window.location.href = `http://ui-action/auth-save-session?provider=${prov}&access_token=${encodeURIComponent(token)}`;
+      tokenInput.value = '';
+    });
+  });
+
   // 1. Initialize State & Settings
   function loadSettingsIntoUI() {
     const s = AIProviderFactory.getSettings();
     providerSelect.value = s.provider || 'gemini';
+
+    ['gemini', 'openai', 'anthropic'].forEach(prov => {
+      const mode = s[`${prov}AuthMode`] || 'subscription';
+      setAuthModeUI(prov, mode);
+    });
+
     geminiKeyInput.value = s.geminiKey || '';
     geminiModelSelect.value = s.geminiModel || 'gemini-3.7-flash';
     openaiKeyInput.value = s.openaiKey || '';
@@ -72,6 +170,7 @@ document.addEventListener('DOMContentLoaded', () => {
     updateProviderFields(s.provider || 'gemini');
     updateMemoryStats();
     requestVaultList();
+    requestAuthStatus();
   }
 
   function updateProviderFields(provider) {
@@ -79,15 +178,32 @@ document.addEventListener('DOMContentLoaded', () => {
     openaiFields.classList.toggle('hidden', provider !== 'openai');
     anthropicFields.classList.toggle('hidden', provider !== 'anthropic');
     ollamaFields.classList.toggle('hidden', provider !== 'ollama');
+
+    if (['gemini', 'openai', 'anthropic'].includes(provider)) {
+      const s = AIProviderFactory.getSettings();
+      const mode = s[`${provider}AuthMode`] || 'subscription';
+      setAuthModeUI(provider, mode);
+    }
   }
 
   providerSelect.addEventListener('change', (e) => {
-    updateProviderFields(e.target.value);
+    const selectedProvider = e.target.value;
+    updateProviderFields(selectedProvider);
+    if (['gemini', 'openai', 'anthropic'].includes(selectedProvider)) {
+      setAuthModeUI(selectedProvider, 'subscription');
+    }
   });
 
   saveSettingsBtn.addEventListener('click', () => {
+    const activeGeminiMode = document.querySelector('.auth-toggle-btn[data-provider="gemini"].active')?.getAttribute('data-mode') || 'subscription';
+    const activeOpenAIMode = document.querySelector('.auth-toggle-btn[data-provider="openai"].active')?.getAttribute('data-mode') || 'subscription';
+    const activeAnthropicMode = document.querySelector('.auth-toggle-btn[data-provider="anthropic"].active')?.getAttribute('data-mode') || 'subscription';
+
     const updated = {
       provider: providerSelect.value,
+      geminiAuthMode: activeGeminiMode,
+      openaiAuthMode: activeOpenAIMode,
+      anthropicAuthMode: activeAnthropicMode,
       geminiKey: geminiKeyInput.value.trim(),
       geminiModel: geminiModelSelect.value,
       openaiKey: openaiKeyInput.value.trim(),
@@ -268,6 +384,25 @@ document.addEventListener('DOMContentLoaded', () => {
     chatContainer.scrollTop = chatContainer.scrollHeight;
   }
 
+  function getSubscriptionToken(provider) {
+    return new Promise((resolve) => {
+      const handler = (prov, token, ok) => {
+        if (prov === provider) {
+          window.onAuthTokenReceived = null;
+          resolve(ok ? token : null);
+        }
+      };
+      window.onAuthTokenReceived = handler;
+      window.location.href = `http://ui-action/auth-get-token?provider=${provider}`;
+      setTimeout(() => {
+        if (window.onAuthTokenReceived === handler) {
+          window.onAuthTokenReceived = null;
+          resolve(null);
+        }
+      }, 1000);
+    });
+  }
+
   async function handleSendPrompt(customText = null) {
     const prompt = (customText || promptInput.value).trim();
     if (!prompt || isGenerating) return;
@@ -293,6 +428,16 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       const settings = AIProviderFactory.getSettings();
+      const currentAuthMode = settings[`${settings.provider}AuthMode`] || 'apikey';
+      settings.authType = currentAuthMode;
+      if (currentAuthMode === 'subscription') {
+        const subToken = await getSubscriptionToken(settings.provider);
+        if (!subToken) {
+          throw new Error(`${settings.provider.toUpperCase()} 구독 계정이 연결되지 않았거나 세션이 만료되었습니다. 설정(⚙️)에서 구독 계정으로 로그인해주세요.`);
+        }
+        settings.subscriptionToken = subToken;
+      }
+
       const provider = AIProviderFactory.createProvider(settings);
       const systemPrompt = settings.systemPrompt + memoryPrompt;
       const tools = window.taskRuntime.getAvailableTools();

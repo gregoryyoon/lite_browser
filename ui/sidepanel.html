@@ -44,9 +44,38 @@
 
           <div id="gemini-fields" class="provider-fields">
             <div class="form-group">
-              <label for="gemini-key">Gemini API Key:</label>
-              <input type="password" id="gemini-key" placeholder="AIzaSy...">
+              <label>인증 방식:</label>
+              <div class="auth-type-toggle">
+                <button type="button" class="auth-toggle-btn active" data-provider="gemini" data-mode="subscription">💳 Google/Gemini 구독</button>
+                <button type="button" class="auth-toggle-btn" data-provider="gemini" data-mode="apikey">🔑 API Key</button>
+              </div>
             </div>
+
+            <div id="gemini-sub-box" class="auth-sub-card">
+              <div class="auth-sub-status" id="gemini-sub-status">
+                <span class="auth-badge-unconnected">⚠️ 구독 미연결</span>
+                <p class="auth-hint">Google Gemini(Advanced) 계정 로그인 또는 OAuth Access Token을 등록하여 API 키 없이 사용하세요.</p>
+              </div>
+              <div class="auth-sub-actions">
+                <button type="button" class="btn btn-primary btn-sm auth-login-btn" data-provider="gemini">🌐 Google Gemini 로그인</button>
+                <button type="button" class="btn btn-danger-outline btn-sm auth-logout-btn hidden" data-provider="gemini">연결 해제</button>
+              </div>
+              <details class="auth-manual-details">
+                <summary>수동 액세스 토큰 등록 (OAuth / gcloud Token)</summary>
+                <div class="form-group" style="margin-top: 6px;">
+                  <input type="password" id="gemini-sub-token" placeholder="Bearer Token (gcloud auth print-access-token 또는 OAuth Token)">
+                  <button type="button" class="btn btn-secondary btn-sm auth-save-token-btn" data-provider="gemini" style="margin-top: 4px;">토큰 저장</button>
+                </div>
+              </details>
+            </div>
+
+            <div id="gemini-apikey-box" class="hidden">
+              <div class="form-group">
+                <label for="gemini-key">Gemini API Key:</label>
+                <input type="password" id="gemini-key" placeholder="AIzaSy...">
+              </div>
+            </div>
+
             <div class="form-group">
               <label for="gemini-model">모델:</label>
               <select id="gemini-model">
@@ -60,9 +89,38 @@
 
           <div id="openai-fields" class="provider-fields hidden">
             <div class="form-group">
-              <label for="openai-key">OpenAI API Key:</label>
-              <input type="password" id="openai-key" placeholder="sk-proj-...">
+              <label>인증 방식:</label>
+              <div class="auth-type-toggle">
+                <button type="button" class="auth-toggle-btn active" data-provider="openai" data-mode="subscription">💳 ChatGPT Plus/Pro 구독</button>
+                <button type="button" class="auth-toggle-btn" data-provider="openai" data-mode="apikey">🔑 API Key</button>
+              </div>
             </div>
+
+            <div id="openai-sub-box" class="auth-sub-card">
+              <div class="auth-sub-status" id="openai-sub-status">
+                <span class="auth-badge-unconnected">⚠️ 구독 미연결</span>
+                <p class="auth-hint">ChatGPT Plus/Team/Pro 구독 계정을 연결하여 추가 API 요금 없이 사용하세요.</p>
+              </div>
+              <div class="auth-sub-actions">
+                <button type="button" class="btn btn-primary btn-sm auth-login-btn" data-provider="openai">🌐 ChatGPT 로그인</button>
+                <button type="button" class="btn btn-danger-outline btn-sm auth-logout-btn hidden" data-provider="openai">연결 해제</button>
+              </div>
+              <details class="auth-manual-details">
+                <summary>수동 세션 토큰 등록 (Access / Session Token)</summary>
+                <div class="form-group" style="margin-top: 6px;">
+                  <input type="password" id="openai-sub-token" placeholder="Bearer Token (DPAPI로 암호화 저장)">
+                  <button type="button" class="btn btn-secondary btn-sm auth-save-token-btn" data-provider="openai" style="margin-top: 4px;">토큰 저장</button>
+                </div>
+              </details>
+            </div>
+
+            <div id="openai-apikey-box" class="hidden">
+              <div class="form-group">
+                <label for="openai-key">OpenAI API Key:</label>
+                <input type="password" id="openai-key" placeholder="sk-proj-...">
+              </div>
+            </div>
+
             <div class="form-group">
               <label for="openai-model">모델:</label>
               <input type="text" id="openai-model" value="gpt-4o">
@@ -71,9 +129,38 @@
 
           <div id="anthropic-fields" class="provider-fields hidden">
             <div class="form-group">
-              <label for="anthropic-key">Anthropic API Key:</label>
-              <input type="password" id="anthropic-key" placeholder="sk-ant-...">
+              <label>인증 방식:</label>
+              <div class="auth-type-toggle">
+                <button type="button" class="auth-toggle-btn active" data-provider="anthropic" data-mode="subscription">💳 Claude Pro 구독</button>
+                <button type="button" class="auth-toggle-btn" data-provider="anthropic" data-mode="apikey">🔑 API Key</button>
+              </div>
             </div>
+
+            <div id="anthropic-sub-box" class="auth-sub-card">
+              <div class="auth-sub-status" id="anthropic-sub-status">
+                <span class="auth-badge-unconnected">⚠️ 구독 미연결</span>
+                <p class="auth-hint">Claude Pro/Team 구독 계정을 연결하여 추가 API 요금 없이 사용하세요.</p>
+              </div>
+              <div class="auth-sub-actions">
+                <button type="button" class="btn btn-primary btn-sm auth-login-btn" data-provider="anthropic">🌐 Claude 로그인</button>
+                <button type="button" class="btn btn-danger-outline btn-sm auth-logout-btn hidden" data-provider="anthropic">연결 해제</button>
+              </div>
+              <details class="auth-manual-details">
+                <summary>수동 세션 토큰 등록 (Session Key / Token)</summary>
+                <div class="form-group" style="margin-top: 6px;">
+                  <input type="password" id="anthropic-sub-token" placeholder="Session Token (DPAPI로 암호화 저장)">
+                  <button type="button" class="btn btn-secondary btn-sm auth-save-token-btn" data-provider="anthropic" style="margin-top: 4px;">토큰 저장</button>
+                </div>
+              </details>
+            </div>
+
+            <div id="anthropic-apikey-box" class="hidden">
+              <div class="form-group">
+                <label for="anthropic-key">Anthropic API Key:</label>
+                <input type="password" id="anthropic-key" placeholder="sk-ant-...">
+              </div>
+            </div>
+
             <div class="form-group">
               <label for="anthropic-model">모델:</label>
               <input type="text" id="anthropic-model" value="claude-3-7-sonnet-20250219">

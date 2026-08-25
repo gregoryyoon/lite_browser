@@ -418,3 +418,77 @@ cmake --build c:\projects\lite_browser\cef_binary_149.0.6\build --config Debug -
 | **2. 브라우저 중복 해제 (댕글링 포인터)** | `on_after_created`와 `on_before_close`에서 콜백 인자로 전달된 브라우저를 임의로 `release`하거나 윈도우 소멸(`WM_NCDESTROY`) 시 이미 파괴된 브라우저 객체에 접근 | 팝업 컨텍스트(`pctx->browser`)를 Weak Reference로 전환하고 불필요한 `add_ref`/`release`를 완전히 제거하여 참조 카운트 1:1 보장 |
 | **3. CEF 내부 객체 파괴 충돌 (`nullptr` 위반)** | `on_before_close` 콜백 내부에서 동기식 `DestroyWindow`를 호출하여 CEF가 미처 윈도우 객체를 정리하기 전에 Win32 윈도우가 파괴됨 | `PostMessage(parent_wnd, WM_USER_CLOSE_POPUP, 0, 0)` 비동기 메시지로 분리하여 CEF 정리 루틴이 완전히 끝난 후 안전하게 Win32 윈도우가 파괴되도록 보장 |
 
+---
+
+## 14. 구독(Subscription) 기반 AI 에이전트 연결 및 DPAPI 토큰 볼트 시스템 (Subscription-based AI Agent Connection)
+
+### 14.1 개요
+OpenAI ChatGPT Plus/Team/Pro, Claude Pro, Google Gemini Advanced(Workspace) 등 기존 AI 유료 구독 계정을 보유한 사용자가 토큰당 별도 API 비용을 지불하지 않고도 브라우저 AI 에이전트를 자유롭게 활용할 수 있도록 지원하는 **구독 기반 인증 및 Windows DPAPI 보안 토큰 볼트 시스템**을 구축했습니다.
+
+### 14.2 주요 구현 아키텍처
+
+```mermaid
+flowchart TD
+    subgraph UI ["사이드패널 설정 (ui/sidepanel.*)"]
+        Toggle["인증 토글: [💳 구독] (기본) | [🔑 API Key]"]
+        LoginBtn["🌐 로그인 버튼 클릭"]
+        StatusCard["실시간 상태 카드 (✅ 연결됨 / ⚠️ 미연결)"]
+    end
+
+    subgraph NativeCore ["C 백엔드 & CEF 브릿지"]
+        LoadHandler["simple_load_handler.c<br/>(웹 로그인 세션 자동 감지)"]
+        Handler["simple_handler.c<br/>(IPC 라우팅 & 브로드캐스트)"]
+        AuthVault["simple_auth.c / simple_auth.h<br/>(Windows DPAPI 암호화 볼트)"]
+        DiskFile["%USERPROFILE%\\.lite-browser\\ai_auth.dat<br/>(암호화된 토큰 파일)"]
+    end
+
+    subgraph Providers ["AI Provider 어댑터 (ui/ai_providers.js)"]
+        BearerAuth["Bearer Token 헤더 통신<br/>(Authorization: Bearer ...)"]
+        FallbackAuth["지능형 API Key 폴백 연동"]
+    end
+
+    Toggle --> LoginBtn
+    LoginBtn -->|auth-login| Handler
+    Handler -->|새 탭 생성| LoadHandler
+    LoadHandler -->|auth-save-session| Handler
+    Handler --> AuthVault
+    AuthVault <--> DiskFile
+    Handler -->|window.onAuthUpdated| StatusCard
+    StatusCard --> BearerAuth
+    BearerAuth -.->|필요시 백업| FallbackAuth
+```
+
+### 14.3 핵심 구현 내역
+
+1. **Windows DPAPI 암호화 로컬 보안 볼트 ([`simple_auth.h`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_auth.h), [`simple_auth.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_auth.c))**:
+   - Windows OS 수준 암호화 API인 `CryptProtectData` 및 `CryptUnprotectData`를 적용하여 `%USERPROFILE%\.lite-browser\ai_auth.dat`에 Provider별 세션 토큰을 안전하게 암호화 보관.
+   - 평문 토큰은 프론트엔드나 디스크에 영구 노출되지 않으며, AI 호출 시점에만 C 백엔드에서 메모리로 복호화되어 베어러 헤더로 주입됨.
+   - `auth_init`, `auth_save_session`, `auth_delete_session`, `auth_is_connected`, `auth_get_status_json`, `auth_get_token` 등 스레드 안전(CriticalSection) C API 제공.
+
+2. **웹 로그인 세션 자동 감지 & 실시간 동기화 ([`simple_load_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_load_handler.c), [`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_handler.c))**:
+   - `gemini.google.com`, `chatgpt.com`, `claude.ai` 로그인 완료 시, C 로드 핸들러(`load_handler_on_loading_state_change`)가 계정 이메일과 활성 세션을 감지하여 볼트에 자동 등록.
+   - 세션 변경 시 메인 창의 독립 사이드패널 브라우저(`win_ctx->sidepanel_browser`)에 실시간 이벤트(`window.onAuthUpdated`)를 브로드캐스트하여 설정 화면이 즉시 `✅ 연결됨 (user@email.com)`으로 동기화됨.
+
+3. **우선순위 기반 하이브리드 UI ([`ui/sidepanel.html`](file:///c:/projects/lite_browser/ui/sidepanel.html), [`ui/sidepanel.css`](file:///c:/projects/lite_browser/ui/sidepanel.css), [`ui/sidepanel.js`](file:///c:/projects/lite_browser/ui/sidepanel.js))**:
+   - **구독 우선 배치**: **`[💳 구독 방식]`을 왼쪽(1순위)**, **`[🔑 API Key]`를 오른쪽**에 배치하여 구독 방식을 기본 선택으로 시각화.
+   - **Provider 변경 시 디폴트 선택**: 드롭다운에서 Provider(Gemini, OpenAI, Claude)를 변경할 때마다 왼쪽 `[💳 구독 방식]`이 즉시 활성화되고 연결 상태 카드가 디폴트로 노출되도록 구현.
+   - **수동 토큰 등록 지원**: Google OAuth Token(`ya29...`) 또는 `gcloud auth print-access-token` 등록 아코디언 제공.
+
+4. **다형성 Provider 어댑터 & 지능형 폴백 ([`ui/ai_providers.js`](file:///c:/projects/lite_browser/ui/ai_providers.js))**:
+   - `GeminiProvider`, `OpenAIProvider`, `AnthropicProvider`에 `authType: 'subscription'` 모드를 확장.
+   - 구독 모드에서 OAuth 토큰(`ya29...`) 존재 시 베어러 토큰으로 우선 통신하며, API Key가 함께 입력되어 있는 경우 안정적인 통신을 위해 자동으로 폴백 연동되어 401 오류를 원천 방지.
+
+### 14.4 주요 소스 파일 맵
+- [`cef_binary_149.0.6/tests/cefsimple_capi/simple_auth.h`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_auth.h): DPAPI 인증 볼트 헤더 인터페이스
+- [`cef_binary_149.0.6/tests/cefsimple_capi/simple_auth.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_auth.c): DPAPI 암호화/복호화 및 파일 IO 구현
+- [`cef_binary_149.0.6/tests/cefsimple_capi/simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_handler.c): `auth-*` IPC 라우팅 및 사이드패널 브로드캐스트
+- [`cef_binary_149.0.6/tests/cefsimple_capi/simple_load_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_load_handler.c): 웹 로그인 세션 자동 감지기
+- [`ui/ai_providers.js`](file:///c:/projects/lite_browser/ui/ai_providers.js): `authType === 'subscription'` Bearer 어댑터 및 폴백
+- [`ui/sidepanel.html`](file:///c:/projects/lite_browser/ui/sidepanel.html): 구독/API Key 하이브리드 UI
+- [`ui/sidepanel.css`](file:///c:/projects/lite_browser/ui/sidepanel.css): 활성 탭 하이라이트 및 카드 스타일
+- [`ui/sidepanel.js`](file:///c:/projects/lite_browser/ui/sidepanel.js): 인증 모드 오케스트레이션 및 상태 동기화
+
+### 14.5 빌드 검증
+- Debug 빌드: `Debug/lite_browser.exe` 및 `Debug/lite_browser.dll` 컴파일 완료 (Exit code 0).
+
+

@@ -5,6 +5,7 @@
 #include "tests/cefsimple_capi/simple_handler.h"
 #include "tests/cefsimple_capi/simple_download_handler.h"
 #include "tests/cefsimple_capi/simple_vault.h"
+#include "tests/cefsimple_capi/simple_auth.h"
 #include "tests/cefsimple_capi/simple_mcp.h"
 
 #include <stdarg.h>
@@ -1107,6 +1108,107 @@ int CEF_CALLBACK request_handler_on_before_browse(
             cef_string_from_utf8(js_code, strlen(js_code), &js_str);
             frame->execute_java_script(frame, &js_str, NULL, 0);
             cef_string_clear(&js_str);
+          }
+        } else if (strcmp(action, "auth-get-status") == 0) {
+          char buf[8192];
+          auth_get_status_json(buf, sizeof(buf));
+          if (frame) {
+            char js_code[8192 + 128];
+            snprintf(js_code, sizeof(js_code), "if (window.renderAuthStatus) { window.renderAuthStatus(%s); }", buf);
+            cef_string_t js_str = {};
+            cef_string_from_utf8(js_code, strlen(js_code), &js_str);
+            frame->execute_java_script(frame, &js_str, NULL, 0);
+            cef_string_clear(&js_str);
+          }
+        } else if (strncmp(action, "auth-save-session?", 18) == 0) {
+          const char* query = action + 18;
+          char* provider = get_query_param(query, "provider");
+          char* email = get_query_param(query, "email");
+          char* tier = get_query_param(query, "tier");
+          char* access_token = get_query_param(query, "access_token");
+          char* refresh_token = get_query_param(query, "refresh_token");
+          char* exp_str = get_query_param(query, "expires_at");
+          long expires_at = exp_str ? atol(exp_str) : 0;
+
+          if (provider && access_token) {
+            auth_save_session(provider, email ? email : "", tier ? tier : "",
+                              access_token, refresh_token ? refresh_token : "", expires_at);
+          }
+          if (provider) free(provider);
+          if (email) free(email);
+          if (tier) free(tier);
+          if (access_token) free(access_token);
+          if (refresh_token) free(refresh_token);
+          if (exp_str) free(exp_str);
+
+          if (win_ctx->sidepanel_browser) {
+            cef_frame_t* sf = win_ctx->sidepanel_browser->get_main_frame(win_ctx->sidepanel_browser);
+            if (sf) {
+              cef_string_t js_str = {};
+              cef_string_from_utf8("if (window.onAuthUpdated) window.onAuthUpdated(true);", 53, &js_str);
+              sf->execute_java_script(sf, &js_str, NULL, 0);
+              cef_string_clear(&js_str);
+              sf->base.release(&sf->base);
+            }
+          }
+          if (frame) {
+            cef_string_t js_str = {};
+            cef_string_from_utf8("if (window.onAuthUpdated) window.onAuthUpdated(true);", 53, &js_str);
+            frame->execute_java_script(frame, &js_str, NULL, 0);
+            cef_string_clear(&js_str);
+          }
+        } else if (strncmp(action, "auth-delete-session?", 20) == 0) {
+          const char* query = action + 20;
+          char* provider = get_query_param(query, "provider");
+          if (provider) {
+            auth_delete_session(provider);
+            free(provider);
+          }
+          if (win_ctx->sidepanel_browser) {
+            cef_frame_t* sf = win_ctx->sidepanel_browser->get_main_frame(win_ctx->sidepanel_browser);
+            if (sf) {
+              cef_string_t js_str = {};
+              cef_string_from_utf8("if (window.onAuthUpdated) window.onAuthUpdated(true);", 53, &js_str);
+              sf->execute_java_script(sf, &js_str, NULL, 0);
+              cef_string_clear(&js_str);
+              sf->base.release(&sf->base);
+            }
+          }
+          if (frame) {
+            cef_string_t js_str = {};
+            cef_string_from_utf8("if (window.onAuthUpdated) window.onAuthUpdated(true);", 53, &js_str);
+            frame->execute_java_script(frame, &js_str, NULL, 0);
+            cef_string_clear(&js_str);
+          }
+        } else if (strncmp(action, "auth-get-token?", 15) == 0) {
+          const char* query = action + 15;
+          char* provider = get_query_param(query, "provider");
+          char token_buf[4096] = {0};
+          int ok = 0;
+          if (provider) {
+            ok = auth_get_token(provider, token_buf, sizeof(token_buf));
+          }
+          if (frame) {
+            char js_code[4096 + 256];
+            snprintf(js_code, sizeof(js_code),
+                     "if (window.onAuthTokenReceived) { window.onAuthTokenReceived('%s', '%s', %s); }",
+                     provider ? provider : "", ok ? token_buf : "", ok ? "true" : "false");
+            cef_string_t js_str = {};
+            cef_string_from_utf8(js_code, strlen(js_code), &js_str);
+            frame->execute_java_script(frame, &js_str, NULL, 0);
+            cef_string_clear(&js_str);
+          }
+          if (provider) free(provider);
+        } else if (strncmp(action, "auth-login?", 11) == 0) {
+          const char* query = action + 11;
+          char* provider = get_query_param(query, "provider");
+          if (provider) {
+            char login_url[2048] = {0};
+            auth_get_login_url(provider, login_url, sizeof(login_url));
+            if (login_url[0]) {
+              CreateNewTab(win_ctx, login_url);
+            }
+            free(provider);
           }
         } else if (strncmp(action, "ai-highlight-element?", 21) == 0) {
           const char* query = action + 21;

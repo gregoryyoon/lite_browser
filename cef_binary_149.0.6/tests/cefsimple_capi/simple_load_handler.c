@@ -128,6 +128,87 @@ load_handler_on_loading_state_change(cef_load_handler_t* self,
         update_ui_nav_state(win_ctx);
       }
     }
+
+    if (!isLoading) {
+      cef_frame_t* main_f = browser->get_main_frame(browser);
+      if (main_f) {
+        cef_string_userfree_t url_uf = main_f->get_url(main_f);
+        if (url_uf) {
+          cef_string_utf8_t url_utf8 = {};
+          cef_string_to_utf8(url_uf->str, url_uf->length, &url_utf8);
+          const char* cur_url = url_utf8.str;
+
+          if (cur_url && strstr(cur_url, "gemini.google.com")) {
+            const char* detect_js = 
+              "(function() {"
+              "  try {"
+              "    let email = '';"
+              "    const av = document.querySelector('img[alt*=\"@\"], a[aria-label*=\"@\"], [data-email]');"
+              "    if (av) {"
+              "      const raw = av.getAttribute('data-email') || av.getAttribute('aria-label') || av.getAttribute('alt') || '';"
+              "      const m = raw.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}/);"
+              "      if (m) email = m[0];"
+              "    }"
+              "    if (!email && window.WIZ_global_data) {"
+              "      const str = JSON.stringify(window.WIZ_global_data);"
+              "      const m = str.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}/);"
+              "      if (m) email = m[0];"
+              "    }"
+              "    if (!email) {"
+              "      const m = document.documentElement.innerHTML.match(/[a-zA-Z0-9._%+-]+@gmail\\.com/);"
+              "      if (m) email = m[0];"
+              "    }"
+              "    const hasPrompt = !!document.querySelector('textarea, div[contenteditable=\"true\"], .ql-editor, bard-text-input');"
+              "    if (email || hasPrompt) {"
+              "      window.location.href = 'http://ui-action/auth-save-session?provider=gemini&email=' + encodeURIComponent(email || 'Google 계정') + '&tier=' + encodeURIComponent('Gemini Advanced') + '&access_token=google_web_session_' + Date.now();"
+              "    }"
+              "  } catch(e) {}"
+              "})();";
+            cef_string_t js_str = {};
+            cef_string_from_utf8(detect_js, strlen(detect_js), &js_str);
+            main_f->execute_java_script(main_f, &js_str, NULL, 0);
+            cef_string_clear(&js_str);
+          } else if (cur_url && strstr(cur_url, "chatgpt.com")) {
+            const char* detect_js = 
+              "(function() {"
+              "  try {"
+              "    fetch('/api/auth/session').then(r => r.json()).then(data => {"
+              "      if (data && data.accessToken) {"
+              "        const email = (data.user && data.user.email) ? data.user.email : 'ChatGPT User';"
+              "        const tier = (data.user && data.user.planType) ? data.user.planType : 'ChatGPT Plus';"
+              "        window.location.href = 'http://ui-action/auth-save-session?provider=openai&email=' + encodeURIComponent(email) + '&tier=' + encodeURIComponent(tier) + '&access_token=' + encodeURIComponent(data.accessToken);"
+              "      }"
+              "    }).catch(e => {});"
+              "  } catch(e) {}"
+              "})();";
+            cef_string_t js_str = {};
+            cef_string_from_utf8(detect_js, strlen(detect_js), &js_str);
+            main_f->execute_java_script(main_f, &js_str, NULL, 0);
+            cef_string_clear(&js_str);
+          } else if (cur_url && strstr(cur_url, "claude.ai")) {
+            const char* detect_js = 
+              "(function() {"
+              "  try {"
+              "    fetch('/api/auth/session').then(r => r.json()).then(data => {"
+              "      if (data) {"
+              "        const email = (data.user && data.user.email) ? data.user.email : 'Claude User';"
+              "        window.location.href = 'http://ui-action/auth-save-session?provider=anthropic&email=' + encodeURIComponent(email) + '&tier=Claude%20Pro&access_token=claude_session_' + Date.now();"
+              "      }"
+              "    }).catch(e => {});"
+              "  } catch(e) {}"
+              "})();";
+            cef_string_t js_str = {};
+            cef_string_from_utf8(detect_js, strlen(detect_js), &js_str);
+            main_f->execute_java_script(main_f, &js_str, NULL, 0);
+            cef_string_clear(&js_str);
+          }
+
+          cef_string_utf8_clear(&url_utf8);
+          cef_string_userfree_free(url_uf);
+        }
+        main_f->base.release(&main_f->base);
+      }
+    }
   }
 }
 
