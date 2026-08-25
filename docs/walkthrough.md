@@ -265,6 +265,8 @@ Edge 브라우저의 `edge://downloads/` 디자인과 UX를 참고하여 다운�
    - 탭이 분할되면 탭바에 `[좌측 페이지 제목 | 우측 페이지 제목]` 결합 텍스트가 표시되며, 탭 제목 좌측에 파란색 듀얼 분할 아이콘(`◫`) 뱃지가 노출됩니다.
 7. **전역 비활성 탭 HWND 일괄 `SW_HIDE` 보정 (잔상 방지)**:
    - 탭 전환(`switch-tab`), 탭 삭제(`RemoveTabAt`), 로딩 상태 전환(`simple_load_handler`), 레이아웃 계산(`WM_SIZE`) 시 현재 선택되지 않은 모든 비활성 탭의 메인 HWND(`hwnd`) 및 우측 HWND(`right_hwnd`)를 일괄 `SW_HIDE` 처리하여 탭 전환 시 화면 잔상이 겹쳐 보이던 오작동을 원천 해결했습니다.
+8. **분할 탭 상태에서 링크 클릭/팝업 시 새 탭 생성 대신 현재 분할 화면 내 이동 처리**:
+   - CEF `on_before_popup` (`simple_life_span_handler.c`) 및 `on_open_urlfrom_tab` (`simple_handler.c`) 핸들러에서, 링크 클릭을 요청한 브라우저가 속한 탭이 분할 탭(`is_split == 1`)인 경우 `CreateNewTab`을 호출하지 않고 해당 분할 화면(`browser->get_main_frame`)으로 바로 `load_url`을 호출하여 새 페이지가 열리도록 구현했습니다. (단, 탭바의 '+' 버튼 클릭 등 명시적 탭 생성은 새 탭으로 구동)
 
 ---
 

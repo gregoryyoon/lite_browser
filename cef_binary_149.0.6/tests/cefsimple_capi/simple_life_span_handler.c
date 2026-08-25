@@ -391,6 +391,27 @@ int CEF_CALLBACK life_span_handler_on_before_popup(
       target_url_str[sizeof(target_url_str) - 1] = '\0';
       cef_string_utf8_clear(&url_utf8);
 
+      int found_tab_idx = -1;
+      for (int i = 0; i < win_ctx->tab_count; i++) {
+        if ((win_ctx->tabs[i].browser && browser->get_identifier(browser) == win_ctx->tabs[i].browser->get_identifier(win_ctx->tabs[i].browser)) ||
+            (win_ctx->tabs[i].right_browser && browser->get_identifier(browser) == win_ctx->tabs[i].right_browser->get_identifier(win_ctx->tabs[i].right_browser))) {
+          found_tab_idx = i;
+          break;
+        }
+      }
+
+      if (found_tab_idx != -1 && win_ctx->tabs[found_tab_idx].is_split) {
+        cef_frame_t* target_frame = browser->get_main_frame(browser);
+        if (target_frame) {
+          cef_string_t url_str = {};
+          cef_string_from_utf8(target_url_str, strlen(target_url_str), &url_str);
+          target_frame->load_url(target_frame, &url_str);
+          cef_string_clear(&url_str);
+          target_frame->base.release(&target_frame->base);
+        }
+        return 1;
+      }
+
       CreateNewTab(win_ctx, target_url_str);
       return 1;
     }

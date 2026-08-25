@@ -2475,8 +2475,31 @@ int CEF_CALLBACK request_handler_on_open_urlfrom_tab(
     strcpy(target_url_str, "about:blank");
   }
 
-  if (win_ctx && win_ctx->tab_count < MAX_TABS) {
-    CreateNewTab(win_ctx, target_url_str);
+  if (win_ctx) {
+    int found_tab_idx = -1;
+    for (int i = 0; i < win_ctx->tab_count; i++) {
+      if ((win_ctx->tabs[i].browser && browser->get_identifier(browser) == win_ctx->tabs[i].browser->get_identifier(win_ctx->tabs[i].browser)) ||
+          (win_ctx->tabs[i].right_browser && browser->get_identifier(browser) == win_ctx->tabs[i].right_browser->get_identifier(win_ctx->tabs[i].right_browser))) {
+        found_tab_idx = i;
+        break;
+      }
+    }
+
+    if (found_tab_idx != -1 && win_ctx->tabs[found_tab_idx].is_split) {
+      cef_frame_t* target_frame = browser->get_main_frame(browser);
+      if (target_frame) {
+        cef_string_t url_str = {};
+        cef_string_from_utf8(target_url_str, strlen(target_url_str), &url_str);
+        target_frame->load_url(target_frame, &url_str);
+        cef_string_clear(&url_str);
+        target_frame->base.release(&target_frame->base);
+      }
+      return 1;
+    }
+
+    if (win_ctx->tab_count < MAX_TABS) {
+      CreateNewTab(win_ctx, target_url_str);
+    }
   }
 
   // Return 1 (true) to cancel default Chromium navigation/new window action for Ctrl+Click / Middle Click
