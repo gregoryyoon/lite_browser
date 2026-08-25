@@ -224,6 +224,50 @@ int CEF_CALLBACK display_handler_on_contents_bounds_change(
   return 0;
 }
 
+void CEF_CALLBACK
+display_handler_on_favicon_urlchange(cef_display_handler_t* self,
+                                     cef_browser_t* browser,
+                                     cef_string_list_t icon_urls) {
+  simple_display_handler_t* handler = (simple_display_handler_t*)self;
+  if (!handler || !handler->parent) return;
+
+  browser_window_t *win_ctx = handler->parent->window_ctx;
+  if (win_ctx && handler->parent->type != BROWSER_TYPE_POPUP) {
+    char icon_url_str[2048] = {0};
+    if (icon_urls && cef_string_list_size(icon_urls) > 0) {
+      cef_string_t url_cef = {};
+      if (cef_string_list_value(icon_urls, 0, &url_cef)) {
+        cef_string_utf8_t url_utf8 = {};
+        cef_string_to_utf8(url_cef.str, url_cef.length, &url_utf8);
+        if (url_utf8.str && url_utf8.length > 0) {
+          strncpy(icon_url_str, url_utf8.str, sizeof(icon_url_str) - 1);
+        }
+        cef_string_utf8_clear(&url_utf8);
+        cef_string_clear(&url_cef);
+      }
+    }
+
+    if (icon_url_str[0]) {
+      for (int i = 0; i < win_ctx->tab_count; i++) {
+        if (win_ctx->tabs[i].browser &&
+            browser->get_identifier(browser) == win_ctx->tabs[i].browser->get_identifier(win_ctx->tabs[i].browser)) {
+          strncpy(win_ctx->tabs[i].favicon_url, icon_url_str, sizeof(win_ctx->tabs[i].favicon_url) - 1);
+          win_ctx->tabs[i].favicon_url[sizeof(win_ctx->tabs[i].favicon_url) - 1] = '\0';
+          update_ui_tabs(win_ctx);
+          break;
+        }
+        if (win_ctx->tabs[i].right_browser &&
+            browser->get_identifier(browser) == win_ctx->tabs[i].right_browser->get_identifier(win_ctx->tabs[i].right_browser)) {
+          strncpy(win_ctx->tabs[i].right_favicon_url, icon_url_str, sizeof(win_ctx->tabs[i].right_favicon_url) - 1);
+          win_ctx->tabs[i].right_favicon_url[sizeof(win_ctx->tabs[i].right_favicon_url) - 1] = '\0';
+          update_ui_tabs(win_ctx);
+          break;
+        }
+      }
+    }
+  }
+}
+
 simple_display_handler_t* display_handler_create(simple_handler_t* parent) {
   simple_display_handler_t* handler =
       (simple_display_handler_t*)calloc(1, sizeof(simple_display_handler_t));
@@ -236,6 +280,7 @@ simple_display_handler_t* display_handler_create(simple_handler_t* parent) {
   // Set callbacks.
   handler->handler.on_title_change = display_handler_on_title_change;
   handler->handler.on_address_change = display_handler_on_address_change;
+  handler->handler.on_favicon_urlchange = display_handler_on_favicon_urlchange;
   handler->handler.on_contents_bounds_change = display_handler_on_contents_bounds_change;
 
   // Store parent reference (no ref count - parent owns us).

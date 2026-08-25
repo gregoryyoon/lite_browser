@@ -122,6 +122,8 @@ load_handler_on_loading_state_change(cef_load_handler_t* self,
       }
     }
 
+    update_ui_tabs(win_ctx);
+
     if (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
       cef_browser_t* active_cb = win_ctx->tabs[win_ctx->active_tab_index].browser;
       if (active_cb && browser->get_identifier(browser) == active_cb->get_identifier(active_cb)) {

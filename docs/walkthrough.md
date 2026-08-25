@@ -513,5 +513,31 @@ flowchart TD
 ### 15.3 빌드 및 검증
 - Debug 빌드 완료: `Debug/lite_browser.exe` (Exit code 0).
 
+---
+
+## 16. 크롬/엣지 스타일 탭 파비콘(Favicon) & 회전 로딩 스피너 엔진 (Tab Favicon & Loading Spinner Engine)
+
+### 16.1 개요
+엣지/크롬 브라우저와 동일하게 네이버(`www.naver.com`) 접속 시 녹색 N 파비콘과 같이 **웹사이트 고유 파비콘 아이콘과 페이지 제목이 함께 노출**되며, 페이지 로딩 중에는 파비콘 자리에 **회전 로딩 스피너(Loading Spinner)**가 실시간으로 표시되도록 구현했습니다.
+
+### 16.2 핵심 구현 내역
+1. **CEF Display Handler 파비콘 변경 콜백 연동 ([`simple_display_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_display_handler.c), [`browser_context.h`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/browser_context.h))**:
+   - `display_handler_on_favicon_urlchange` 콜백을 등록하여 웹페이지가 전송하는 `icon_urls` 목록 중 첫 번째 파비콘 URL을 추출하고 해당 탭의 `favicon_url`에 자동 저장.
+2. **다단계 지능형 파비콘 폴백 및 내부 페이지 전용 아이콘 ([`ui/app.js`](file:///c:/projects/lite_browser/ui/app.js))**:
+   - **내부 페이지 전용 아이콘**: 북마크 관리자(`lite://favorites` ➔ 황금색 별), 다운로드 관리자(`lite://downloads` ➔ 파란색 다운로드 화살표), AI 사이드패널(`lite://sidepanel` ➔ 보라색 스파클) 전용 고해상도 SVG 아이콘 노출.
+   - **웹페이지 파비콘 3단계 폴백**:
+     1. CEF가 추출한 웹페이지 원본 `favicon_url`
+     2. Google Favicon 캐시 서비스 (`https://www.google.com/s2/favicons?domain=...&sz=32`)
+     3. 미지원/오류 시 기본 회색 지구본 SVG 아이콘 (`onerror` 자동 전환)
+3. **페이지 로딩 중 실시간 회전 스피너 ([`simple_load_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_load_handler.c), [`ui/style.css`](file:///c:/projects/lite_browser/ui/style.css))**:
+   - `load_handler_on_loading_state_change`에서 `isLoading` 상태 변경 시 탭 목록을 즉시 갱신(`update_ui_tabs`).
+   - 로딩 중(`tab.is_loading == 1`)일 때는 파비콘 대신 파란색 원형 회전 스피너(`.tab-spinner`)를 렌더링하고, 로딩 완료 시 파비콘으로 매끄럽게 전환.
+4. **극소형 탭 중앙 정렬**:
+   - 탭이 수십 개로 늘어나 45px 이하로 좁아지더라도 파비콘/스피너가 탭 정중앙에 배치되어 어떤 웹사이트인지 시각적으로 즉시 식별 가능.
+
+### 16.3 빌드 및 검증
+- Debug 빌드 완료: `Debug/lite_browser.exe` (Exit code 0).
+
+
 
 

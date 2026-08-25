@@ -263,6 +263,21 @@ window.updateAddress = function(url) {
   }
 };
 
+const DEFAULT_GLOBE_SVG = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%2371717a"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>`;
+const FAVORITES_ICON_SVG = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23f59e0b"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>`;
+const DOWNLOADS_ICON_SVG = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%233b82f6"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>`;
+const SIDEPANEL_ICON_SVG = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%238b5cf6"><path d="M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25L19 9zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12l-5.5-2.5z"/></svg>`;
+
+function getDomainFromUrl(url) {
+  if (!url) return '';
+  try {
+    const u = new URL(url);
+    return u.hostname;
+  } catch (e) {
+    return '';
+  }
+}
+
 window.updateTabsList = function(tabs, activeId) {
   const container = document.getElementById('tabs');
   if (!container) return;
@@ -295,6 +310,42 @@ window.updateTabsList = function(tabs, activeId) {
       splitIcon.title = '듀얼 탭 분할 상태';
       splitIcon.innerHTML = `<svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-8 16H5V5h6v14zm8 0h-6V5h6v14z"/></svg>`;
       tabEl.appendChild(splitIcon);
+    }
+
+    // Render Favicon or Loading Spinner
+    if (tab.is_loading) {
+      const spinnerEl = document.createElement('span');
+      spinnerEl.className = 'tab-spinner';
+      tabEl.appendChild(spinnerEl);
+    } else if (isManager) {
+      const favEl = document.createElement('img');
+      favEl.className = 'tab-favicon';
+      favEl.src = FAVORITES_ICON_SVG;
+      tabEl.appendChild(favEl);
+    } else if (isDownloads) {
+      const favEl = document.createElement('img');
+      favEl.className = 'tab-favicon';
+      favEl.src = DOWNLOADS_ICON_SVG;
+      tabEl.appendChild(favEl);
+    } else if (isSidepanel) {
+      const favEl = document.createElement('img');
+      favEl.className = 'tab-favicon';
+      favEl.src = SIDEPANEL_ICON_SVG;
+      tabEl.appendChild(favEl);
+    } else {
+      const favEl = document.createElement('img');
+      favEl.className = 'tab-favicon';
+      const domain = getDomainFromUrl(tab.url);
+      const googleFaviconUrl = domain ? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=32` : '';
+      favEl.src = tab.favicon || googleFaviconUrl || DEFAULT_GLOBE_SVG;
+      favEl.onerror = () => {
+        if (googleFaviconUrl && favEl.src !== googleFaviconUrl) {
+          favEl.src = googleFaviconUrl;
+        } else {
+          favEl.src = DEFAULT_GLOBE_SVG;
+        }
+      };
+      tabEl.appendChild(favEl);
     }
 
     const titleEl = document.createElement('span');

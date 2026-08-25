@@ -661,6 +661,7 @@ void update_ui_tabs(browser_window_t* win_ctx) {
   for (int i = 0; i < win_ctx->tab_count; i++) {
     char escaped_title[1024] = {0};
     char escaped_url[4096] = {0};
+    char escaped_favicon[2048] = {0};
 
     if (win_ctx->tabs[i].is_split) {
       const char* t1 = win_ctx->tabs[i].title[0] ? win_ctx->tabs[i].title : "새 탭";
@@ -672,13 +673,21 @@ void update_ui_tabs(browser_window_t* win_ctx) {
       EscapeJsonString(win_ctx->tabs[i].title, escaped_title, sizeof(escaped_title));
     }
     EscapeJsonString(win_ctx->tabs[i].url, escaped_url, sizeof(escaped_url));
+    EscapeJsonString(win_ctx->tabs[i].favicon_url, escaped_favicon, sizeof(escaped_favicon));
 
-    char tab_str[5000];
+    int is_loading = 0;
+    if (win_ctx->tabs[i].browser) {
+      is_loading = win_ctx->tabs[i].browser->is_loading(win_ctx->tabs[i].browser);
+    }
+
+    char tab_str[6000];
     snprintf(tab_str, sizeof(tab_str), 
-             "{\"id\":%d,\"title\":\"%s\",\"url\":\"%s\",\"is_split\":%d}%s", 
+             "{\"id\":%d,\"title\":\"%s\",\"url\":\"%s\",\"favicon\":\"%s\",\"is_loading\":%d,\"is_split\":%d}%s", 
              win_ctx->tabs[i].tab_id, 
              escaped_title, 
              escaped_url,
+             escaped_favicon,
+             is_loading,
              win_ctx->tabs[i].is_split,
              (i == win_ctx->tab_count - 1) ? "" : ",");
     

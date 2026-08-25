@@ -41,19 +41,26 @@ HTML5/CSS3/JavaScript 기반의 현대적 라이트 테마 UI와 순수 Win32 �
 - 단일 탭 내에서 좌/우 2개의 독립된 웹 브라우저 뷰를 동시 렌더링.
 - 6px 호버 마우스 리사이저 바(`0.2f` ~ `0.8f` 비율 동적 조정).
 - CEF 포커스 핸들러와 Win32 `WM_MOUSEACTIVATE` 센서를 연동하여 현재 선택된 뷰의 URL/제목/탐색 상태가 단일 주소창과 100% 동기화 (활성 뷰에 **2px 브랜드 블루 테두리** 피드백).
+- 분할 탭 상태에서 링크 클릭/팝업 발생 시 새 탭을 띄우지 않고 클릭을 요청한 분할 화면 내에서 바로 페이지 이동 처리.
 - 우클릭 컨텍스트 메뉴를 통한 "다른 분할 화면에서 열기" 기능 지원.
 
-### 4. 🗂️ 다중 탭 (Multi-Tab) & 드래그 앤 드롭 새 창 분리 (Reparenting)
-- 창당 최대 10개의 독립 탭 지원.
-- 탭을 외부 바탕화면으로 드래그 시 **`setPointerCapture`**를 채택하여 OS 드롭 금지 제약을 우회하고, 마우스를 떼는 순간 새 독립 윈도우 생성.
-- 웹 페이지 리로드 없이 Win32 `SetParent` API를 통해 네이티브 자식 브라우저 HWND를 즉각 이관.
+### 4. 🗂️ 다중 탭 (Multi-Tab), 균등 비율 자동 축소 & 파비콘/스피너 엔진
+- **Chrome/Edge 스타일 균등 비율 축소**: 탭이 많아지면 `flex: 1 1 0px` 및 `min-width: 32px`로 모든 탭 폭이 균등하게 축소되고, Container Queries(`@container (max-width: 75px)`)로 비활성 탭 닫기 버튼 자동 숨김 처리.
+- **파비콘 & 회전 스피너 엔진**: CEF 파비콘 콜백, Google 캐시, 기본 지구가 결합된 3단계 폴백 파비콘 렌더링 및 페이지 로딩 중 파란색 원형 회전 스피너(`.tab-spinner`) 실시간 작동.
+- **드래그 앤 드롭 새 창 분리 (Reparenting)**: 탭을 외부 바탕화면으로 드래그 시 **`setPointerCapture`**를 채택하여 OS 드롭 금지 제약을 우회하고, 마우스를 떼는 순간 새 독립 윈도우 생성. 웹 페이지 리로드 없이 Win32 `SetParent` API를 통해 네이티브 자식 브라우저 HWND를 즉각 이관.
 
-### 5. 🔖 스마트 오옴니박스 & 북마크 대시보드
+### 5. 💳 구독 기반 AI 에이전트 연결 & Windows DPAPI 보안 토큰 볼트
+- ChatGPT Plus/Pro, Claude Pro, Gemini Advanced 등 기존 AI 유료 구독 계정을 별도 API 비용 없이 활용.
+- **Windows DPAPI 암호화 볼트**: `CryptProtectData` API를 적용하여 `%USERPROFILE%\.lite-browser\ai_auth.dat`에 토큰을 OS 수준에서 안전하게 암호화 보관.
+- **웹 로그인 세션 자동 감지**: `gemini.google.com`, `chatgpt.com`, `claude.ai` 로그인 시 세션을 자동 채집하여 사이드패널 UI(`✅ 연결됨`)로 실시간 브로드캐스트.
+- **Bearer Token & API Key 폴백**: OAuth 베어러 헤더 통신 우선 사용 및 API Key 지능형 폴백 연동.
+
+### 6. 🔖 스마트 오옴니박스 & 북마크 대시보드
 - 주소창 입력 시 북마크 및 방문 기록 동적 자동완성 및 **방문 횟수(`방문 N회`) 표시** UX.
 - YouTube 및 통합 키워드 추출기 (`extractor.js`) 연동 및 Gemini 3.x AI API 하이브리드 바인딩 (`thought_signature` / HTTP 429 지연 자동 재시도).
 - 백엔드 CEF 다운로드 핸들러 연동: 파일 중복 순서 자동 부여, 진행률 추적 및 JSON 기반 저장소 관리.
 
-### 6. 🔌 Rust MCP (Model Context Protocol) 서버 연동
+### 7. 🔌 Rust MCP (Model Context Protocol) 서버 연동
 - AI 에이전트와의 브라우저 제어 동기화를 위한 Rust 기반 **MCP Server (`mcp_server/`)** 탑재.
 - 브라우저 상태 조회 및 액션 자동화 인터페이스 제공.
 
@@ -143,6 +150,8 @@ c:\projects\lite_browser\
 │   ├── index.html                 # 메인 탭바 및 네비게이션 주소창 UI
 │   ├── style.css                  # 커스텀 라이트 테마 스타일시트
 │   ├── app.js                     # 탭 관리, UI 이벤트 및 백엔드 IPC 처리
+│   ├── sidepanel.html / css / js  # 구독 기반 AI 에이전트 & DPAPI 토큰 볼트 UI
+│   ├── ai_providers.js            # 다형성 AI Provider 어댑터 (Bearer / API Key)
 │   ├── manager.html / css / js    # 북마크 & 오옴니박스 매니저
 │   └── extractor.js               # 웹 키워드 및 북마크 추출기
 ├── mcp_server\                     # Rust 기반 MCP (Model Context Protocol) 서버 모듈
@@ -152,6 +161,7 @@ c:\projects\lite_browser\
 │       ├── cefsimple_win.c        # Win32 메인 진입점 (wWinMain)
 │       ├── simple_app.c / h       # Win32 메인 창 생성, 메시지 프로시저, 탭 배치
 │       ├── simple_handler.c / h   # IPC 액션 핸들러, 브라우저 수명 주기 관리
+│       ├── simple_auth.c / h      # Windows DPAPI 암호화 보안 토큰 볼트 C API
 │       ├── browser_context.h      # 동적 윈도우/탭 컨텍스트 구조체 정의
 │       └── win\inject_icon.py     # 바이너리 아이콘 리소스 자동 주입 스크립트
 └── docs\                          # 상세 개발 및 워크스루 문서

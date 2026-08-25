@@ -13,6 +13,7 @@ typedef struct _tab_info_t {
   char title[256];
   char url[4096];
   int is_loaded;
+  char favicon_url[2048];
   void* tab_handler;
 
   // Dual tab split screen fields
@@ -22,6 +23,7 @@ typedef struct _tab_info_t {
   char right_title[256];
   char right_url[4096];
   int right_is_loaded;
+  char right_favicon_url[2048];
   void* right_tab_handler;
   int active_split;         // 0: left pane, 1: right pane
   float split_ratio;        // ratio of left pane width (0.2 to 0.8, default 0.5)
