@@ -575,18 +575,48 @@ class OllamaProvider extends AIProviderInterface {
     this.baseUrl = config.baseUrl || 'http://localhost:11434';
   }
 
-  async chatStream({ messages, tools, systemPrompt, onChunk, onThinking, onToolCall, onComplete, onError, signal }) {
+  async chatStream({ messages, tools, systemPrompt, onChunk, onThinking, onToolCall, onStatus, onComplete, onError, signal }) {
     try {
       const url = `${this.baseUrl}/api/chat`;
       const fullMessages = [];
-      if (systemPrompt) fullMessages.push({ role: 'system', content: systemPrompt });
-      fullMessages.push(...messages);
+      if (systemPrompt) {
+        fullMessages.push({ role: 'system', content: systemPrompt });
+      }
+
+      for (const msg of messages) {
+        if (msg.role === 'tool') {
+          fullMessages.push({
+            role: 'tool',
+            content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)
+          });
+        } else if (msg.role === 'assistant') {
+          const m = { role: 'assistant', content: msg.content || '' };
+          if (msg.tool_calls && msg.tool_calls.length > 0) {
+            m.tool_calls = msg.tool_calls;
+          }
+          fullMessages.push(m);
+        } else if (msg.role === 'user') {
+          fullMessages.push({ role: 'user', content: msg.content });
+        }
+      }
+
+      const ollamaTools = tools && tools.length > 0 ? tools.map(t => ({
+        type: 'function',
+        function: {
+          name: t.name,
+          description: t.description,
+          parameters: t.parameters || t.inputSchema || {}
+        }
+      })) : undefined;
 
       const body = {
         model: this.model,
         messages: fullMessages,
         stream: true
       };
+      if (ollamaTools) {
+        body.tools = ollamaTools;
+      }
 
       const response = await fetch(url, {
         method: 'POST',
@@ -603,6 +633,9 @@ class OllamaProvider extends AIProviderInterface {
       const decoder = new TextDecoder();
       let buffer = '';
       let fullText = '';
+      let thinkingText = '';
+      let inThinking = false;
+      const collectedToolCalls = [];
 
       while (true) {
         const { done, value } = await reader.read();
@@ -617,15 +650,55 @@ class OllamaProvider extends AIProviderInterface {
           if (!trimmed) continue;
           try {
             const data = JSON.parse(trimmed);
-            if (data.message?.content && onChunk) {
-              fullText += data.message.content;
-              onChunk(data.message.content, fullText);
+
+            // Handle content / thinking chunks
+            if (data.message?.content) {
+              const chunk = data.message.content;
+              if (chunk.includes('<think>')) {
+                inThinking = true;
+              }
+              if (inThinking) {
+                thinkingText += chunk;
+                if (onThinking) onThinking(chunk, thinkingText);
+                if (chunk.includes('</think>')) {
+                  inThinking = false;
+                }
+              } else {
+                fullText += chunk;
+                if (onChunk) onChunk(chunk, fullText);
+              }
+            }
+
+            // Handle Ollama tool calls
+            if (data.message?.tool_calls && Array.isArray(data.message.tool_calls)) {
+              for (const tc of data.message.tool_calls) {
+                if (tc.function?.name) {
+                  let fnArgs = tc.function.arguments;
+                  if (typeof fnArgs === 'string') {
+                    try { fnArgs = JSON.parse(fnArgs); } catch (e) { fnArgs = {}; }
+                  } else if (!fnArgs || typeof fnArgs !== 'object') {
+                    fnArgs = {};
+                  }
+                  collectedToolCalls.push({
+                    id: 'call_' + Math.random().toString(36).substring(2, 9),
+                    name: tc.function.name,
+                    args: fnArgs
+                  });
+                }
+              }
             }
           } catch (e) {}
         }
       }
 
-      if (onComplete) onComplete({ fullText });
+      // Dispatch tool calls to task runtime
+      for (const tc of collectedToolCalls) {
+        if (tc.name && onToolCall) {
+          onToolCall({ id: tc.id, name: tc.name, args: tc.args });
+        }
+      }
+
+      if (onComplete) onComplete({ fullText, thinkingText });
     } catch (err) {
       if (err.name === 'AbortError') {
         if (onComplete) onComplete({ fullText: '', interrupted: true });
