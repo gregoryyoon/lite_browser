@@ -10,7 +10,6 @@
 #include <dwmapi.h>
 #include <shlobj.h>
 #include <shellapi.h>
-#include "tests/cefsimple_capi/simple_mcp.h"
 #pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "shell32.lib")
 #endif
@@ -793,7 +792,6 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
     if (g_window_count == 0)
     {
       LogMsg("WM_DESTROY: calling cef_quit_message_loop()\n");
-      mcp_server_shutdown();
       cef_quit_message_loop();
     }
     return 0;

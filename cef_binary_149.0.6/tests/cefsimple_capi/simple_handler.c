@@ -6,7 +6,6 @@
 #include "tests/cefsimple_capi/simple_download_handler.h"
 #include "tests/cefsimple_capi/simple_vault.h"
 #include "tests/cefsimple_capi/simple_auth.h"
-#include "tests/cefsimple_capi/simple_mcp.h"
 
 #include <stdarg.h>
 #include <stdatomic.h>
@@ -1641,17 +1640,6 @@ int CEF_CALLBACK request_handler_on_before_browse(
               free(decoded);
             }
             free(data_b64);
-          }
-        } else if (strcmp(action, "mcp-get-tools") == 0) {
-          char buf[16384];
-          mcp_get_tools_json(buf, sizeof(buf));
-          if (frame) {
-            char js_code[16384 + 128];
-            snprintf(js_code, sizeof(js_code), "if (window.onMcpToolsLoaded) { window.onMcpToolsLoaded(%s); }", buf);
-            cef_string_t js_str = {};
-            cef_string_from_utf8(js_code, strlen(js_code), &js_str);
-            frame->execute_java_script(frame, &js_str, NULL, 0);
-            cef_string_clear(&js_str);
           }
         } else if (strcmp(action, "back") == 0) {
           if (cb) cb->go_back(cb);

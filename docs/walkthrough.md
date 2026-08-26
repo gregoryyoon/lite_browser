@@ -366,9 +366,8 @@ cmake --build c:\projects\lite_browser\cef_binary_149.0.6\build --config Debug -
    - IndexedDB 기반으로 과거 방문 기록, 북마크, 대화 요약본을 n-gram 벡터로 인덱싱하고 코사인 유사도 검색을 통해 관련 컨텍스트를 AI 에이전트에 주입.
    - 설정 UI를 통해 '방문기록 자동 인덱싱 비활성화' 및 '기억 데이터 전체 삭제'를 1클릭으로 실행하는 데이터 제어권 보장.
 
-8. **Rust 브라우저 제어 MCP Server (`mcp_server/`, `simple_mcp.c`, `simple_mcp.h`)**:
-   - `mcp_server/` 디렉토리에 표준 JSON-RPC 2.0 MCP 서버 구현 (Cargo 프로젝트).
-   - C 백엔드가 `lite_browser_mcp.exe` 프로세스를 관리하며, 바이너리 미존재 시에도 내장 네이티브 브릿지로 도구 호출을 중계하는 Fallback 설계 적용.
+8. **초경량 자체 완결형 네이티브 제어 아키텍처 (Simplicity First)**:
+   - 외부 런타임 의존성(Rust/Node/Python) 없이 C 백엔드(`simple_handler.c`)와 자바스크립트 런타임(`ui/task_runtime.js`) 간의 직접 IPC로 브라우저 조작/추출을 100% 자체 완결 처리.
 
 ### 12.3 주요 소스 파일 맵
 - [`ui/content_extractor.js`](file:///c:/projects/lite_browser/ui/content_extractor.js): 5단계 본문 파싱 & 마크다운 추출기 모듈
@@ -379,8 +378,6 @@ cmake --build c:\projects\lite_browser\cef_binary_149.0.6\build --config Debug -
 - [`ui/task_runtime.js`](file:///c:/projects/lite_browser/ui/task_runtime.js): 상태 머신 및 DOM 액션 실행 엔진
 - [`ui/agent_memory.js`](file:///c:/projects/lite_browser/ui/agent_memory.js): IndexedDB 벡터 메모리 & 데이터 컨트롤
 - [`simple_vault.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_vault.c) & [`simple_vault.h`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_vault.h): Windows DPAPI 로컬 보안 볼트
-- [`simple_mcp.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_mcp.c) & [`simple_mcp.h`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_mcp.h): MCP Server 프로세스 수명주기 및 브릿지
-- [`mcp_server/Cargo.toml`](file:///c:/projects/lite_browser/mcp_server/Cargo.toml) & [`mcp_server/src/main.rs`](file:///c:/projects/lite_browser/mcp_server/src/main.rs): Rust 브라우저 제어 MCP Server
 
 ### 12.4 빌드 및 패키징 검증
 - Debug 빌드: `Debug/lite_browser.exe` 컴파일 및 링크 성공 (Exit code 0).
