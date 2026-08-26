@@ -546,8 +546,11 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
   case WM_SIZE:
   {
     if (!win_ctx) return 0;
+    if (wParam == SIZE_MINIMIZED) return 0;
+
     int width = LOWORD(lParam);
     int height = HIWORD(lParam);
+    if (width <= 0 || height <= 0) return 0;
 
     int ui_height = GetUIHeightForWindow(hwnd);
     int content_y = ui_height + 1;
@@ -562,11 +565,17 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
 
     if (win_ctx->show_sidepanel) {
       sp_splitter_w = 5;
-      sp_w = (win_ctx->sidepanel_width > 0) ? win_ctx->sidepanel_width : (int)(380 * (ui_height / 72.0f));
-      if (sp_w < 260) sp_w = 260;
-      if (sp_w > total_w - 300) sp_w = total_w - 300;
-      if (sp_w < 260) sp_w = 260;
-      win_ctx->sidepanel_width = sp_w;
+      int default_sp_w = (int)(380 * (ui_height / 72.0f));
+      int min_sp_w = (int)(320 * (ui_height / 72.0f));
+      if (min_sp_w < 280) min_sp_w = 280;
+
+      sp_w = (win_ctx->sidepanel_width > 0) ? win_ctx->sidepanel_width : default_sp_w;
+      if (sp_w < min_sp_w) sp_w = min_sp_w;
+
+      if (total_w > min_sp_w + 300) {
+        if (sp_w > total_w - 300) sp_w = total_w - 300;
+      }
+      if (sp_w < 200) sp_w = 200;
 
       main_area_w = total_w - sp_w - sp_splitter_w;
       if (main_area_w < 100) main_area_w = 100;
