@@ -590,6 +590,28 @@ Google Gemini, OpenAI, Claude와 같은 클라우드 모델뿐만 아니라, **O
 ### 19.3 빌드 및 검증
 - Debug 빌드 완료: `Debug/lite_browser.exe` (Exit code 0).
 
+---
 
+## 20. AI 웹 세션 감지 무한 로딩 루프 및 브라우저 프리징 해결 (AI Session Detection Loop Prevention)
 
+### 20.1 개요
+Google Gemini(`gemini.google.com`), Claude(`claude.ai`), ChatGPT(`chatgpt.com`) 등 웹 기반 AI 서비스에 접속할 때 페이지가 무한으로 로딩을 시도하고 브라우저 동작이 심각하게 느려지며 프리징되는 현상을 분석하고, 1회성 가드를 적용하여 문제를 완벽히 해결했습니다.
 
+### 20.2 문제 원인 분석 (Root Cause)
+1. **AI 자동 세션 감지 스크립트의 무한 재진입**:
+   - [`simple_load_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_load_handler.c)의 `load_handler_on_loading_state_change` 콜백에서 로딩 완료(`!isLoading`) 시점마다 AI 사이드패널 연동용 세션 감지 스크립트(`detect_js`)를 주입했습니다.
+   - 스크립트가 세션 정보를 백엔드로 전달하기 위해 `window.location.href = 'http://ui-action/auth-save-session?provider=...'`를 실행하여 탑레벨 내비게이션을 시도함.
+2. **내비게이션 취소와 무한 루프**:
+   - C 백엔드의 `on_before_browse`에서 `http://ui-action/` 요청을 가로채고 페이지 이동을 취소(`return 1`)함.
+   - 내비게이션 취소로 인해 페이지 로딩 상태가 다시 변경(`isLoading=0`)되면서, `detect_js`가 **다시 주입 및 실행**되는 무한 루프(Infinite Loop) 발생.
+   - 매 초 수십~수백 번의 스크립트 실행, 파일 I/O(`auth_save_session`), UI 탭 및 주소창 동기화 IPC가 폭주하여 CPU 점유율 100% 및 브라우저 프리징 유발.
+
+### 20.3 핵심 구현 내역
+1. **1회성 실행 가드(`window.__lite_auth_attempted`) 적용 ([`simple_load_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_load_handler.c))**:
+   - Gemini, ChatGPT, Claude 감지 스크립트 최상단에 `if (window.__lite_auth_attempted) return; window.__lite_auth_attempted = true;` 가드를 추가.
+   - 첫 번째 감지 이후 동일 페이지/SPA 내비게이션에서는 스크립트가 즉시 반환되도록 하여 **무한 로딩 및 중복 내비게이션 루프를 100% 원천 차단**.
+   - 사용자가 다른 페이지로 이동하여 창 컨텍스트가 새로고침되면 가드가 자연스럽게 리셋되어 신규 세션도 정상 감지 지원.
+
+### 20.4 빌드 및 검증
+- **빌드 결과**: Debug 빌드 정상 완료 (`Debug/lite_browser.exe`, Exit code 0).
+- **동작 검증**: `https://claude.ai/` 및 `https://gemini.google.com/app?pli=1` 접속 시 무한 로딩 및 랙 없이 즉각적이고 안정적으로 로딩 완료 확인.

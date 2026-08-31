@@ -144,6 +144,7 @@ load_handler_on_loading_state_change(cef_load_handler_t* self,
             const char* detect_js = 
               "(function() {"
               "  try {"
+              "    if (window.__lite_auth_attempted) return;"
               "    let email = '';"
               "    const av = document.querySelector('img[alt*=\"@\"], a[aria-label*=\"@\"], [data-email]');"
               "    if (av) {"
@@ -162,6 +163,7 @@ load_handler_on_loading_state_change(cef_load_handler_t* self,
               "    }"
               "    const hasPrompt = !!document.querySelector('textarea, div[contenteditable=\"true\"], .ql-editor, bard-text-input');"
               "    if (email || hasPrompt) {"
+              "      window.__lite_auth_attempted = true;"
               "      window.location.href = 'http://ui-action/auth-save-session?provider=gemini&email=' + encodeURIComponent(email || 'Google 계정') + '&tier=' + encodeURIComponent('Gemini Advanced') + '&access_token=google_web_session_' + Date.now();"
               "    }"
               "  } catch(e) {}"
@@ -174,6 +176,8 @@ load_handler_on_loading_state_change(cef_load_handler_t* self,
             const char* detect_js = 
               "(function() {"
               "  try {"
+              "    if (window.__lite_auth_attempted) return;"
+              "    window.__lite_auth_attempted = true;"
               "    fetch('/api/auth/session').then(r => r.json()).then(data => {"
               "      if (data && data.accessToken) {"
               "        const email = (data.user && data.user.email) ? data.user.email : 'ChatGPT User';"
@@ -191,6 +195,8 @@ load_handler_on_loading_state_change(cef_load_handler_t* self,
             const char* detect_js = 
               "(function() {"
               "  try {"
+              "    if (window.__lite_auth_attempted) return;"
+              "    window.__lite_auth_attempted = true;"
               "    fetch('/api/auth/session').then(r => r.json()).then(data => {"
               "      if (data) {"
               "        const email = (data.user && data.user.email) ? data.user.email : 'Claude User';"
