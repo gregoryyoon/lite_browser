@@ -2345,6 +2345,7 @@ int CEF_CALLBACK request_handler_on_before_browse(
             win_ctx->tabs[found_idx].is_loaded = 1;
             if (win_ctx->tabs[found_idx].hwnd) {
               ShowWindow(win_ctx->tabs[found_idx].hwnd, SW_SHOW);
+              SetFocus(win_ctx->tabs[found_idx].hwnd);
               
               RECT rect;
               GetClientRect(win_ctx->main_hwnd, &rect);
@@ -2359,6 +2360,36 @@ int CEF_CALLBACK request_handler_on_before_browse(
             }
             update_ui_tabs(win_ctx);
             update_ui_nav_state(win_ctx);
+          }
+        } else if (strcmp(action, "trigger-find") == 0) {
+          if (win_ctx && win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+            tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
+            HWND target_hwnd = (active_tab->is_split && active_tab->active_split == 1 && active_tab->right_hwnd)
+                                   ? active_tab->right_hwnd : active_tab->hwnd;
+            cef_browser_t* target_b = (active_tab->is_split && active_tab->active_split == 1 && active_tab->right_browser)
+                                   ? active_tab->right_browser : active_tab->browser;
+            if (target_hwnd && IsWindowVisible(target_hwnd)) {
+              SetFocus(target_hwnd);
+            }
+            if (target_b) {
+              cef_browser_host_t* host = target_b->get_host(target_b);
+              if (host) {
+                host->set_focus(host, 1);
+
+                cef_key_event_t key_event = {};
+                key_event.size = sizeof(cef_key_event_t);
+                key_event.type = KEYEVENT_RAWKEYDOWN;
+                key_event.windows_key_code = 'F';
+                key_event.native_key_code = 'F';
+                key_event.modifiers = EVENTFLAG_CONTROL_DOWN;
+                host->send_key_event(host, &key_event);
+
+                key_event.type = KEYEVENT_KEYUP;
+                host->send_key_event(host, &key_event);
+
+                host->base.release(&host->base);
+              }
+            }
           }
         } else if (strncmp(action, "close-tab?id=", 13) == 0) {
           int target_id = atoi(action + 13);

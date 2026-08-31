@@ -817,7 +817,13 @@ let omniRawQuery = '';
 
 document.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('keydown', (e) => {
-    if (e.ctrlKey && (e.key === 'j' || e.key === 'J')) {
+    const isInput = document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA');
+    if (e.ctrlKey && (e.key === 'f' || e.key === 'F')) {
+      if (!isInput) {
+        e.preventDefault();
+        window.location.href = 'http://ui-action/trigger-find';
+      }
+    } else if (e.ctrlKey && (e.key === 'j' || e.key === 'J')) {
       e.preventDefault();
       openDownloadDashboard();
     } else if (e.ctrlKey && e.shiftKey && (e.key === 'a' || e.key === 'A')) {

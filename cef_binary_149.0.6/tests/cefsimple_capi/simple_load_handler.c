@@ -132,6 +132,20 @@ load_handler_on_loading_state_change(cef_load_handler_t* self,
     }
 
     if (!isLoading) {
+      if (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+        tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
+        if (active_tab->browser && browser->get_identifier(browser) == active_tab->browser->get_identifier(active_tab->browser)) {
+          if (active_tab->hwnd && IsWindowVisible(active_tab->hwnd)) {
+            SetFocus(active_tab->hwnd);
+          }
+          cef_browser_host_t* host = active_tab->browser->get_host(active_tab->browser);
+          if (host) {
+            host->set_focus(host, 1);
+            host->base.release(&host->base);
+          }
+        }
+      }
+
       cef_frame_t* main_f = browser->get_main_frame(browser);
       if (main_f) {
         cef_string_userfree_t url_uf = main_f->get_url(main_f);

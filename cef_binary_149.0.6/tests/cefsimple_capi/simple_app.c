@@ -543,6 +543,28 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
     }
     break;
   }
+  case WM_SETFOCUS:
+  case WM_ACTIVATE:
+  {
+    if (win_ctx && win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+      tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
+      HWND target_hwnd = (active_tab->is_split && active_tab->active_split == 1 && active_tab->right_hwnd)
+                             ? active_tab->right_hwnd : active_tab->hwnd;
+      cef_browser_t* target_b = (active_tab->is_split && active_tab->active_split == 1 && active_tab->right_browser)
+                             ? active_tab->right_browser : active_tab->browser;
+      if (target_hwnd && IsWindowVisible(target_hwnd)) {
+        SetFocus(target_hwnd);
+      }
+      if (target_b) {
+        cef_browser_host_t* host = target_b->get_host(target_b);
+        if (host) {
+          host->set_focus(host, 1);
+          host->base.release(&host->base);
+        }
+      }
+    }
+    return 0;
+  }
   case WM_SIZE:
   {
     if (!win_ctx) return 0;

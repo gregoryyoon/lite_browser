@@ -615,3 +615,30 @@ Google Gemini(`gemini.google.com`), Claude(`claude.ai`), ChatGPT(`chatgpt.com`) 
 ### 20.4 빌드 및 검증
 - **빌드 결과**: Debug 빌드 정상 완료 (`Debug/lite_browser.exe`, Exit code 0).
 - **동작 검증**: `https://claude.ai/` 및 `https://gemini.google.com/app?pli=1` 접속 시 무한 로딩 및 랙 없이 즉각적이고 안정적으로 로딩 완료 확인.
+
+---
+
+## 21. 웹 콘텐츠 자동 포커스 및 Ctrl+F 찾기 단축키 포워딩 엔진 (Web Content Auto Focus & Ctrl+F Forwarding Engine)
+
+### 21.1 개요
+페이지 로딩 후 `Ctrl+F` 키를 눌렀을 때 마우스로 본문 영역을 직접 클릭하기 전까지 찾기 창이 뜨지 않던 문제를 분석하고, **페이지 로드 완료, 탭 전환, 윈도우 활성화 시 웹 콘텐츠 영역으로 포커스를 자동 전달**하며, 상단 UI 영역에 포커스가 머물러 있는 상태에서도 **`Ctrl+F` 단축키를 감지하여 웹 콘텐츠 영역으로 즉시 전달/합성 실행**하는 시스템을 구현했습니다.
+
+### 21.2 문제 원인 분석 (Root Cause)
+1. **상단 UI 브라우저로의 포커스 잔류**:
+   - LiteBrowser는 상단 툴바/탭바(`ui_browser`)와 본문 영역(`content_browser`)이 별도의 자식 HWND 브라우저로 분리되어 있습니다.
+   - 창 활성화 또는 페이지 로딩 완료 시 포커스를 웹 본문 HWND로 명시적으로 넘겨주지 않아, 키보드 입력 및 단축키 포커스가 상단 UI 영역에 머물러 있었습니다.
+2. **UI 브라우저 내 단축키 미처리**:
+   - 상단 UI 브라우저에서 `Ctrl+F` 키가 눌려도 이를 본문 브라우저로 전달하는 브릿지 라우팅이 없어 무반응 상태가 되었습니다.
+
+### 21.3 핵심 구현 내역
+1. **페이지 로드 완료 시 자동 포커스 ([`simple_load_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_load_handler.c))**:
+   - `load_handler_on_loading_state_change`에서 `isLoading == 0` 시점에 활성 탭의 HWND 및 CEF 호스트로 `SetFocus(hwnd)` 및 `host->set_focus(host, 1)`를 호출하여 웹페이지 영역으로 포커스를 자동 이동.
+2. **탭 전환 및 창 활성화 포커스 연동 ([`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_handler.c), [`simple_app.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_app.c))**:
+   - `switch-tab` 및 메인 윈도우 프로시저의 `WM_SETFOCUS`, `WM_ACTIVATE` 메시지 수신 시 현재 활성 탭의 `hwnd`로 포커스를 자동 설정.
+3. **UI 영역 `Ctrl+F` 감지 및 C 백엔드 키 이벤트 합성 포워딩 ([`ui/app.js`](file:///c:/projects/lite_browser/ui/app.js), [`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_handler.c))**:
+   - UI 브라우저의 키다운 리스너에서 주소창 입력 중이 아닐 때 `Ctrl+F`가 눌리면 `http://ui-action/trigger-find`를 호출.
+   - C 백엔드에서 활성 탭 본문 영역으로 포커스를 즉시 전환한 후 `host->send_key_event`로 `Ctrl+F` 키 이벤트를 합성 전송하여 Chromium 내장 찾기 창이 즉각 실행되도록 처리.
+
+### 21.4 빌드 및 검증
+- **빌드 결과**: Debug 빌드 완료 (`Debug/lite_browser.exe`, Exit code 0).
+
