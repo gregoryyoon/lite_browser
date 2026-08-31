@@ -89,6 +89,26 @@ static void EscapeJsonStringLocal(const char *in, char *out, size_t out_size) {
   out[j] = '\0';
 }
 
+static int CheckPathExistsUtf8(const char *utf8_path) {
+  if (!utf8_path || utf8_path[0] == '\0') return 0;
+  WCHAR wpath[MAX_PATH * 2] = {0};
+  if (MultiByteToWideChar(CP_UTF8, 0, utf8_path, -1, wpath, MAX_PATH * 2) > 0) {
+    DWORD attr = GetFileAttributesW(wpath);
+    return (attr != INVALID_FILE_ATTRIBUTES) ? 1 : 0;
+  }
+  return 0;
+}
+
+static int CheckFileExistsUtf8(const char *utf8_path) {
+  if (!utf8_path || utf8_path[0] == '\0') return 0;
+  WCHAR wpath[MAX_PATH * 2] = {0};
+  if (MultiByteToWideChar(CP_UTF8, 0, utf8_path, -1, wpath, MAX_PATH * 2) > 0) {
+    DWORD attr = GetFileAttributesW(wpath);
+    return (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY)) ? 1 : 0;
+  }
+  return 0;
+}
+
 static void SaveDownloadsHistoryToDisk(void) {
   EnsureCriticalSectionInitialized();
   EnterCriticalSection(&g_download_cs);
@@ -115,7 +135,8 @@ static void SaveDownloadsHistoryToDisk(void) {
       EscapeJsonStringLocal(rec->file_name, esc_name, sizeof(esc_name));
       EscapeJsonStringLocal(rec->mime_type, esc_mime, sizeof(esc_mime));
 
-      int file_exists = (rec->full_path[0] != '\0' && GetFileAttributesA(rec->full_path) != INVALID_FILE_ATTRIBUTES) ? 1 : 0;
+      int file_exists = CheckFileExistsUtf8(rec->full_path);
+      rec->file_exists = file_exists;
 
       fprintf(fp,
               "  {\n"
@@ -154,9 +175,18 @@ static void SaveDownloadsHistoryToDisk(void) {
   LeaveCriticalSection(&g_download_cs);
 }
 
+static int g_downloads_initialized = 0;
+
 void download_manager_init(void) {
   EnsureCriticalSectionInitialized();
   EnterCriticalSection(&g_download_cs);
+
+  if (g_downloads_initialized) {
+    LeaveCriticalSection(&g_download_cs);
+    return;
+  }
+  g_downloads_initialized = 1;
+  g_download_record_count = 0;
 
   char json_path[MAX_PATH];
   GetDownloadsJsonFilePath(json_path, sizeof(json_path));
@@ -245,10 +275,22 @@ void download_manager_init(void) {
           if (p_et) sscanf(p_et, "\"end_time\": %lld", (long long*)&rec.end_time);
 
           rec.is_in_progress = 0; // Loaded items are non-active historical items
-          rec.file_exists = (rec.full_path[0] != '\0' && GetFileAttributesA(rec.full_path) != INVALID_FILE_ATTRIBUTES) ? 1 : 0;
+          rec.file_exists = CheckFileExistsUtf8(rec.full_path);
 
           if (rec.id > 0) {
-            g_download_records[g_download_record_count++] = rec;
+            int duplicate = 0;
+            for (int k = 0; k < g_download_record_count; k++) {
+              if (g_download_records[k].id == rec.id ||
+                  (rec.full_path[0] != '\0' &&
+                   strcmp(g_download_records[k].full_path, rec.full_path) == 0 &&
+                   g_download_records[k].start_time == rec.start_time)) {
+                duplicate = 1;
+                break;
+              }
+            }
+            if (!duplicate && g_download_record_count < MAX_DOWNLOAD_RECORDS) {
+              g_download_records[g_download_record_count++] = rec;
+            }
           }
           p++;
         }
@@ -259,9 +301,12 @@ void download_manager_init(void) {
   }
 
   LeaveCriticalSection(&g_download_cs);
+
+  // Clean up duplicate entries on disk
+  SaveDownloadsHistoryToDisk();
 }
 
-static void BroadcastDownloadUpdate(void) {
+void BroadcastDownloadUpdate(void) {
   simple_handler_t *handler = simple_handler_get_instance();
   if (!handler || !handler->window_ctx) return;
   browser_window_t *win_ctx = handler->window_ctx;
@@ -271,12 +316,25 @@ static void BroadcastDownloadUpdate(void) {
 
   download_manager_get_list_json(buf, 1024 * 1024);
 
-  char *js_code = (char*)malloc(1024 * 1024 + 128);
+  char *js_code = (char*)malloc(1024 * 1024 + 256);
   if (js_code) {
-    snprintf(js_code, 1024 * 1024 + 128, "if (window.renderDownloads) { window.renderDownloads(%s); }", buf);
+    snprintf(js_code, 1024 * 1024 + 256,
+             "if (window.renderDownloads) { window.renderDownloads(%s); }"
+             "if (window.updateDownloadButtonStatus) { window.updateDownloadButtonStatus(%s); }",
+             buf, buf);
     cef_string_t js_str = {};
     cef_string_from_utf8(js_code, strlen(js_code), &js_str);
 
+    // 1. Notify Top UI Navigation Bar
+    if (win_ctx->ui_browser) {
+      cef_frame_t *uf = win_ctx->ui_browser->get_main_frame(win_ctx->ui_browser);
+      if (uf) {
+        uf->execute_java_script(uf, &js_str, NULL, 0);
+        uf->base.release(&uf->base);
+      }
+    }
+
+    // 2. Notify Content Tabs
     for (int i = 0; i < win_ctx->tab_count; i++) {
       cef_browser_t *b = win_ctx->tabs[i].browser;
       if (b) {
@@ -284,6 +342,14 @@ static void BroadcastDownloadUpdate(void) {
         if (f) {
           f->execute_java_script(f, &js_str, NULL, 0);
           f->base.release(&f->base);
+        }
+      }
+      if (win_ctx->tabs[i].is_split && win_ctx->tabs[i].right_browser) {
+        cef_browser_t *rb = win_ctx->tabs[i].right_browser;
+        cef_frame_t *rf = rb->get_main_frame(rb);
+        if (rf) {
+          rf->execute_java_script(rf, &js_str, NULL, 0);
+          rf->base.release(&rf->base);
         }
       }
     }
@@ -358,21 +424,25 @@ static void UpdateDownloadRecord(uint32_t id, const char *full_path, const char 
     }
   }
 
-  rec->file_exists = (rec->full_path[0] != '\0' && GetFileAttributesA(rec->full_path) != INVALID_FILE_ATTRIBUTES) ? 1 : 0;
+  rec->file_exists = CheckFileExistsUtf8(rec->full_path);
 
   LeaveCriticalSection(&g_download_cs);
 
   SaveDownloadsHistoryToDisk();
+  BroadcastDownloadUpdate();
 }
 
 static void GetDefaultDownloadsDirectory(char *out_path, size_t max_len) {
-  char profile_path[MAX_PATH] = {0};
-  if (SHGetSpecialFolderPathA(NULL, profile_path, CSIDL_PROFILE, TRUE)) {
-    snprintf(out_path, max_len, "%s\\Downloads", profile_path);
+  WCHAR wprofile[MAX_PATH] = {0};
+  if (SHGetSpecialFolderPathW(NULL, wprofile, CSIDL_PROFILE, TRUE)) {
+    WCHAR wdownloads[MAX_PATH] = {0};
+    swprintf_s(wdownloads, MAX_PATH, L"%s\\Downloads", wprofile);
+    CreateDirectoryW(wdownloads, NULL);
+    WideCharToMultiByte(CP_UTF8, 0, wdownloads, -1, out_path, (int)max_len, NULL, NULL);
   } else {
     snprintf(out_path, max_len, "C:\\Downloads");
+    CreateDirectoryA(out_path, NULL);
   }
-  CreateDirectoryA(out_path, NULL);
 }
 
 static void GenerateNonConflictingPath(const char *downloads_dir, const char *suggested_name, char *out_path, size_t max_len) {
@@ -392,13 +462,13 @@ static void GenerateNonConflictingPath(const char *downloads_dir, const char *su
   }
 
   snprintf(out_path, max_len, "%s\\%s", downloads_dir, suggested_name);
-  if (GetFileAttributesA(out_path) == INVALID_FILE_ATTRIBUTES) {
+  if (!CheckPathExistsUtf8(out_path)) {
     return;
   }
 
   for (int i = 1; i <= 9999; i++) {
     snprintf(out_path, max_len, "%s\\%s (%d)%s", downloads_dir, stem, i, ext);
-    if (GetFileAttributesA(out_path) == INVALID_FILE_ATTRIBUTES) {
+    if (!CheckPathExistsUtf8(out_path)) {
       return;
     }
   }
@@ -559,7 +629,7 @@ void download_manager_get_list_json(char *out_buf, size_t max_len) {
     EscapeJsonStringLocal(rec->file_name, esc_name, sizeof(esc_name));
     EscapeJsonStringLocal(rec->mime_type, esc_mime, sizeof(esc_mime));
 
-    int file_exists = (rec->full_path[0] != '\0' && GetFileAttributesA(rec->full_path) != INVALID_FILE_ATTRIBUTES) ? 1 : 0;
+    int file_exists = CheckFileExistsUtf8(rec->full_path);
     rec->file_exists = file_exists;
 
     offset += snprintf(out_buf + offset, max_len - offset,
@@ -599,24 +669,51 @@ void download_manager_get_list_json(char *out_buf, size_t max_len) {
 
 int download_manager_open_file(const char *path) {
   if (!path || path[0] == '\0') return 0;
-  HINSTANCE hInst = ShellExecuteA(NULL, "open", path, NULL, NULL, SW_SHOWNORMAL);
-  return ((INT_PTR)hInst > 32) ? 1 : 0;
+  WCHAR wpath[MAX_PATH * 2] = {0};
+  if (MultiByteToWideChar(CP_UTF8, 0, path, -1, wpath, MAX_PATH * 2) > 0) {
+    HINSTANCE hInst = ShellExecuteW(NULL, L"open", wpath, NULL, NULL, SW_SHOWNORMAL);
+    return ((INT_PTR)hInst > 32) ? 1 : 0;
+  }
+  return 0;
 }
 
 int download_manager_show_in_folder(const char *path) {
-  if (!path || path[0] == '\0') return 0;
-  char cmd_args[MAX_PATH + 32];
-  snprintf(cmd_args, sizeof(cmd_args), "/select,\"%s\"", path);
-  HINSTANCE hInst = ShellExecuteA(NULL, "open", "explorer.exe", cmd_args, NULL, SW_SHOWNORMAL);
+  if (!path || path[0] == '\0') {
+    WCHAR wtarget[MAX_PATH] = {0};
+    if (SHGetSpecialFolderPathW(NULL, wtarget, CSIDL_PROFILE, TRUE)) {
+      wcscat_s(wtarget, MAX_PATH, L"\\Downloads");
+      HINSTANCE hInst = ShellExecuteW(NULL, L"open", wtarget, NULL, NULL, SW_SHOWNORMAL);
+      return ((INT_PTR)hInst > 32) ? 1 : 0;
+    }
+    return 0;
+  }
+
+  WCHAR wpath[MAX_PATH * 2] = {0};
+  if (MultiByteToWideChar(CP_UTF8, 0, path, -1, wpath, MAX_PATH * 2) <= 0) {
+    return 0;
+  }
+
+  DWORD attr = GetFileAttributesW(wpath);
+  if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY)) {
+    HINSTANCE hInst = ShellExecuteW(NULL, L"open", wpath, NULL, NULL, SW_SHOWNORMAL);
+    return ((INT_PTR)hInst > 32) ? 1 : 0;
+  }
+
+  WCHAR cmd_args[MAX_PATH * 2 + 32] = {0};
+  swprintf_s(cmd_args, MAX_PATH * 2 + 32, L"/select,\"%s\"", wpath);
+  HINSTANCE hInst = ShellExecuteW(NULL, L"open", L"explorer.exe", cmd_args, NULL, SW_SHOWNORMAL);
   return ((INT_PTR)hInst > 32) ? 1 : 0;
 }
 
 int download_manager_delete_file(uint32_t id, const char *path) {
   int success = 0;
   if (path && path[0] != '\0') {
-    if (GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES) {
-      if (DeleteFileA(path)) {
-        success = 1;
+    WCHAR wpath[MAX_PATH * 2] = {0};
+    if (MultiByteToWideChar(CP_UTF8, 0, path, -1, wpath, MAX_PATH * 2) > 0) {
+      if (GetFileAttributesW(wpath) != INVALID_FILE_ATTRIBUTES) {
+        if (DeleteFileW(wpath)) {
+          success = 1;
+        }
       }
     }
   }
@@ -632,6 +729,7 @@ int download_manager_delete_file(uint32_t id, const char *path) {
   LeaveCriticalSection(&g_download_cs);
 
   SaveDownloadsHistoryToDisk();
+  BroadcastDownloadUpdate();
   return success;
 }
 
@@ -656,7 +754,10 @@ int download_manager_remove_history(uint32_t id) {
 
   LeaveCriticalSection(&g_download_cs);
 
-  if (removed) SaveDownloadsHistoryToDisk();
+  if (removed) {
+    SaveDownloadsHistoryToDisk();
+    BroadcastDownloadUpdate();
+  }
   return removed;
 }
 
@@ -679,6 +780,7 @@ int download_manager_clear_history(void) {
   LeaveCriticalSection(&g_download_cs);
 
   SaveDownloadsHistoryToDisk();
+  BroadcastDownloadUpdate();
   return 1;
 }
 
@@ -694,6 +796,7 @@ int download_manager_pause(uint32_t id) {
     }
   }
   LeaveCriticalSection(&g_download_cs);
+  if (ok) BroadcastDownloadUpdate();
   return ok;
 }
 
@@ -709,6 +812,7 @@ int download_manager_resume(uint32_t id) {
     }
   }
   LeaveCriticalSection(&g_download_cs);
+  if (ok) BroadcastDownloadUpdate();
   return ok;
 }
 
@@ -724,5 +828,6 @@ int download_manager_cancel(uint32_t id) {
     }
   }
   LeaveCriticalSection(&g_download_cs);
+  if (ok) BroadcastDownloadUpdate();
   return ok;
 }

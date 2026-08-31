@@ -37,5 +37,6 @@ int download_manager_clear_history(void);
 int download_manager_pause(uint32_t id);
 int download_manager_resume(uint32_t id);
 int download_manager_cancel(uint32_t id);
+void BroadcastDownloadUpdate(void);
 
 #endif // CEF_TESTS_CEFSIMPLE_CAPI_SIMPLE_DOWNLOAD_HANDLER_H_

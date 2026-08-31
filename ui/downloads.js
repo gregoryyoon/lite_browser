@@ -6,8 +6,6 @@ let g_searchKeyword = '';
 
 document.addEventListener('DOMContentLoaded', () => {
   requestDownloadsList();
-  // Poll for active progress updates every 1 second as fallback
-  setInterval(requestDownloadsList, 1000);
 });
 
 function requestDownloadsList() {
@@ -17,7 +15,13 @@ function requestDownloadsList() {
 // Global callback invoked by C backend via ExecuteJsOnBrowser
 window.renderDownloads = function(items) {
   if (Array.isArray(items)) {
-    g_downloadsList = items;
+    const seen = new Set();
+    g_downloadsList = items.filter(it => {
+      const key = it.id ? `id_${it.id}` : `${it.full_path}_${it.start_time}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
     updateCounts();
     renderList();
   }

@@ -223,24 +223,31 @@ cmake --build c:\projects\lite_browser\cef_binary_149.0.6\build --config Release
 ## 7. 다운로드 관리자 대시보드 시스템 (`lite://downloads`)
 
 ### 7.1 개요
-Edge 브라우저의 `edge://downloads/` 디자인과 UX를 참고하여 다운로드 진행률 실시간 추적, 자동 다운로드 디렉토리 고정 및 중복 번호 부여, 영속 이력 관리, 파일 실존 검사 및 파일 관리 기능을 탑재했습니다.
+Edge 브라우저의 `edge://downloads/` 디자인과 UX를 참고하여 다운로드 진행률 실시간 추적, 자동 다운로드 디렉토리 고정 및 중복 번호 부여, 영속 이력 관리, Unicode(한글/특수문자) 완벽 지원, 파일 실존 검사, 툴바 실시간 프로그레스 링/완료 인디케이터 및 파일 관리 기능을 탑재했습니다.
 
 ### 7.2 주요 구현 내역
 1. **사용자 기본 다운로드 폴더 고정 & 자동 다운로드**:
-   - `SHGetSpecialFolderPathA`를 사용해 `%USERPROFILE%\Downloads`로 저장 경로를 고정하고 `show_dialog = 0` 처리하여 Save As 대화상자 없이 즉시 자동 저장됩니다.
+   - `SHGetSpecialFolderPathW`를 사용해 `%USERPROFILE%\Downloads`로 저장 경로를 고정하고 `show_dialog = 0` 처리하여 Save As 대화상자 없이 즉시 자동 저장됩니다.
 2. **동일 파일명 자동 순서 번호 부여 (중복 방지)**:
    - 동일 파일 존재 시 `filename (1).ext`, `filename (2).ext` 로 순서 번호를 자동으로 부여해 파일 덮어쓰기를 원천 방지합니다.
 3. **다운로드 진행 추적 및 영속성 (`downloads.json`)**:
    - CEF `cef_download_handler_t` C API 인터페이스를 구현하고 `cef_client_t`에 바인딩했습니다.
    - 전송 바이트, 총 바이트, 속도, 진행률(%), 상태(다운로드 중/완료/일시중지/취소/실패)를 `%USERPROFILE%\.lite-browser\downloads.json`에 기록하여 재기동 시에도 이력을 복원합니다.
-4. **대시보드 UI (`lite://downloads`) 및 파일 관리**:
-   - `lite://downloads`, `edge://downloads`, `chrome://downloads` 주소 이동 지원.
-   - 확장자별 스타일 아이콘, 카테고리 탭, 파일실존 검사(파일 미존재 시 뱃지 표시 및 열기 비활성화), 파일 실행, 탐색기 폴더에서 보기, 파일 물리 삭제, 이력 정리, 파일 정보 확인 모달 제공.
-5. **IPC 통신 및 실시간 푸시 엔진**:
-   - 프론트엔드 UI(`ui/downloads.js`)에서 Lite Browser의 네이티브 프레임 가로채기 방식인 `window.location.href = 'http://ui-action/...'`을 통해 안전하게 C 백엔드 명령을 호출합니다.
-   - 백엔드의 `BroadcastDownloadUpdate()`를 구동하여 다운로드 상태 갱신 시 대시보드 화면으로 최신 목록 데이터(`window.renderDownloads`)를 실시간 푸시(Push)합니다.
-6. **새 탭 개설 연동**:
-   - 주소창 우측 다운로드 버튼, `Ctrl+J` 단축키, 3점 메뉴 "다운로드 (Ctrl+J)" 실행 시 백엔드 `open-download-manager` IPC를 거쳐 `CreateNewTab`을 호출하여 활성 탭 바로 우측에 새로운 탭으로 다운로드 대시보드가 오픈됩니다.
+   - `download_manager_init()`에 1회 초기화 가드 및 고유 키 검증을 적용하여 다중 탭 생성 시 중복 로딩 및 중복 저장을 원천 차단했습니다.
+4. **Unicode(한글/특수문자) 완벽 지원 및 파일 실존 검사**:
+   - `CheckFileExistsUtf8()` 및 `CheckPathExistsUtf8()` 헬퍼를 도입하여 UTF-8 경로를 UTF-16(`WCHAR`)으로 변환 후 `GetFileAttributesW`, `ShellExecuteW`, `DeleteFileW` 등 Windows Unicode API를 호출합니다.
+   - `미래엔...hwp`, `종목별...xlsx` 등 한글 및 공백/대괄호가 포함된 파일도 디스크 실존 여부를 100% 정확하게 판정합니다.
+5. **툴바 다운로드 버튼 실시간 원형 프로그레스 링 & 완료 인디케이터**:
+   - 다운로드 진행 중: Edge 스타일의 **원형 프로그레스 링(Circular Progress Ring)**에 `0% ~ 100%` 전송량이 실시간 렌더링됩니다.
+   - 다운로드 완료 시: 화살표 아이콘이 **체크마크(✓)**와 **초록색 펄스 뱃지/글로우 하이라이트**로 전환되어 클릭을 유도합니다.
+   - 버튼 클릭 시: 다운로드 관리자 탭이 열리며 기본 화살표 아이콘으로 즉시 초기화됩니다.
+6. **Chromium 기본 다운로드 팝업 완전 억제**:
+   - `--disable-features=DownloadBubble,DownloadBubbleV2` 및 `--disable-download-notification` 스위치를 주입하여 Chromium 내장 다운로드 버블/쉘프 팝업을 완전히 차단했습니다.
+7. **IPC 통신 및 실시간 푸시 엔진**:
+   - 프론트엔드 UI(`ui/downloads.js`)의 주기적 폴링(`setInterval`)을 제거하여 탭 깜빡임 현상을 완벽히 해소했습니다.
+   - 백엔드의 `BroadcastDownloadUpdate()`가 상단 툴바 UI(`win_ctx->ui_browser`) 및 열려 있는 대시보드 탭으로 최신 목록 데이터(`window.renderDownloads`, `window.updateDownloadButtonStatus`)를 실시간 푸시(Push)합니다.
+8. **새 탭 개설 연동**:
+   - 주소창 우측 다운로드 버튼, `Ctrl+J` 단축키, 3점 메뉴 "다운로드 관리자 (Ctrl+J)" 실행 시 백엔드 `open-download-manager` IPC를 거쳐 `CreateNewTab`을 호출하여 활성 탭 바로 우측에 새로운 탭으로 다운로드 관리자가 오픈됩니다.
 
 ---
 

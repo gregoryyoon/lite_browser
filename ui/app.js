@@ -800,13 +800,85 @@ function closeToastModal() {
   closeAllPopups();
 }
 
+let g_hasUnseenCompletedDownload = false;
+let g_lastActiveCount = 0;
+
 function openBookmarkDashboard() {
   window.location.href = 'http://ui-action/open-bookmark-manager';
 }
 
 function openDownloadDashboard() {
+  const btn = document.getElementById('download-view-btn');
+  const dot = document.getElementById('dl-btn-dot');
+  if (btn) {
+    btn.classList.remove('is-completed');
+    btn.title = '다운로드 관리자 (Ctrl+J)';
+  }
+  if (dot) dot.classList.add('hide');
+  g_hasUnseenCompletedDownload = false;
   window.location.href = 'http://ui-action/open-download-manager';
 }
+
+window.updateDownloadButtonStatus = function(items) {
+  const btn = document.getElementById('download-view-btn');
+  const ringFill = document.getElementById('dl-btn-ring-fill');
+  const dot = document.getElementById('dl-btn-dot');
+  if (!btn) return;
+
+  if (!Array.isArray(items)) return;
+
+  const activeItems = items.filter(x => x.is_in_progress);
+  const currentActiveCount = activeItems.length;
+
+  // Detect active -> 0 transition with at least one completed download
+  if (g_lastActiveCount > 0 && currentActiveCount === 0) {
+    const hasCompleted = items.some(x => x.is_complete);
+    if (hasCompleted) {
+      g_hasUnseenCompletedDownload = true;
+    }
+  }
+  g_lastActiveCount = currentActiveCount;
+
+  if (currentActiveCount > 0) {
+    btn.classList.add('is-downloading');
+    btn.classList.remove('is-completed');
+    if (dot) dot.classList.add('hide');
+
+    let totalBytes = 0;
+    let receivedBytes = 0;
+    activeItems.forEach(it => {
+      totalBytes += (it.total_bytes > 0 ? it.total_bytes : 0);
+      receivedBytes += (it.received_bytes > 0 ? it.received_bytes : 0);
+    });
+
+    let avgPercent = 0;
+    if (totalBytes > 0) {
+      avgPercent = Math.min(100, Math.max(0, Math.round((receivedBytes / totalBytes) * 100)));
+    } else {
+      avgPercent = (activeItems[0].percent_complete >= 0) ? activeItems[0].percent_complete : 50;
+    }
+
+    const circumference = 59.69;
+    const offset = circumference * (1 - (avgPercent / 100));
+    if (ringFill) {
+      ringFill.style.strokeDashoffset = offset.toFixed(2);
+    }
+    btn.title = `다운로드 진행 중 (${currentActiveCount}개 - ${avgPercent}%) (Ctrl+J)`;
+  } else {
+    btn.classList.remove('is-downloading');
+    if (ringFill) ringFill.style.strokeDashoffset = '59.69';
+
+    if (g_hasUnseenCompletedDownload) {
+      btn.classList.add('is-completed');
+      if (dot) dot.classList.remove('hide');
+      btn.title = '다운로드 완료됨 - 다운로드 관리자 열기 (Ctrl+J)';
+    } else {
+      btn.classList.remove('is-completed');
+      if (dot) dot.classList.add('hide');
+      btn.title = '다운로드 관리자 (Ctrl+J)';
+    }
+  }
+};
 
 // ==================== SMART OMNIBOX ENGINE ====================
 

@@ -1709,13 +1709,11 @@ int CEF_CALLBACK request_handler_on_before_browse(
             download_manager_open_file(path);
             free(path);
           }
-        } else if (strncmp(action, "download-show-in-folder?", 24) == 0) {
-          const char* query = action + 24;
-          char* path = get_query_param(query, "path");
-          if (path) {
-            download_manager_show_in_folder(path);
-            free(path);
-          }
+        } else if (strncmp(action, "download-show-in-folder", 23) == 0) {
+          const char* query = (action[23] == '?') ? (action + 24) : "";
+          char* path = (query[0] != '\0') ? get_query_param(query, "path") : NULL;
+          download_manager_show_in_folder(path ? path : "");
+          if (path) free(path);
         } else if (strncmp(action, "download-delete-file?", 21) == 0) {
           const char* query = action + 21;
           char* id_str = get_query_param(query, "id");
