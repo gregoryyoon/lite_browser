@@ -106,11 +106,10 @@
       clone.querySelectorAll(tag).forEach(el => el.remove());
     });
 
-    // Class/ID noise patterns (ads, banners, social, comments, widgets)
+    // Class/ID noise patterns (ads, banners, social, widgets)
     const noiseClassPatterns = [
       '.ad', '.ads', '.advertisement', '.banner', '.sponsor', '.sponsored',
       '.social-share', '.sns-share', '.share-box', '.share-area',
-      '.comment', '.comments', '.reply', '.reply-list', '#comments',
       '.pagination', '.paging', '.page-nav',
       '.sidebar', '.side-bar', '.widget', '.popup', '.modal',
       '.footer', '.footer-area', '.header-nav', '.top-nav', '.btn-area'
@@ -414,8 +413,40 @@
       }
 
       if (descText) {
-        const cleanDesc = descText.slice(0, 3500);
+        const cleanDesc = descText.slice(0, 2500);
         md += `### 📝 동영상 상세 설명\n${cleanDesc}\n\n`;
+      }
+
+      // Extract Comments (if loaded in DOM)
+      const commentHeader = doc.querySelector('ytd-comments-header-renderer #count, ytd-comments-header-renderer #title, yt-formatted-string.count-text')?.innerText?.trim() || '';
+      const commentNodes = Array.from(doc.querySelectorAll('ytd-comment-thread-renderer, ytd-comment-view-model'));
+      const comments = [];
+
+      commentNodes.slice(0, 50).forEach(cNode => {
+        const authorEl = cNode.querySelector('#author-text, #header-author, .ytd-comment-view-model #author-text');
+        const textEl = cNode.querySelector('#content-text, yt-attributed-string#content-text, .yt-core-attributed-string');
+        const voteEl = cNode.querySelector('#vote-count-middle, .ytd-comment-action-buttons-renderer span.yt-core-attributed-string');
+        const timeEl = cNode.querySelector('#published-time-text a, .ytd-comment-view-model a.yt-core-attributed-string');
+
+        const author = (authorEl ? authorEl.innerText : '').trim().replace(/^@/, '');
+        const text = (textEl ? textEl.innerText : '').trim();
+        const votes = (voteEl ? voteEl.innerText : '').trim();
+        const time = (timeEl ? timeEl.innerText : '').trim();
+
+        if (text) {
+          let commentLine = `- **${author || '시청자'}**`;
+          if (time) commentLine += ` (${time})`;
+          if (votes) commentLine += ` [👍 ${votes}]`;
+          commentLine += `: ${text}`;
+          comments.push(commentLine);
+        }
+      });
+
+      if (comments.length > 0) {
+        md += `### 💬 시청자 댓글 목록 (${commentHeader || comments.length + '개 로딩됨'})\n`;
+        md += comments.join('\n\n') + `\n\n`;
+      } else if (commentHeader) {
+        md += `### 💬 시청자 댓글\n${commentHeader} (댓글을 확인하려면 스크롤을 아래로 조금 더 내려주세요)\n\n`;
       }
 
       // Extract Interactive Buttons

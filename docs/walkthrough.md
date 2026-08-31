@@ -535,6 +535,61 @@ flowchart TD
 ### 16.3 빌드 및 검증
 - Debug 빌드 완료: `Debug/lite_browser.exe` (Exit code 0).
 
+---
+
+## 17. 로컬 Ollama AI Provider 도구 호출(Tool Calling) 및 CoT 스트리밍 시스템 (Local Ollama Tool Calling & CoT Streaming)
+
+### 17.1 개요
+Google Gemini, OpenAI, Claude와 같은 클라우드 모델뿐만 아니라, **Ollama를 통해 로컬에서 구동되는 오픈소스 LLM(Gemma4, Llama 3.2, Qwen 등)도 LiteBrowser의 브라우저 제어 도구를 100% 자율적으로 호출**하여 현재 페이지 URL 확인, 본문 요약, 클릭, 텍스트 입력을 수행할 수 있도록 엔드포인트 연동을 고도화했습니다.
+
+### 17.2 핵심 구현 내역
+1. **Ollama 표준 `tools` 스키마 연동 및 스트리밍 파싱 ([`ui/ai_providers.js`](file:///c:/projects/lite_browser/ui/ai_providers.js))**:
+   - `OllamaProvider.chatStream`에 `tools` 배열을 Ollama `/api/chat` 표준 JSON 스키마로 변환하여 전송.
+   - 스트림 수신 시 `message.tool_calls`를 실시간 파싱하여 `task_runtime.js`의 브라우저 제어 루틴으로 즉시 디스패치.
+2. **Ollama Go 서버 엄격 스키마 호환 (`function.arguments` Object 변환)**:
+   - OpenAI 규격의 직렬화 문자열 형태 `arguments`를 Ollama의 Go 언어 백엔드 규격(`map[string]any`)에 맞게 순수 JSON Object로 자동 변환하여 전송함으로써 `400 Bad Request` 에러를 원천 해결.
+3. **추론(Thinking CoT) 태그 파싱**:
+   - DeepSeek-R1, Gemma 등 모델의 `<think>...</think>` 사고 과정을 실시간으로 분리하여 사이드패널 아코디언 UI에 스트리밍 렌더링.
+
+### 17.3 빌드 및 검증
+- Debug 빌드 완료: `Debug/lite_browser.exe` (Exit code 0).
+
+---
+
+## 18. 윈도우 최소화/복원 시 AI 사이드패널 너비 보존 시스템 (Sidepanel Width Preservation on Minimize/Restore)
+
+### 18.1 개요
+브라우저 윈도우를 최소화(Minimize)했다가 다시 최대화/복원할 때, 사이드패널의 가로 너비가 비정상적으로 좁아져 내부 내용이 가려지던 문제를 해결했습니다.
+
+### 18.2 핵심 구현 내역
+1. **`SIZE_MINIMIZED` 가드 조건 추가 ([`simple_app.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_app.c))**:
+   - Windows의 `WM_SIZE` 메시지 중 `wParam == SIZE_MINIMIZED` 또는 `width <= 0`인 시점에는 레이아웃 재계산과 너비 덮어쓰기를 즉시 중단(`return 0`).
+2. **사용자 지정 너비(`sidepanel_width`) 불변성 보장**:
+   - `WM_SIZE` 중 단순 화면 렌더링 시에는 사용자가 설정하거나 드래그 조절한 `win_ctx->sidepanel_width`를 손상시키지 않고 안전하게 보존하도록 수정.
+
+### 18.3 빌드 및 검증
+- Debug 빌드 완료: `Debug/lite_browser.exe` (Exit code 0).
+
+---
+
+## 19. 실시간 브라우저 동적 갱신 규칙 및 유튜브/커뮤니티 댓글 추출 엔진 (Real-time Agent Refresh & Comments Extractor)
+
+### 19.1 개요
+사용자가 대화 도중 웹사이트를 이동하거나 탭을 변경할 때 과거 정적 대화 기록에 갇히지 않고 항상 **실시간 최신 브라우저 화면을 새로 확인**하도록 에이전트 행동 프레임워크를 고도화하고, **유튜브 시청자 댓글 및 웹 커뮤니티의 상세 댓글 전문을 누락 없이 마크다운으로 추출**하여 LLM에 전달하는 파이프라인을 구축했습니다.
+
+### 19.2 핵심 구현 내역
+1. **동적 브라우징 실시간 갱신 규칙 및 중복 호출 가드 ([`ui/sidepanel.js`](file:///c:/projects/lite_browser/ui/sidepanel.js))**:
+   - `baseDirective`를 통해 *"브라우저는 동적 환경이므로 이전 대화에 의존하지 말고 새 질문마다 반드시 최신 `browser_get_page_content`를 호출하라"*는 수칙 주입.
+   - 단일 턴 내에서 `executedToolsInTurn` 가드를 도입하여, 도구 실행 후 중복 호출을 차단하고 즉시 최종 텍스트 답변을 작성하도록 유도.
+2. **조회 vs 조작 분리 원칙 (Unprompted Action Guard)**:
+   - 사용자가 "URL 알려줘", "요약해줘" 등 단순 조회성 질문을 했을 때 검색창이나 버튼이 화면에 보여도 자의적으로 `browser_type_text`/`browser_click_element`를 수행하지 않도록 엄격한 가드 적용.
+3. **유튜브 및 웹페이지 댓글 추출기 탑재 ([`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_handler.c), [`ui/content_extractor.js`](file:///c:/projects/lite_browser/ui/content_extractor.js))**:
+   - 노이즈 필터 목록에서 `.comment`, `.comments`, `#comments`를 완전히 제거하여 댓글 유실 방지.
+   - 유튜브 영상 페이지(`youtube.com/watch`) 접속 시 영상 제목, 채널명, 설명과 함께 **로딩된 시청자 댓글 목록 (작성자, 댓글 전문, 좋아요 수)**을 구조화된 마크다운(`### 💬 시청자 댓글 목록`)으로 추출하여 LLM에 주입.
+
+### 19.3 빌드 및 검증
+- Debug 빌드 완료: `Debug/lite_browser.exe` (Exit code 0).
+
 
 
 

@@ -439,20 +439,34 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       const provider = AIProviderFactory.createProvider(settings);
-      const systemPrompt = settings.systemPrompt + memoryPrompt;
+      const baseDirective = `[AI 브라우저 에이전트 핵심 행동 지침]\n` +
+        `1. 당신은 웹 브라우징을 능동적으로 돕는 실시간 AI 브라우저 에이전트입니다.\n` +
+        `2. [사용자 지시 준수 및 임의 조작 금지 원칙]: 사용자가 URL 질문, 본문 요약, 내용 설명 등 '조회/질문'을 했을 때는 오직 'browser_get_page_content'로 내용만 확인하고 즉시 답변해야 합니다. 사용자가 명시적으로 검색이나 클릭을 지시하지 않았다면, 화면에 검색창이나 버튼이 보이더라도 절대로 'browser_type_text'나 'browser_click_element'를 임의로 실행하지 마십시오.\n` +
+        `3. [실시간 갱신 규칙]: 웹 브라우저는 사용자가 대화 도중에도 수시로 다른 페이지로 이동할 수 있는 동적 환경입니다. 사용자가 새로 질문(새 턴)할 때마다 과거 대화 기록에 의존하지 말고 'browser_get_page_content' 도구를 호출하여 최신 실시간 브라우저 상태를 확인하세요.\n` +
+        `4. [도구 완료 후 답변 원칙]: 이번 턴에서 도구를 실행하여 결과를 받았다면 불필요한 추가 조작을 하지 말고, 수신된 최신 URL 및 본문 데이터를 바탕으로 즉시 사용자에게 최종 텍스트 답변을 작성하여 완료하십시오.\n` +
+        `5. 도구 실행 결과를 받으면 그 안의 실제 최신 URL과 본문 내용을 바탕으로 정확하게 답변하세요.\n\n`;
+      const systemPrompt = baseDirective + (settings.systemPrompt || '') + memoryPrompt;
       const tools = window.taskRuntime.getAvailableTools();
 
       let loopCount = 0;
       const maxLoops = 6;
+      const executedToolsInTurn = new Set();
 
       while (loopCount < maxLoops) {
         loopCount++;
         const bubble = createStreamingBubble();
         let toolCalls = [];
 
+        // If page content was already retrieved in this turn without subsequent navigation,
+        // filter it out from tools so the model is prompted to produce the final text answer.
+        let activeTools = tools;
+        if (executedToolsInTurn.has('browser_get_page_content') && !executedToolsInTurn.has('browser_navigate')) {
+          activeTools = tools.filter(t => t.name !== 'browser_get_page_content');
+        }
+
         await provider.chatStream({
           messages: conversationHistory,
-          tools,
+          tools: activeTools && activeTools.length > 0 ? activeTools : undefined,
           systemPrompt,
           signal: abortController.signal,
           onStatus: (statusInfo) => {
@@ -521,6 +535,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Execute tool calls step by step
         for (const tc of toolCalls) {
+          executedToolsInTurn.add(tc.name);
+          if (tc.name === 'browser_navigate') {
+            executedToolsInTurn.delete('browser_get_page_content');
+          }
           try {
             const toolResult = await window.taskRuntime.executeToolAction(tc.name, tc.args);
             appendToolCard(tc.name, tc.args, toolResult);

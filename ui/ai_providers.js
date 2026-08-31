@@ -585,14 +585,40 @@ class OllamaProvider extends AIProviderInterface {
 
       for (const msg of messages) {
         if (msg.role === 'tool') {
+          let contentStr = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+          try {
+            const parsed = typeof msg.content === 'string' ? JSON.parse(msg.content) : msg.content;
+            if (parsed && (parsed.url || parsed.title || parsed.bodySnippet)) {
+              const u = parsed.url || '';
+              const t = parsed.title || '';
+              const b = parsed.bodySnippet || parsed.markdown || '';
+              contentStr = `[도구 실행 성공 - 현재 브라우저 탭 정보]\n- 현재 페이지 URL: ${u}\n- 웹페이지 제목: ${t}\n- 본문 내용:\n${b}`;
+            }
+          } catch (e) {}
+
           fullMessages.push({
             role: 'tool',
-            content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)
+            content: contentStr
           });
         } else if (msg.role === 'assistant') {
           const m = { role: 'assistant', content: msg.content || '' };
           if (msg.tool_calls && msg.tool_calls.length > 0) {
-            m.tool_calls = msg.tool_calls;
+            m.tool_calls = msg.tool_calls.map(tc => {
+              let argsObj = tc.function?.arguments || tc.args || {};
+              if (typeof argsObj === 'string') {
+                try {
+                  argsObj = JSON.parse(argsObj);
+                } catch (e) {
+                  argsObj = {};
+                }
+              }
+              return {
+                function: {
+                  name: tc.function?.name || tc.name,
+                  arguments: argsObj
+                }
+              };
+            });
           }
           fullMessages.push(m);
         } else if (msg.role === 'user') {
@@ -626,7 +652,16 @@ class OllamaProvider extends AIProviderInterface {
       });
 
       if (!response.ok) {
-        throw new Error(`Ollama API 연결 실패 (${response.status}). Ollama가 실행 중인지 확인하세요.`);
+        let errDetail = '';
+        try {
+          const errJson = await response.json();
+          errDetail = errJson.error || JSON.stringify(errJson);
+        } catch (e) {
+          try {
+            errDetail = await response.text();
+          } catch (e2) {}
+        }
+        throw new Error(`Ollama API 오류 (${response.status}): ${errDetail || '요청 처리 실패'}`);
       }
 
       const reader = response.body.getReader();
@@ -726,7 +761,7 @@ class AIProviderFactory {
       anthropicModel: 'claude-3-7-sonnet-20250219',
       ollamaUrl: 'http://localhost:11434',
       ollamaModel: 'llama3.2',
-      systemPrompt: '당신은 사용자의 웹 브라우징을 능동적으로 돕는 지능형 AI 브라우저 에이전트입니다. 간결하고 정확하게 설명하고, 요청 시 도구를 적절히 활용하여 작업을 완수하세요.'
+      systemPrompt: '당신은 사용자의 웹 브라우징을 능동적으로 돕는 지능형 AI 브라우저 에이전트입니다. 사용자가 현재 페이지, URL, 웹페이지 본문, 요약, 검색 등을 질문하거나 요청하면 절대 브라우저를 볼 수 없다고 거절하지 말고, 즉시 제공된 브라우저 도구(browser_get_page_content 등)를 호출하여 정보를 확인한 뒤 완벽하게 답변하세요.'
     };
 
     try {

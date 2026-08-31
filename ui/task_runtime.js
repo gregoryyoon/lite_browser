@@ -60,7 +60,7 @@ class TaskRuntime {
       },
       {
         name: 'browser_get_page_content',
-        description: '현재 활성화된 웹 페이지의 제목, URL, 상세 본문 텍스트(bodySnippet), 상호작용 버튼 및 입력창 목록을 추출합니다.',
+        description: '현재 브라우저 활성 탭의 최신 실시간 URL, 웹페이지 제목, 상세 본문 텍스트(bodySnippet)를 읽어옵니다. 사용자가 대화 도중 페이지를 새로 이동했을 수 있으므로, 과거 대화에서 이미 확인했더라도 사용자가 다시 페이지/URL/요약을 요청할 때마다 반드시 새로 호출해야 합니다.',
         parameters: {
           type: 'object',
           properties: {
@@ -70,7 +70,7 @@ class TaskRuntime {
       },
       {
         name: 'browser_click_element',
-        description: '지정한 CSS 셀렉터나 버튼 텍스트의 요소를 마우스로 클릭합니다.',
+        description: '사용자가 특정 버튼이나 링크를 클릭하라고 명시적으로 요청했을 때만 해당 요소를 마우스로 클릭합니다. 단순 URL/내용 조회 질문일 때는 절대 임의로 호출하지 마세요.',
         parameters: {
           type: 'object',
           properties: {
@@ -81,7 +81,7 @@ class TaskRuntime {
       },
       {
         name: 'browser_type_text',
-        description: '검색창이나 입력 폼에 텍스트를 입력합니다.',
+        description: '사용자가 검색어나 텍스트를 입력하라고 명시적으로 요청했을 때만 입력 폼에 텍스트를 입력합니다. 단순 URL/내용 조회 질문일 때는 절대 임의로 호출하지 마세요.',
         parameters: {
           type: 'object',
           properties: {
@@ -149,11 +149,18 @@ class TaskRuntime {
               setTimeout(() => {
                 if (this.pendingDomCallback) {
                   this.pendingDomCallback = null;
-                  resolve({ title: '현재 페이지', bodySnippet: '페이지 본문 내용을 읽을 수 없습니다.', markdown: '', buttons: [], inputs: [] });
+                  resolve({ title: '현재 페이지', url: '', bodySnippet: '페이지 본문 내용을 읽을 수 없습니다.', markdown: '', buttons: [], inputs: [] });
                 }
               }, 5000);
             });
-            return { status: 'success', data: domData };
+            return {
+              status: 'success',
+              url: domData.url || '',
+              title: domData.title || '',
+              bodySnippet: domData.bodySnippet || domData.markdown || '',
+              buttons: domData.buttons || [],
+              inputs: domData.inputs || []
+            };
           }
 
           case 'browser_click_element': {
