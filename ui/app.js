@@ -1152,24 +1152,37 @@ function closeOmniboxDropdown() {
   closeAllPopups();
 }
 
-window.showToast = function(message, type = 'info') {
+window.showToast = function(message, type = 'info', duration = 5000) {
   let container = document.querySelector('.generic-toast-container');
   if (!container) {
     container = document.createElement('div');
     container.className = 'generic-toast-container';
     document.body.appendChild(container);
   }
+
+  // Clear previous timer and existing toast smoothly so the latest message replaces it immediately
+  if (window._toastTimer) {
+    clearTimeout(window._toastTimer);
+    window._toastTimer = null;
+  }
+  container.innerHTML = '';
+
   const toast = document.createElement('div');
   toast.className = `generic-toast ${type}`;
   toast.textContent = message;
   container.appendChild(toast);
 
-  setTimeout(() => {
+  window._toastTimer = setTimeout(() => {
     toast.style.opacity = '0';
     toast.style.transform = 'translateY(-6px) scale(0.95)';
-    setTimeout(() => toast.remove(), 220);
-  }, 4000);
+    setTimeout(() => {
+      if (toast.parentNode) {
+        toast.remove();
+      }
+    }, 250);
+  }, duration);
 };
+
 
 
 
