@@ -1166,9 +1166,10 @@ window.showToast = function(message, type = 'info') {
 
   setTimeout(() => {
     toast.style.opacity = '0';
-    toast.style.transform = 'translateY(6px) scale(0.96)';
-    setTimeout(() => toast.remove(), 250);
+    toast.style.transform = 'translateY(-6px) scale(0.95)';
+    setTimeout(() => toast.remove(), 220);
   }, 4000);
 };
+
 
 
