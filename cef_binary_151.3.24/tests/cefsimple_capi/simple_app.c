@@ -1,4 +1,5 @@
 #include "tests/cefsimple_capi/simple_app.h"
+#include "tests/cefsimple_capi/simple_installer.h"
 #include "include/capi/cef_preference_capi.h"
 #include "include/capi/cef_values_capi.h"
 
@@ -1212,6 +1213,7 @@ void CEF_CALLBACK browser_process_handler_on_context_initialized(
 
 #if defined(OS_WIN)
   create_browser_window(g_startup_url);
+  simple_installer_report_launch_success();
 #else
   // Non-Windows fallback (views or generic single window)
   cef_window_info_t window_info = {};

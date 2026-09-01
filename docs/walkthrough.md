@@ -702,3 +702,28 @@ CEF 151.1+ 릴리스부터 지원되는 **CEF Installer Library** 아키텍처�
    - Release 빌드: `cmake --build c:\projects\lite_browser\cef_binary_151.3.24\build --config Release --target cefsimple_capi` (Exit code 0).
    - NSIS 인스톨러: `makensis c:\projects\lite_browser\installer.nsi` -> [`LiteBrowserInstaller.exe`](file:///c:/projects/lite_browser/LiteBrowserInstaller.exe) (182.7 MB, Exit code 0).
 
+---
+
+## 24. CEF 런타임 CDN 자동 업데이트 (`/cef-update` & `RunInstaller` 비동기 API) 구현 (Runtime Auto-Update Pipeline)
+
+### 24.1 개요
+사용자 PC(`%LocalAppData%\CEF\`)에서 앱 재빌드/재설치 없이도 최신 CEF 런타임 보안 패치 및 엔진을 CDN으로부터 직접 자동 수신 및 갱신할 수 있도록 **커맨드라인 옵션(`/cef-update`)** 및 **백엔드 `RunInstaller` 비동기 API 모듈과 UI 토스트 알림**을 구축했습니다.
+
+### 24.2 핵심 구현 내역
+1. **`enable_explicit_modes: true` 활성화 ([`cef_installer_config.json`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/win/cef_installer_config.json))**:
+   - 부트스트랩 Executable의 명시적 커맨드라인 모드를 활성화하여 `lite_browser.exe /cef-update`, `lite_browser.exe /cef-update /cef-background`, `lite_browser.exe /cef-uninstall` 명령 직접 실행 지원.
+2. **C 백엔드 비동기 인스톨러 모듈 구축 ([`simple_installer.h`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_installer.h), [`simple_installer.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_installer.c))**:
+   - `simple_installer_report_launch_success()`: 앱 정상 구동 시 `RunInstaller("launch_success", NULL)`을 보고하여 롤백 오감지 방지.
+   - `simple_installer_check_update_async()`: 별도 백그라운드 워커 스레드(`CreateThread`)에서 `RunInstaller("update", NULL)`을 실행하여 UI 프리징 없이 CDN 업데이트 검사 및 다운로드 수행.
+3. **3점 메뉴 연동 및 IPC 액션 바인딩 ([`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c))**:
+   - 3점 메뉴(Menu ID `1009`)에 **"CEF 런타임 업데이트 확인"** 항목 추가.
+   - `http://ui-action/check-cef-update` IPC 액션 라우팅 등록.
+4. **글로벌 UI 토스트 알림 컴포넌트 ([`ui/style.css`](file:///c:/projects/lite_browser/ui/style.css), [`ui/app.js`](file:///c:/projects/lite_browser/ui/app.js))**:
+   - `window.showToast(message, type)` 구현: 업데이트 시작 시 `"CEF 런타임 최신 버전 확인 및 CDN 수신 중..."`, 완료 시 `"최신 CEF 런타임 수신 완료 (다음 실행 시 적용)"` 또는 `"이미 최신 CEF 런타임을 사용 중입니다."` 실시간 안내.
+
+### 24.3 빌드 및 검증
+- **Debug 빌드**: `Debug/lite_browser.exe` 컴파일 성공 (Exit code 0).
+- **Release 빌드**: `Release/lite_browser.exe` 컴파일 성공 (Exit code 0).
+- **인스톨러 패키지**: [`LiteBrowserInstaller.exe`](file:///c:/projects/lite_browser/LiteBrowserInstaller.exe) 생성 완료 (Exit code 0).
+
+

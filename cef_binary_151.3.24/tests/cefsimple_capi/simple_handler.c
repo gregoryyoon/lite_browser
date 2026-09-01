@@ -6,6 +6,7 @@
 #include "tests/cefsimple_capi/simple_download_handler.h"
 #include "tests/cefsimple_capi/simple_vault.h"
 #include "tests/cefsimple_capi/simple_auth.h"
+#include "tests/cefsimple_capi/simple_installer.h"
 
 #include <stdarg.h>
 #include <stdatomic.h>
@@ -1758,6 +1759,8 @@ int CEF_CALLBACK request_handler_on_before_browse(
             download_manager_cancel(id);
             free(id_str);
           }
+        } else if (strcmp(action, "check-cef-update") == 0) {
+          simple_installer_check_update_async(win_ctx);
         } else if (strncmp(action, "show-menu?", 10) == 0) {
           int click_x = 0, click_y = 0;
           if (sscanf(action + 10, "x=%d&y=%d", &click_x, &click_y) == 2) {
@@ -1778,6 +1781,7 @@ int CEF_CALLBACK request_handler_on_before_browse(
             AppendMenuW(hMenu, MF_STRING, 1004, L"개발자 도구 (Inspect)");
             AppendMenuW(hMenu, MF_STRING, 1005, L"페이지 소스 보기");
             AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+            AppendMenuW(hMenu, MF_STRING, 1009, L"CEF 런타임 업데이트 확인");
             AppendMenuW(hMenu, MF_STRING, 1006, L"종료");
 
             int cmd = TrackPopupMenu(hMenu, TPM_RETURNCMD | TPM_RIGHTALIGN | TPM_TOPALIGN, pt.x, pt.y, 0, win_ctx->main_hwnd, NULL);
@@ -1789,6 +1793,8 @@ int CEF_CALLBACK request_handler_on_before_browse(
               create_browser_window("lite://favorites");
             } else if (cmd == 1008) {
               CreateNewTab(win_ctx, "lite://downloads");
+            } else if (cmd == 1009) {
+              simple_installer_check_update_async(win_ctx);
             } else if (cmd == 1003) {
               if (cb) {
                 cef_browser_host_t* host = cb->get_host(cb);

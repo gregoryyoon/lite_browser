@@ -20,6 +20,8 @@ set(CEFSIMPLE_CAPI_SRCS
   simple_vault.h
   simple_auth.c
   simple_auth.h
+  simple_installer.c
+  simple_installer.h
   simple_handler.c
   simple_handler.h
   simple_life_span_handler.c

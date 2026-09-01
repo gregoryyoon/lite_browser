@@ -1152,3 +1152,23 @@ function closeOmniboxDropdown() {
   closeAllPopups();
 }
 
+window.showToast = function(message, type = 'info') {
+  let container = document.querySelector('.generic-toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.className = 'generic-toast-container';
+    document.body.appendChild(container);
+  }
+  const toast = document.createElement('div');
+  toast.className = `generic-toast ${type}`;
+  toast.textContent = message;
+  container.appendChild(toast);
+
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    toast.style.transform = 'translateY(6px) scale(0.96)';
+    setTimeout(() => toast.remove(), 250);
+  }, 4000);
+};
+
+

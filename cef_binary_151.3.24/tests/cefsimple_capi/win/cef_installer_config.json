@@ -4,5 +4,6 @@
   "vmax": "",
   "abi_hash": "1671cc913eeb4ecf",
   "launch_health": "explicit",
+  "enable_explicit_modes": true,
   "bundled_cef_path": "cef_runtime"
 }
