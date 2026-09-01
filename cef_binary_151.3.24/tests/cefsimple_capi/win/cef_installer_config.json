@@ -1,0 +1,8 @@
+{
+  "appid": "F83A2E79-4B51-41C2-8B1C-9D72A6E9E4F0",
+  "vmin": "151.1",
+  "vmax": "",
+  "abi_hash": "1671cc913eeb4ecf",
+  "launch_health": "explicit",
+  "bundled_cef_path": "cef_runtime"
+}

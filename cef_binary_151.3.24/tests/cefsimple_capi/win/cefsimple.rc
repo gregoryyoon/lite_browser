@@ -33,6 +33,13 @@ LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
 IDI_CEFSIMPLE           ICON                    "cefsimple.ico"
 IDI_SMALL               ICON                    "small.ico"
 
+/////////////////////////////////////////////////////////////////////////////
+//
+// CEF Installer Configuration
+//
+CEF_INSTALLER_CONFIG    256                     "cef_installer_config.json"
+
+
 
 #ifdef APSTUDIO_INVOKED
 /////////////////////////////////////////////////////////////////////////////

@@ -680,3 +680,25 @@ Google Gemini(`gemini.google.com`), Claude(`claude.ai`), ChatGPT(`chatgpt.com`) 
 - **Debug 바이너리**: [`cef_binary_151.3.24/build/tests/cefsimple_capi/Debug/lite_browser.exe`](file:///c:/projects/lite_browser/cef_binary_151.3.24/build/tests/cefsimple_capi/Debug/lite_browser.exe) (Exit code 0)
 - **Release 바이너리**: [`cef_binary_151.3.24/build/tests/cefsimple_capi/Release/lite_browser.exe`](file:///c:/projects/lite_browser/cef_binary_151.3.24/build/tests/cefsimple_capi/Release/lite_browser.exe) (Exit code 0)
 - **인스톨러 패키지**: [`c:\projects\lite_browser\LiteBrowserInstaller.exe`](file:///c:/projects/lite_browser/LiteBrowserInstaller.exe) (Exit code 0)
+
+---
+
+## 23. CEF 151.1+ Installer (하이브리드 번들 모드 + explicit 롤백) 도입 (CEF Installer Integration)
+
+### 23.1 개요
+CEF 151.1+ 릴리스부터 지원되는 **CEF Installer Library** 아키텍처를 LiteBrowser에 본격 도입했습니다. 인스톨러 배포 시 기본 런타임 번들링(`bundled_cef_path`)을 유지하여 100% 오프라인 기동을 보장하는 동시에, 사용자 PC의 공유 CEF 설치 디렉토리(`%LocalAppData%\CEF\`) 및 CDN 자동 업데이트, 그리고 연속 크래시 시 이전 호환 버전으로 안전하게 롤백되는 **`launch_health: explicit`** 메커니즘을 적용했습니다.
+
+### 23.2 핵심 적용 내역
+1. **`CEF_INSTALLER_CONFIG` 리소스 구성 파일 작성 ([`cef_installer_config.json`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/win/cef_installer_config.json))**:
+   - `appid`: `"F83A2E79-4B51-41C2-8B1C-9D72A6E9E4F0"`
+   - `vmin`: `"151.1"`
+   - `abi_hash`: `"1671cc913eeb4ecf"` (CEF 151.3.24 샌드박스 호환 해시)
+   - `launch_health`: `"explicit"` (안전 롤백 메커니즘)
+   - `bundled_cef_path`: `"cef_runtime"` (하이브리드 오프라인 번들 경로)
+2. **Win32 리소스 컴파일러 매핑 ([`cefsimple.rc`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/win/cefsimple.rc))**:
+   - `CEF_INSTALLER_CONFIG 256 "cef_installer_config.json"` 구문을 탑재하여 MSVC `rc.exe` 빌드 시 `lite_browser.dll` 바이너리에 리소스를 자동 내장.
+3. **빌드 및 인스톨러 검증**:
+   - Debug 빌드: `cmake --build c:\projects\lite_browser\cef_binary_151.3.24\build --config Debug --target cefsimple_capi` (Exit code 0).
+   - Release 빌드: `cmake --build c:\projects\lite_browser\cef_binary_151.3.24\build --config Release --target cefsimple_capi` (Exit code 0).
+   - NSIS 인스톨러: `makensis c:\projects\lite_browser\installer.nsi` -> [`LiteBrowserInstaller.exe`](file:///c:/projects/lite_browser/LiteBrowserInstaller.exe) (182.7 MB, Exit code 0).
+
