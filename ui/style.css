@@ -283,20 +283,22 @@ body {
 /* Download Button Dynamic Progress & Complete Styling */
 .dl-toolbar-btn {
   position: relative;
+  width: 32px;
+  height: 32px;
 }
 
 .dl-btn-wrapper {
   position: relative;
-  width: 22px;
-  height: 22px;
+  width: 32px;
+  height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .dl-btn-svg {
-  width: 22px;
-  height: 22px;
+  width: 32px;
+  height: 32px;
   overflow: visible;
   display: block;
 }
@@ -304,7 +306,7 @@ body {
 .dl-ring-bg {
   fill: none;
   stroke: rgba(0, 0, 0, 0.12);
-  stroke-width: 2;
+  stroke-width: 2.8;
   display: none;
   transform-origin: center;
   transform: rotate(-90deg);
@@ -313,10 +315,10 @@ body {
 .dl-ring-fill {
   fill: none;
   stroke: #0078d4;
-  stroke-width: 2.2;
+  stroke-width: 3.0;
   stroke-linecap: round;
-  stroke-dasharray: 59.69;
-  stroke-dashoffset: 59.69;
+  stroke-dasharray: 94.25;
+  stroke-dashoffset: 94.25;
   display: none;
   transform-origin: center;
   transform: rotate(-90deg);
@@ -335,7 +337,7 @@ body {
 
 /* Downloading State */
 .dl-toolbar-btn.is-downloading {
-  background: rgba(0, 120, 212, 0.08);
+  background: rgba(0, 120, 212, 0.1);
   color: #0078d4;
 }
 
@@ -359,18 +361,6 @@ body {
 .dl-toolbar-btn.is-completed .dl-icon-complete {
   display: block;
   animation: dlPopIn 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-}
-
-.dl-btn-dot {
-  position: absolute;
-  top: -2px;
-  right: -2px;
-  width: 7px;
-  height: 7px;
-  background: #10b981;
-  border: 1.5px solid #ffffff;
-  border-radius: 50%;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
 }
 
 @keyframes dlPopIn {

@@ -1,4 +1,6 @@
 #include "tests/cefsimple_capi/simple_app.h"
+#include "include/capi/cef_preference_capi.h"
+#include "include/capi/cef_values_capi.h"
 
 #include <stdatomic.h>
 #include <stdbool.h>
@@ -1182,6 +1184,30 @@ void CEF_CALLBACK browser_process_handler_on_context_initialized(
   if (url_value)
   {
     cef_string_userfree_free(url_value);
+  }
+
+  // Suppress Chromium download bubble partial view and auto-open popups via global preferences
+  cef_preference_manager_t* pref_mgr = cef_preference_manager_get_global();
+  if (pref_mgr) {
+    const char* prefs[] = {
+      "download_bubble.partial_view_enabled",
+      "download_bubble.auto_open",
+      "download.prompt_for_download",
+      NULL
+    };
+    for (int i = 0; prefs[i] != NULL; i++) {
+      cef_string_t name = {};
+      cef_string_from_ascii(prefs[i], strlen(prefs[i]), &name);
+      if (pref_mgr->can_set_preference(pref_mgr, &name)) {
+        cef_value_t* val = cef_value_create();
+        val->set_bool(val, 0);
+        cef_string_t err = {};
+        pref_mgr->set_preference(pref_mgr, &name, val, &err);
+        cef_string_clear(&err);
+        val->base.release(&val->base);
+      }
+      cef_string_clear(&name);
+    }
   }
 
 #if defined(OS_WIN)

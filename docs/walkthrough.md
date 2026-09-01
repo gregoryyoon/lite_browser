@@ -241,7 +241,11 @@ Edge 브라우저의 `edge://downloads/` 디자인과 UX를 참고하여 다운�
    - 다운로드 진행 중: Edge 스타일의 **원형 프로그레스 링(Circular Progress Ring)**에 `0% ~ 100%` 전송량이 실시간 렌더링됩니다.
    - 다운로드 완료 시: 화살표 아이콘이 **체크마크(✓)**와 **초록색 펄스 뱃지/글로우 하이라이트**로 전환되어 클릭을 유도합니다.
    - 버튼 클릭 시: 다운로드 관리자 탭이 열리며 기본 화살표 아이콘으로 즉시 초기화됩니다.
-6. **다운로드 대화상자 자동 억제 (`show_dialog = 0`)**:
+6. **다운로드 완료 팝업 완전 억제 (CEF Global Preference)**:
+   - `browser_process_handler_on_context_initialized` 시점에 `cef_preference_manager_get_global()`을 통해 Chromium 내부 다운로드 팝업 동작을 완전히 끄도록 설정했습니다:
+     - `download_bubble.partial_view_enabled = false` (다운로드 완료 시 부분 뷰/팝업 토스트 노출 차단)
+     - `download_bubble.auto_open = false` (다운로드 완료 시 자동 팝업 오픈 차단)
+     - `download.prompt_for_download = false` (저장 위치 묻기 팝업 차단)
    - `on_before_download` 콜백에서 `callback->cont(callback, &path, 0)` (`show_dialog = 0`)을 반환하여 Save As 대화상자 없이 백그라운드 기본 다운로드 폴더로 즉시 자동 저장됩니다.
 7. **IPC 통신 및 실시간 푸시 엔진**:
    - 프론트엔드 UI(`ui/downloads.js`)의 주기적 폴링(`setInterval`)을 제거하여 탭 깜빡임 현상을 완벽히 해소했습니다.

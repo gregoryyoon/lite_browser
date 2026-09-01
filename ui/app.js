@@ -809,12 +809,10 @@ function openBookmarkDashboard() {
 
 function openDownloadDashboard() {
   const btn = document.getElementById('download-view-btn');
-  const dot = document.getElementById('dl-btn-dot');
   if (btn) {
     btn.classList.remove('is-completed');
     btn.title = '다운로드 관리자 (Ctrl+J)';
   }
-  if (dot) dot.classList.add('hide');
   g_hasUnseenCompletedDownload = false;
   window.location.href = 'http://ui-action/open-download-manager';
 }
@@ -822,7 +820,6 @@ function openDownloadDashboard() {
 window.updateDownloadButtonStatus = function(items) {
   const btn = document.getElementById('download-view-btn');
   const ringFill = document.getElementById('dl-btn-ring-fill');
-  const dot = document.getElementById('dl-btn-dot');
   if (!btn) return;
 
   if (!Array.isArray(items)) return;
@@ -839,10 +836,11 @@ window.updateDownloadButtonStatus = function(items) {
   }
   g_lastActiveCount = currentActiveCount;
 
+  const circumference = 94.25;
+
   if (currentActiveCount > 0) {
     btn.classList.add('is-downloading');
     btn.classList.remove('is-completed');
-    if (dot) dot.classList.add('hide');
 
     let totalBytes = 0;
     let receivedBytes = 0;
@@ -858,7 +856,6 @@ window.updateDownloadButtonStatus = function(items) {
       avgPercent = (activeItems[0].percent_complete >= 0) ? activeItems[0].percent_complete : 50;
     }
 
-    const circumference = 59.69;
     const offset = circumference * (1 - (avgPercent / 100));
     if (ringFill) {
       ringFill.style.strokeDashoffset = offset.toFixed(2);
@@ -866,15 +863,13 @@ window.updateDownloadButtonStatus = function(items) {
     btn.title = `다운로드 진행 중 (${currentActiveCount}개 - ${avgPercent}%) (Ctrl+J)`;
   } else {
     btn.classList.remove('is-downloading');
-    if (ringFill) ringFill.style.strokeDashoffset = '59.69';
+    if (ringFill) ringFill.style.strokeDashoffset = '94.25';
 
     if (g_hasUnseenCompletedDownload) {
       btn.classList.add('is-completed');
-      if (dot) dot.classList.remove('hide');
       btn.title = '다운로드 완료됨 - 다운로드 관리자 열기 (Ctrl+J)';
     } else {
       btn.classList.remove('is-completed');
-      if (dot) dot.classList.add('hide');
       btn.title = '다운로드 관리자 (Ctrl+J)';
     }
   }
