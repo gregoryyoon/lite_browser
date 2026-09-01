@@ -1,7 +1,7 @@
 # 빌드 및 실행 환경
-- **실행 환경**: 64-bit Windows, CEF binary distribution 149.0.6
+- **실행 환경**: 64-bit Windows, CEF binary distribution 151.3.24 (Chromium 151.0.7922.174)
 - **빌드 환경**: Visual Studio 2022/2026 IDE (CMake 사용)
-- **빌드 결과물 디렉토리**: `C:\projects\lite_browser\cef_binary_149.0.6\build`
+- **빌드 결과물 디렉토리**: `C:\projects\lite_browser\cef_binary_151.3.24\build`
 
 # cefsimple_capi 구조 분석 및 C API 제약 사항
 - `cefsimple_capi`는 C++ 스마트 포인터와 클래스 대신 **순수 C 언어로 구현된 CEF 예제**입니다.

@@ -10,8 +10,8 @@ RequestExecutionLevel admin
 
 ; Interface Settings
 !define MUI_ABORTWARNING
-!define MUI_ICON "cef_binary_149.0.6\tests\cefsimple_capi\win\cefsimple.ico"
-!define MUI_UNICON "cef_binary_149.0.6\tests\cefsimple_capi\win\cefsimple.ico"
+!define MUI_ICON "cef_binary_151.3.24\tests\cefsimple_capi\win\cefsimple.ico"
+!define MUI_UNICON "cef_binary_151.3.24\tests\cefsimple_capi\win\cefsimple.ico"
 
 ; Pages
 !insertmacro MUI_PAGE_WELCOME
@@ -32,29 +32,29 @@ Section "Install"
   SetOutPath "$INSTDIR"
   
   ; Executables and DLLs
-  File "c:\projects\lite_browser\cef_binary_149.0.6\build\tests\cefsimple_capi\Release\lite_browser.exe"
-  File /nonfatal "c:\projects\lite_browser\cef_binary_149.0.6\build\tests\cefsimple_capi\Release\lite_browser.dll"
-  File "c:\projects\lite_browser\cef_binary_149.0.6\build\tests\cefsimple_capi\Release\libcef.dll"
-  File "c:\projects\lite_browser\cef_binary_149.0.6\build\tests\cefsimple_capi\Release\chrome_elf.dll"
-  File "c:\projects\lite_browser\cef_binary_149.0.6\build\tests\cefsimple_capi\Release\d3dcompiler_47.dll"
-  File "c:\projects\lite_browser\cef_binary_149.0.6\build\tests\cefsimple_capi\Release\dxcompiler.dll"
-  File "c:\projects\lite_browser\cef_binary_149.0.6\build\tests\cefsimple_capi\Release\dxil.dll"
-  File "c:\projects\lite_browser\cef_binary_149.0.6\build\tests\cefsimple_capi\Release\icudtl.dat"
-  File "c:\projects\lite_browser\cef_binary_149.0.6\build\tests\cefsimple_capi\Release\libEGL.dll"
-  File "c:\projects\lite_browser\cef_binary_149.0.6\build\tests\cefsimple_capi\Release\libGLESv2.dll"
-  File "c:\projects\lite_browser\cef_binary_149.0.6\build\tests\cefsimple_capi\Release\v8_context_snapshot.bin"
-  File "c:\projects\lite_browser\cef_binary_149.0.6\build\tests\cefsimple_capi\Release\vk_swiftshader.dll"
-  File "c:\projects\lite_browser\cef_binary_149.0.6\build\tests\cefsimple_capi\Release\vk_swiftshader_icd.json"
-  File "c:\projects\lite_browser\cef_binary_149.0.6\build\tests\cefsimple_capi\Release\vulkan-1.dll"
+  File "c:\projects\lite_browser\cef_binary_151.3.24\build\tests\cefsimple_capi\Release\lite_browser.exe"
+  File /nonfatal "c:\projects\lite_browser\cef_binary_151.3.24\build\tests\cefsimple_capi\Release\lite_browser.dll"
+  File "c:\projects\lite_browser\cef_binary_151.3.24\build\tests\cefsimple_capi\Release\libcef.dll"
+  File "c:\projects\lite_browser\cef_binary_151.3.24\build\tests\cefsimple_capi\Release\chrome_elf.dll"
+  File "c:\projects\lite_browser\cef_binary_151.3.24\build\tests\cefsimple_capi\Release\d3dcompiler_47.dll"
+  File "c:\projects\lite_browser\cef_binary_151.3.24\build\tests\cefsimple_capi\Release\dxcompiler.dll"
+  File "c:\projects\lite_browser\cef_binary_151.3.24\build\tests\cefsimple_capi\Release\dxil.dll"
+  File "c:\projects\lite_browser\cef_binary_151.3.24\build\tests\cefsimple_capi\Release\icudtl.dat"
+  File "c:\projects\lite_browser\cef_binary_151.3.24\build\tests\cefsimple_capi\Release\libEGL.dll"
+  File "c:\projects\lite_browser\cef_binary_151.3.24\build\tests\cefsimple_capi\Release\libGLESv2.dll"
+  File "c:\projects\lite_browser\cef_binary_151.3.24\build\tests\cefsimple_capi\Release\v8_context_snapshot.bin"
+  File "c:\projects\lite_browser\cef_binary_151.3.24\build\tests\cefsimple_capi\Release\vk_swiftshader.dll"
+  File "c:\projects\lite_browser\cef_binary_151.3.24\build\tests\cefsimple_capi\Release\vk_swiftshader_icd.json"
+  File "c:\projects\lite_browser\cef_binary_151.3.24\build\tests\cefsimple_capi\Release\vulkan-1.dll"
   
   ; Resource files
-  File "c:\projects\lite_browser\cef_binary_149.0.6\build\tests\cefsimple_capi\Release\chrome_100_percent.pak"
-  File "c:\projects\lite_browser\cef_binary_149.0.6\build\tests\cefsimple_capi\Release\chrome_200_percent.pak"
-  File "c:\projects\lite_browser\cef_binary_149.0.6\build\tests\cefsimple_capi\Release\resources.pak"
+  File "c:\projects\lite_browser\cef_binary_151.3.24\build\tests\cefsimple_capi\Release\chrome_100_percent.pak"
+  File "c:\projects\lite_browser\cef_binary_151.3.24\build\tests\cefsimple_capi\Release\chrome_200_percent.pak"
+  File "c:\projects\lite_browser\cef_binary_151.3.24\build\tests\cefsimple_capi\Release\resources.pak"
   
   ; Locales folder
   SetOutPath "$INSTDIR\locales"
-  File "c:\projects\lite_browser\cef_binary_149.0.6\build\tests\cefsimple_capi\Release\locales\*.*"
+  File "c:\projects\lite_browser\cef_binary_151.3.24\build\tests\cefsimple_capi\Release\locales\*.*"
   
   ; UI folder (Main UI, MD Editor, Bookmark Manager, Extractor)
   SetOutPath "$INSTDIR\ui"

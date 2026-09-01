@@ -653,3 +653,30 @@ Google Gemini(`gemini.google.com`), Claude(`claude.ai`), ChatGPT(`chatgpt.com`) 
 ### 21.4 빌드 및 검증
 - **빌드 결과**: Debug 빌드 완료 (`Debug/lite_browser.exe`, Exit code 0).
 
+---
+
+## 22. Chromium 151 / CEF 151.3.24 최신 릴리스 업그레이드 및 인스톨러 패키징 (CEF 151.3.24 Upgrade)
+
+### 22.1 개요
+기존 `cef_binary_149.0.6` 기반으로 개발 및 패키징되던 LiteBrowser를 최신 Chromium 151 기반의 **CEF 151.3.24 (`151.3.24+g2384915+chromium-151.0.7922.174`)** 버전으로 전면 업그레이드하고, Debug/Release 빌드 및 NSIS 인스톨러 패키징을 완료했습니다.
+
+### 22.2 핵심 작업 내역
+1. **신규 바이너리 배포판 디렉토리 구축 (`cef_binary_151.3.24`)**:
+   - `c:\projects\cef-latest\cef_binary`를 `c:\projects\lite_browser\cef_binary_151.3.24`로 복제 구성하여 기존 149 버전과의 격리 및 롤백 안전성 확보.
+2. **커스텀 C 백엔드 소스 및 리소스 일괄 이관**:
+   - LiteBrowser 핵심 소스(`browser_context.h`, `cefsimple_win.c`, `simple_app.c`, `simple_handler.c`, `simple_load_handler.c`, `simple_display_handler.c`, `simple_life_span_handler.c`, `simple_auth.c`, `simple_download_handler.c`, `simple_vault.c`, `CMakeLists.txt`, `win/` 리소스)를 `cef_binary_151.3.24\tests\cefsimple_capi`로 이관.
+3. **CMake 및 Visual Studio 18 2026 빌드 환경 구성**:
+   - `cmake -B build -G "Visual Studio 18 2026" -A x64`로 솔루션 생성.
+   - C11 Atomics, DPAPI(`crypt32.lib`), `lite_browser.exe` 출력 및 아이콘 주입 파이프라인 검증.
+4. **빌드 및 C API 호환성 검증**:
+   - Debug 빌드: `cmake --build build --config Debug --target cefsimple_capi` (Exit code 0).
+   - Release 빌드: `cmake --build build --config Release --target cefsimple_capi` (Exit code 0).
+5. **`.gitignore` 및 NSIS 인스톨러 (`installer.nsi`) 동기화**:
+   - `.gitignore`에 `cef_binary_151.3.24` 대용량 바이너리 제외 룰 추가.
+   - `installer.nsi`의 파일 참조 경로를 `cef_binary_151.3.24` Release 빌드로 갱신.
+   - `makensis installer.nsi` 실행하여 최종 설치 프로그램 `LiteBrowserInstaller.exe` (182 MB) 생성 완료.
+
+### 22.3 빌드 및 검증
+- **Debug 바이너리**: [`cef_binary_151.3.24/build/tests/cefsimple_capi/Debug/lite_browser.exe`](file:///c:/projects/lite_browser/cef_binary_151.3.24/build/tests/cefsimple_capi/Debug/lite_browser.exe) (Exit code 0)
+- **Release 바이너리**: [`cef_binary_151.3.24/build/tests/cefsimple_capi/Release/lite_browser.exe`](file:///c:/projects/lite_browser/cef_binary_151.3.24/build/tests/cefsimple_capi/Release/lite_browser.exe) (Exit code 0)
+- **인스톨러 패키지**: [`c:\projects\lite_browser\LiteBrowserInstaller.exe`](file:///c:/projects/lite_browser/LiteBrowserInstaller.exe) (Exit code 0)
