@@ -209,6 +209,7 @@ void CEF_CALLBACK life_span_handler_on_after_created(
     RECT r;
     GetClientRect(win_ctx->main_hwnd, &r);
     PostMessage(win_ctx->main_hwnd, WM_SIZE, 0, MAKELPARAM(r.right, r.bottom));
+    SubclassAllChildWindows(win_ctx->main_hwnd);
   }
 }
 

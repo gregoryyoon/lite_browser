@@ -770,3 +770,26 @@ CEF 149에서 CEF 151.3.24로 업그레이드한 이후 앱 실행부터 북마�
 
 ### 26.3 빌드 및 검증
 - **CEF 151.3.24 Debug 빌드**: 성공 (Exit code 0).
+
+---
+
+## 27. 자식 윈도우 서브클래싱 기반 리사이즈 커서 복원 및 분할 화면 직각 사각형 선택 보더 구현
+
+### 27.1 개요
+0px 보더리스 레이아웃 도입 후 발생한 2가지 사이드 이펙트를 완벽히 해결했습니다:
+1. 자식 브라우저 윈도우가 메인 윈도우를 덮어 외곽 마우스 히트테스트를 가로채던 문제를 **자식 윈도우 서브클래싱(`HTTRANSPARENT`)** 기법으로 해결하여 0px 밀착 상태에서도 네이티브 리사이즈 커서(`↔`, `↕`, `⤢`) 및 창 크기 조절이 정상 작동하도록 복원했습니다.
+2. 듀얼 분할(Split) 모드에서 어떤 화면이 활성화되었는지 한눈에 식별할 수 있도록 **Edge 분할 화면 스타일의 직각 사각형 2px 블루 선택 보더(`RGB(0, 102, 204)`)**와 비활성 연회색 보더(`RGB(220, 220, 225)`)를 정밀 복원했습니다. (단일 탭 모드는 0px 완전 밀착 유지)
+
+### 27.2 핵심 개선 내역
+1. **자식 윈도우 서브클래싱 (`ChildBorderSubclassProc` / `SubclassAllChildWindows`) ([`browser_context.h`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/browser_context.h), [`simple_app.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c), [`simple_life_span_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_life_span_handler.c))**:
+   - `commctrl.h`의 `SetWindowSubclass`를 활용하여 상단 툴바, 웹 본문 탭, 분할 화면, AI 사이드패널 등 모든 자식 브라우저 윈도우에 서브클래스 프로시저를 등록.
+   - 창 가장자리 6px 영역에서 `WM_NCHITTEST` 수신 시 `HTTRANSPARENT`를 반환하여 메인 윈도우로 히트테스트를 투과 전달.
+   - 메인 윈도우(`LiteBrowserMainWndProc`)가 상/하/좌/우 4면 및 4개 모서리 대각선에 대해 적절한 `HTLEFT`, `HTRIGHT`, `HTTOP`, `HTBOTTOM`, `HTTOPLEFT` 등을 반환하여 네이티브 창 크기 조절 커서 노출 및 리사이징 루프 동작.
+2. **분할 화면 2px 직각 사각형 블루 선택 보더 복원 ([`simple_app.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c))**:
+   - `WM_SIZE`에서 분할 화면 브라우저에 2px 인셋(`left_x + 2, content_y + 2, left_w - 4, content_h - 4`)을 적용.
+   - `WM_PAINT`에서 활성화된 화면에 2px 블루 직각 사각형 보더(`RGB(0, 102, 204)`), 비활성 화면에 2px 연회색 보더(`RGB(220, 220, 225)`)를 드로잉하여 시인성을 극대화.
+   - 단일 탭 화면은 0px 완전 밀착 풀위드 렌더링 유지.
+
+### 27.3 빌드 및 검증
+- **CEF 151.3.24 Debug 빌드**: 성공 (Exit code 0).
+

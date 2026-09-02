@@ -267,10 +267,43 @@ IMPLEMENT_REFCOUNTING_SIMPLE(simple_browser_process_handler_t,
 
 #if defined(OS_WIN)
 #include "tests/cefsimple_capi/browser_context.h"
+#include <commctrl.h>
+#pragma comment(lib, "comctl32.lib")
 
 #define MAX_WINDOWS 10
 static browser_window_t* g_windows[MAX_WINDOWS] = {NULL};
 int g_window_count = 0;
+
+static LRESULT CALLBACK ChildBorderSubclassProc(
+    HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
+    UINT_PTR uIdSubclass, DWORD_PTR dwRefData) {
+  if (uMsg == WM_NCHITTEST) {
+    HWND main_hwnd = (HWND)dwRefData;
+    if (IsWindow(main_hwnd) && !IsZoomed(main_hwnd)) {
+      POINT pt = { (short)LOWORD(lParam), (short)HIWORD(lParam) };
+      RECT wr;
+      GetWindowRect(main_hwnd, &wr);
+      const int border = 6;
+      if (pt.x < wr.left + border || pt.x >= wr.right - border ||
+          pt.y < wr.top + border || pt.y >= wr.bottom - border) {
+        return HTTRANSPARENT;
+      }
+    }
+  }
+  return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+}
+
+static BOOL CALLBACK EnumAndSubclassChildren(HWND child, LPARAM lParam) {
+  HWND main_hwnd = (HWND)lParam;
+  SetWindowSubclass(child, ChildBorderSubclassProc, 1001, (DWORD_PTR)main_hwnd);
+  return TRUE;
+}
+
+void SubclassAllChildWindows(HWND main_hwnd) {
+  if (IsWindow(main_hwnd)) {
+    EnumChildWindows(main_hwnd, EnumAndSubclassChildren, (LPARAM)main_hwnd);
+  }
+}
 
 LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
                                         LPARAM lParam)
@@ -346,7 +379,7 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
       RECT wr;
       GetWindowRect(hwnd, &wr);
 
-      const int border = 8;
+      const int border = 6;
       int top = pt.y < wr.top + border;
       int bottom = pt.y >= wr.bottom - border;
       int left = pt.x < wr.left + border;
@@ -366,6 +399,9 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
   case WM_MOUSEACTIVATE:
   case WM_PARENTNOTIFY:
   {
+    if (message == WM_PARENTNOTIFY && LOWORD(wParam) == WM_CREATE) {
+      SubclassAllChildWindows(hwnd);
+    }
     if (win_ctx) {
       POINT pt;
       GetCursorPos(&pt);
@@ -441,11 +477,34 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
           if (ratio < 0.2f || ratio > 0.8f) ratio = 0.5f;
 
           int left_w = (int)((main_area_w - split_bar_w) * ratio);
+          int right_w = main_area_w - split_bar_w - left_w;
+          int left_x = 0;
+          int right_x = left_w + split_bar_w;
           int bar_x = left_w;
 
+          HBRUSH active_brush = CreateSolidBrush(RGB(0, 102, 204));
+          HBRUSH inactive_brush = CreateSolidBrush(RGB(220, 220, 225));
           HBRUSH bar_brush = CreateSolidBrush(RGB(228, 230, 235));
+
+          RECT left_rect = {left_x, content_y, left_x + left_w, content_y + content_h};
           RECT bar_rect = {bar_x, content_y, bar_x + split_bar_w, content_y + content_h};
+          RECT right_rect = {right_x, content_y, right_x + right_w, content_y + content_h};
+
+          // Draw 2px rectangular border around left screen
+          FrameRect(hdc, &left_rect, (active_tab->active_split == 0) ? active_brush : inactive_brush);
+          RECT left_rect_inner = {left_x + 1, content_y + 1, left_x + left_w - 1, content_y + content_h - 1};
+          FrameRect(hdc, &left_rect_inner, (active_tab->active_split == 0) ? active_brush : inactive_brush);
+
+          // Draw central splitter bar
           FillRect(hdc, &bar_rect, bar_brush);
+
+          // Draw 2px rectangular border around right screen
+          FrameRect(hdc, &right_rect, (active_tab->active_split == 1) ? active_brush : inactive_brush);
+          RECT right_rect_inner = {right_x + 1, content_y + 1, right_x + right_w - 1, content_y + content_h - 1};
+          FrameRect(hdc, &right_rect_inner, (active_tab->active_split == 1) ? active_brush : inactive_brush);
+
+          DeleteObject(active_brush);
+          DeleteObject(inactive_brush);
           DeleteObject(bar_brush);
         }
       }
@@ -690,7 +749,7 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
           if (host) {
             HWND left_hwnd = host->get_window_handle(host);
             if (left_hwnd) {
-              MoveWindow(left_hwnd, left_x, content_y, left_w, content_h, TRUE);
+              MoveWindow(left_hwnd, left_x + 2, content_y + 2, left_w - 4, content_h - 4, TRUE);
               ShowWindow(left_hwnd, SW_SHOW);
             }
             host->base.release(&host->base);
@@ -701,7 +760,7 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
         if (r_host) {
           HWND right_hwnd = r_host->get_window_handle(r_host);
           if (right_hwnd) {
-            MoveWindow(right_hwnd, right_x, content_y, right_w, content_h, TRUE);
+            MoveWindow(right_hwnd, right_x + 2, content_y + 2, right_w - 4, content_h - 4, TRUE);
             ShowWindow(right_hwnd, SW_SHOW);
           }
           r_host->base.release(&r_host->base);
@@ -798,6 +857,8 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
         frame->base.release(&frame->base);
       }
     }
+
+    SubclassAllChildWindows(hwnd);
 
     return 0;
   }
