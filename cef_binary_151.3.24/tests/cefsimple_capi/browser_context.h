@@ -58,6 +58,7 @@ typedef struct _browser_window_t {
 #if defined(OS_WIN)
 browser_window_t* create_browser_window(const char* startup_url);
 browser_window_t* create_browser_window_for_detached(cef_browser_t* detached_browser, HWND detached_hwnd, const char* url, const char* title, int x, int y);
+void CreateSidepanelBrowser(browser_window_t* win_ctx);
 extern int g_window_count;
 #endif
 

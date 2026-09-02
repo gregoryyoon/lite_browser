@@ -1007,6 +1007,9 @@ int CEF_CALLBACK request_handler_on_before_browse(
 
         if (strcmp(action, "toggle-ai-sidepanel") == 0) {
           win_ctx->show_sidepanel = !win_ctx->show_sidepanel;
+          if (win_ctx->show_sidepanel && !win_ctx->sidepanel_browser && !win_ctx->sidepanel_handler) {
+            CreateSidepanelBrowser(win_ctx);
+          }
           RECT r;
           GetClientRect(win_ctx->main_hwnd, &r);
           PostMessage(win_ctx->main_hwnd, WM_SIZE, 0, MAKELPARAM(r.right, r.bottom));

@@ -147,6 +147,50 @@ static void ResolveSidepanelPath(cef_string_t *out_url) {
 #endif
 }
 
+// Resolves local path to ui/manager.html (Bookmarks manager)
+static void ResolveManagerPath(cef_string_t *out_url) {
+#if defined(OS_WIN)
+  char exe_path[MAX_PATH];
+  GetModuleFileNameA(NULL, exe_path, MAX_PATH);
+
+  char path[MAX_PATH];
+  strcpy(path, exe_path);
+
+  int found = 0;
+  for (int i = 0; i < 8; i++) {
+    char *last_backslash = strrchr(path, '\\');
+    if (!last_backslash)
+      break;
+    *last_backslash = '\0';
+
+    char test_path[MAX_PATH];
+    snprintf(test_path, sizeof(test_path), "%s\\ui\\manager.html", path);
+    DWORD attrib = GetFileAttributesA(test_path);
+    if (attrib != INVALID_FILE_ATTRIBUTES &&
+        !(attrib & FILE_ATTRIBUTE_DIRECTORY)) {
+      char file_url[MAX_PATH + 16];
+      snprintf(file_url, sizeof(file_url), "file:///%s/ui/manager.html", path);
+      for (size_t j = 8; file_url[j]; j++) {
+        if (file_url[j] == '\\') {
+          file_url[j] = '/';
+        }
+      }
+      cef_string_from_ascii(file_url, strlen(file_url), out_url);
+      found = 1;
+      break;
+    }
+  }
+
+  if (!found) {
+    cef_string_from_ascii("file:///C:/projects/lite_browser/ui/manager.html", 48,
+                          out_url);
+  }
+#else
+  cef_string_from_ascii("file:///projects/lite_browser/ui/manager.html", 45,
+                        out_url);
+#endif
+}
+
 
 
 // Implement reference counting functions for simple_app_t.
@@ -834,6 +878,53 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
   return DefWindowProc(hwnd, message, wParam, lParam);
 }
 
+void CreateSidepanelBrowser(browser_window_t* win_ctx) {
+  if (!win_ctx || !win_ctx->main_hwnd) return;
+  if (win_ctx->sidepanel_browser || win_ctx->sidepanel_handler) return;
+
+  RECT rect;
+  GetClientRect(win_ctx->main_hwnd, &rect);
+  int width = rect.right;
+  int height = rect.bottom;
+
+  int ui_height = GetUIHeightForWindow(win_ctx->main_hwnd);
+  int content_y = ui_height + 1;
+  int content_h = height - content_y - 1;
+
+  int default_sp_w = (win_ctx->sidepanel_width > 0) ? win_ctx->sidepanel_width : (int)(380 * (ui_height / 72.0f));
+
+  cef_browser_settings_t browser_settings = {};
+  browser_settings.size = sizeof(cef_browser_settings_t);
+
+  cef_window_info_t sidepanel_window_info = {};
+  sidepanel_window_info.size = sizeof(cef_window_info_t);
+  sidepanel_window_info.style =
+      WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
+  sidepanel_window_info.parent_window = win_ctx->main_hwnd;
+  sidepanel_window_info.bounds.x = width - default_sp_w;
+  sidepanel_window_info.bounds.y = content_y;
+  sidepanel_window_info.bounds.width = default_sp_w;
+  sidepanel_window_info.bounds.height = content_h;
+  sidepanel_window_info.runtime_style = CEF_RUNTIME_STYLE_DEFAULT;
+
+  cef_string_t sp_url = {};
+  ResolveSidepanelPath(&sp_url);
+
+  simple_handler_t *sidepanel_handler = simple_handler_create(0);
+  sidepanel_handler->window_ctx = win_ctx;
+  sidepanel_handler->type = BROWSER_TYPE_SIDEPANEL;
+
+  win_ctx->sidepanel_browser = NULL;
+  win_ctx->sidepanel_hwnd = NULL;
+  win_ctx->sidepanel_width = default_sp_w;
+  win_ctx->sidepanel_handler = sidepanel_handler;
+
+  cef_browser_host_create_browser(
+      &sidepanel_window_info, &sidepanel_handler->client, &sp_url,
+      &browser_settings, NULL, NULL);
+  cef_string_clear(&sp_url);
+}
+
 browser_window_t* create_browser_window(const char* startup_url) {
   HINSTANCE hInstance = GetModuleHandle(NULL);
 
@@ -955,7 +1046,14 @@ browser_window_t* create_browser_window(const char* startup_url) {
   content_window_info.runtime_style = CEF_RUNTIME_STYLE_DEFAULT;
 
   cef_string_t content_url = {};
-  cef_string_from_ascii(startup_url, strlen(startup_url), &content_url);
+  if (startup_url && (strcmp(startup_url, "lite://favorites") == 0 ||
+                      strcmp(startup_url, "lite://bookmarks") == 0 ||
+                      strcmp(startup_url, "edge://favorites") == 0 ||
+                      strcmp(startup_url, "chrome://favorites") == 0)) {
+    ResolveManagerPath(&content_url);
+  } else {
+    cef_string_from_ascii(startup_url, strlen(startup_url), &content_url);
+  }
 
   simple_handler_t *content_handler = simple_handler_create(0);
   content_handler->window_ctx = win_ctx;
@@ -976,36 +1074,13 @@ browser_window_t* create_browser_window(const char* startup_url) {
       &browser_settings, NULL, NULL);
   cef_string_clear(&content_url);
 
-  // 3. Create Sidepanel child browser (Initially hidden)
+  // 3. Initialize Sidepanel state (Initially hidden & lazy loaded on demand)
   int default_sp_w = (int)(380 * (ui_height / 72.0f));
-  cef_window_info_t sidepanel_window_info = {};
-  sidepanel_window_info.size = sizeof(cef_window_info_t);
-  sidepanel_window_info.style =
-      WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
-  sidepanel_window_info.parent_window = main_hwnd;
-  sidepanel_window_info.bounds.x = width - default_sp_w;
-  sidepanel_window_info.bounds.y = content_y;
-  sidepanel_window_info.bounds.width = default_sp_w;
-  sidepanel_window_info.bounds.height = content_h;
-  sidepanel_window_info.runtime_style = CEF_RUNTIME_STYLE_DEFAULT;
-
-  cef_string_t sp_url = {};
-  ResolveSidepanelPath(&sp_url);
-
-  simple_handler_t *sidepanel_handler = simple_handler_create(0);
-  sidepanel_handler->window_ctx = win_ctx;
-  sidepanel_handler->type = BROWSER_TYPE_SIDEPANEL;
-
   win_ctx->sidepanel_browser = NULL;
   win_ctx->sidepanel_hwnd = NULL;
   win_ctx->show_sidepanel = 0;
   win_ctx->sidepanel_width = default_sp_w;
-  win_ctx->sidepanel_handler = sidepanel_handler;
-
-  cef_browser_host_create_browser(
-      &sidepanel_window_info, &sidepanel_handler->client, &sp_url,
-      &browser_settings, NULL, NULL);
-  cef_string_clear(&sp_url);
+  win_ctx->sidepanel_handler = NULL;
 
   return win_ctx;
 }
@@ -1106,36 +1181,13 @@ browser_window_t* create_browser_window_for_detached(cef_browser_t* detached_bro
     host->base.release(&host->base);
   }
 
-  // 3. Create Sidepanel child browser (Initially hidden)
+  // 3. Initialize Sidepanel state (Initially hidden & lazy loaded on demand)
   int default_sp_w = (int)(380 * (ui_height / 72.0f));
-  cef_window_info_t sidepanel_window_info = {};
-  sidepanel_window_info.size = sizeof(cef_window_info_t);
-  sidepanel_window_info.style =
-      WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
-  sidepanel_window_info.parent_window = main_hwnd;
-  sidepanel_window_info.bounds.x = width - default_sp_w;
-  sidepanel_window_info.bounds.y = content_y;
-  sidepanel_window_info.bounds.width = default_sp_w;
-  sidepanel_window_info.bounds.height = content_h;
-  sidepanel_window_info.runtime_style = CEF_RUNTIME_STYLE_DEFAULT;
-
-  cef_string_t sp_url = {};
-  ResolveSidepanelPath(&sp_url);
-
-  simple_handler_t *sidepanel_handler = simple_handler_create(0);
-  sidepanel_handler->window_ctx = win_ctx;
-  sidepanel_handler->type = BROWSER_TYPE_SIDEPANEL;
-
   win_ctx->sidepanel_browser = NULL;
   win_ctx->sidepanel_hwnd = NULL;
   win_ctx->show_sidepanel = 0;
   win_ctx->sidepanel_width = default_sp_w;
-  win_ctx->sidepanel_handler = sidepanel_handler;
-
-  cef_browser_host_create_browser(
-      &sidepanel_window_info, &sidepanel_handler->client, &sp_url,
-      &browser_settings, NULL, NULL);
-  cef_string_clear(&sp_url);
+  win_ctx->sidepanel_handler = NULL;
 
   ShowWindow(main_hwnd, SW_SHOW);
   UpdateWindow(main_hwnd);
@@ -1170,7 +1222,7 @@ void CEF_CALLBACK browser_process_handler_on_context_initialized(
   }
   else
   {
-    cef_string_from_ascii("lite://favorites", 16, &url);
+    ResolveManagerPath(&url);
   }
 
   cef_string_utf8_t url_utf8 = {};
