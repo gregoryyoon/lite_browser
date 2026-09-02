@@ -2781,6 +2781,7 @@ void CEF_CALLBACK context_menu_on_before_context_menu(
           int width = rect.right;
           int height = rect.bottom;
           
+          int ui_height = GetUIHeightForWindow(win_ctx->main_hwnd);
           cef_browser_settings_t browser_settings = {};
           browser_settings.size = sizeof(cef_browser_settings_t);
           
@@ -2788,10 +2789,10 @@ void CEF_CALLBACK context_menu_on_before_context_menu(
           content_window_info.size = sizeof(cef_window_info_t);
           content_window_info.style = WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
           content_window_info.parent_window = win_ctx->main_hwnd;
-          content_window_info.bounds.x = 1;
-          content_window_info.bounds.y = 101;
-          content_window_info.bounds.width = width - 2;
-          content_window_info.bounds.height = height - 102;
+          content_window_info.bounds.x = 0;
+          content_window_info.bounds.y = ui_height;
+          content_window_info.bounds.width = width;
+          content_window_info.bounds.height = height - ui_height;
           content_window_info.runtime_style = CEF_RUNTIME_STYLE_DEFAULT;
           
           cef_string_t content_url = {};
@@ -2858,8 +2859,8 @@ void CreateNewTab(browser_window_t* win_ctx, const char* url) {
   int height = rect.bottom;
 
   int ui_height = GetUIHeightForWindow(win_ctx->main_hwnd);
-  int content_y = ui_height + 1;
-  int content_h = height - content_y - 1;
+  int content_y = ui_height;
+  int content_h = height - content_y;
 
   cef_browser_settings_t browser_settings = {};
   browser_settings.size = sizeof(cef_browser_settings_t);
@@ -2868,9 +2869,9 @@ void CreateNewTab(browser_window_t* win_ctx, const char* url) {
   content_window_info.size = sizeof(cef_window_info_t);
   content_window_info.style = WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
   content_window_info.parent_window = win_ctx->main_hwnd;
-  content_window_info.bounds.x = 1;
+  content_window_info.bounds.x = 0;
   content_window_info.bounds.y = content_y;
-  content_window_info.bounds.width = width - 2;
+  content_window_info.bounds.width = width;
   content_window_info.bounds.height = content_h;
   content_window_info.runtime_style = CEF_RUNTIME_STYLE_DEFAULT;
 

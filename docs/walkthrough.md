@@ -747,5 +747,26 @@ CEF 149에서 CEF 151.3.24로 업그레이드한 이후 앱 실행부터 북마�
 - **Debug 빌드**: `cmake --build c:\projects\lite_browser\cef_binary_151.3.24\build --config Debug --target cefsimple_capi` (Exit code 0).
 - **Release 빌드**: `cmake --build c:\projects\lite_browser\cef_binary_151.3.24\build --config Release --target cefsimple_capi` (Exit code 0).
 
+---
 
+## 26. 0px 완전 밀착 심리스(Seamless) 브라우저 레이아웃 및 갭 제거 (0px Gap Seamless Full-Width Layout)
 
+### 26.1 개요
+메인 윈도우와 내부 자식 브라우저(상단 툴바, 웹 본문 탭, 듀얼 분할 화면, AI 사이드패널) 사이에 존재하던 OS 외곽 프레임과 1~3px 여백(Inset Gap)을 제거하고, **모든 자식 브라우저 윈도우가 메인 윈도우 및 인접 브라우저와 0px로 완벽히 밀착(Full-Width Seamless Fitting)**되도록 레이아웃 엔진을 개선했습니다.
+
+### 26.2 핵심 개선 내역
+1. **Windows 비클라이언트 영역(OS 프레임) 0px 제거 (`WM_NCCALCSIZE`, `WM_NCHITTEST`) ([`simple_app.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c))**:
+   - `WM_NCCALCSIZE`에서 `return 0`을 처리하여 `WS_THICKFRAME` 스타일에 의해 창 외곽에 기본으로 생성되던 8px 두께의 흰색 Non-Client 프레임을 완전히 제거.
+   - `WM_NCHITTEST`를 통해 창 외곽 8px 모서리에서 네이티브 리사이즈 조절 커서(↔, ↕, ⤢)가 정상 작동하도록 바인딩.
+   - `SetWindowPos(..., SWP_FRAMECHANGED)`를 호출하여 DWM 드롭 섀도우를 유지하면서 클라이언트 영역이 물리적 창의 최상단/좌측 끝(x=0, y=0)까지 확장되도록 보정.
+2. **단일 탭 웹 본문 0px 밀착 ([`simple_app.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c), [`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c))**:
+   - `content_y = ui_height`, `content_h = height - content_y`, `total_w = width`로 재계산.
+   - 본문 브라우저 좌표를 `x = 0, y = ui_height, width = width, height = height - ui_height`로 설정하여 상/하/좌/우의 1px 여백을 제거하고 창 끝까지 꽉 채움.
+3. **듀얼 분할(Split) 화면 및 스플리터 0px 밀착 ([`simple_app.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c))**:
+   - 분할 화면 테두리의 2px 인셋을 제거하고, 좌측 브라우저는 `x = 0`부터, 우측 브라우저는 분할 바 바로 옆부터 창 끝까지 완전 밀착 렌더링.
+   - 가운데 분할 바(Splitter) 두께를 4px로 슬림화하여 자연스럽고 모던한 일체형 UI 구현.
+4. **AI 사이드패널 0px 밀착 ([`simple_app.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c))**:
+   - 본문 영역과 사이드패널 사이의 4px 리사이즈 바를 제외한 상/하/우측 여백을 0px로 밀착 배치.
+
+### 26.3 빌드 및 검증
+- **CEF 151.3.24 Debug 빌드**: 성공 (Exit code 0).
