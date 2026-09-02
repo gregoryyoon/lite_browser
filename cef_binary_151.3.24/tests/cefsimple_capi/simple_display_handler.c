@@ -111,6 +111,11 @@ display_handler_on_address_change(cef_display_handler_t* self,
                                   cef_browser_t* browser,
                                   cef_frame_t* frame,
                                   const cef_string_t* url) {
+  // Ignore address changes from subframes/iframes
+  if (frame && !frame->is_main(frame)) {
+    return;
+  }
+
   simple_display_handler_t* handler = (simple_display_handler_t*)self;
 
   cef_string_utf8_t url_utf8 = {};

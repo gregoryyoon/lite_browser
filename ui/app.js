@@ -258,6 +258,9 @@ window.updateAddress = function(url) {
     }
   }
   updateStarIcon();
+};
+
+window.recordPageVisit = function(url) {
   if (url && /^https?:\/\//i.test(url)) {
     addHistoryEntry(url, currentTitle);
   }

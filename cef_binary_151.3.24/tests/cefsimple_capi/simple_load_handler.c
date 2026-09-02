@@ -234,6 +234,83 @@ load_handler_on_loading_state_change(cef_load_handler_t* self,
   }
 }
 
+static void EscapeJsonStringLocal(const char* src, char* dest, size_t dest_len) {
+  if (!src || !dest || dest_len == 0) return;
+  size_t j = 0;
+  for (size_t i = 0; src[i] != '\0' && j + 2 < dest_len; i++) {
+    unsigned char c = (unsigned char)src[i];
+    if (c == '\\') {
+      dest[j++] = '\\'; dest[j++] = '\\';
+    } else if (c == '"') {
+      dest[j++] = '\\'; dest[j++] = '"';
+    } else if (c == '\n') {
+      dest[j++] = '\\'; dest[j++] = 'n';
+    } else if (c == '\r') {
+      dest[j++] = '\\'; dest[j++] = 'r';
+    } else if (c == '\t') {
+      dest[j++] = '\\'; dest[j++] = 't';
+    } else if (c < 32) {
+      // skip other control characters
+    } else {
+      dest[j++] = c;
+    }
+  }
+  dest[j] = '\0';
+}
+
+void CEF_CALLBACK load_handler_on_load_end(cef_load_handler_t* self,
+                                           cef_browser_t* browser,
+                                           cef_frame_t* frame,
+                                           int httpStatusCode) {
+  simple_load_handler_t* handler = (simple_load_handler_t*)self;
+  browser_window_t *win_ctx = handler->parent->window_ctx;
+  if (!win_ctx || handler->parent->type == BROWSER_TYPE_POPUP) return;
+
+  // 1. Only process for the main (top-level) frame
+  if (!frame || !frame->is_main(frame)) return;
+
+  // 2. Ignore server error codes (>= 400)
+  if (httpStatusCode >= 400) return;
+
+  // 3. Ignore if this browser is the UI toolbar browser itself
+  if (win_ctx->ui_browser &&
+      browser->get_identifier(browser) == win_ctx->ui_browser->get_identifier(win_ctx->ui_browser)) {
+    return;
+  }
+
+  cef_string_userfree_t url_uf = frame->get_url(frame);
+  if (!url_uf) return;
+
+  cef_string_utf8_t url_utf8 = {};
+  cef_string_to_utf8(url_uf->str, url_uf->length, &url_utf8);
+  const char* cur_url = url_utf8.str;
+
+  // 4. Only record for web URLs (http, https)
+  if (cur_url && (strncmp(cur_url, "http://", 7) == 0 || strncmp(cur_url, "https://", 8) == 0)) {
+    if (win_ctx->ui_browser) {
+      char escaped_url[4096] = {0};
+      EscapeJsonStringLocal(cur_url, escaped_url, sizeof(escaped_url));
+
+      char js_code[4500];
+      snprintf(js_code, sizeof(js_code),
+               "if (window.recordPageVisit) { window.recordPageVisit(\"%s\"); }",
+               escaped_url);
+
+      cef_frame_t* ui_frame = win_ctx->ui_browser->get_main_frame(win_ctx->ui_browser);
+      if (ui_frame) {
+        cef_string_t js_str = {};
+        cef_string_from_utf8(js_code, strlen(js_code), &js_str);
+        ui_frame->execute_java_script(ui_frame, &js_str, NULL, 0);
+        cef_string_clear(&js_str);
+        ui_frame->base.release(&ui_frame->base);
+      }
+    }
+  }
+
+  cef_string_utf8_clear(&url_utf8);
+  cef_string_userfree_free(url_uf);
+}
+
 simple_load_handler_t* load_handler_create(simple_handler_t* parent) {
   simple_load_handler_t* handler =
       (simple_load_handler_t*)calloc(1, sizeof(simple_load_handler_t));
@@ -247,6 +324,7 @@ simple_load_handler_t* load_handler_create(simple_handler_t* parent) {
   handler->handler.on_load_error = load_handler_on_load_error;
   handler->handler.on_loading_state_change =
       load_handler_on_loading_state_change;
+  handler->handler.on_load_end = load_handler_on_load_end;
 
   // Store parent reference (no ref count - parent owns us).
   handler->parent = parent;

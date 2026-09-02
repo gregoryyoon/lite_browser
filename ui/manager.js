@@ -218,7 +218,13 @@ function renderMainView() {
       filtered.forEach(bm => {
         const card = document.createElement('div');
         card.className = 'bm-card';
-        card.onclick = () => openBookmarkUrl(bm.url);
+        card.onclick = (e) => openBookmarkUrl(bm.url, e.ctrlKey);
+        card.onauxclick = (e) => {
+          if (e.button === 1) {
+            e.preventDefault();
+            openBookmarkUrl(bm.url, true);
+          }
+        };
 
         const thumbHtml = bm.thumbnailUrl 
           ? `<img src="${bm.thumbnailUrl}" class="card-thumb" onerror="this.outerHTML='<div class=\\'card-thumb-placeholder\\'>${(bm.title || 'B')[0]}</div>'">`
@@ -262,7 +268,13 @@ function renderMainView() {
       filtered.forEach(bm => {
         const row = document.createElement('div');
         row.className = 'list-row';
-        row.onclick = () => openBookmarkUrl(bm.url);
+        row.onclick = (e) => openBookmarkUrl(bm.url, e.ctrlKey);
+        row.onauxclick = (e) => {
+          if (e.button === 1) {
+            e.preventDefault();
+            openBookmarkUrl(bm.url, true);
+          }
+        };
         const timeAgo = formatTimeAgo(bm.context?.createdAt);
         const visitCount = getItemVisitCount(bm);
 
@@ -283,9 +295,13 @@ function renderMainView() {
   }
 }
 
-function openBookmarkUrl(url) {
+function openBookmarkUrl(url, newTab = false) {
   if (url) {
-    window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(url);
+    if (newTab) {
+      window.location.href = 'http://ui-action/new-tab?url=' + encodeURIComponent(url);
+    } else {
+      window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(url);
+    }
   }
 }
 

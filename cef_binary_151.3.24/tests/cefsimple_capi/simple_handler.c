@@ -2329,6 +2329,28 @@ int CEF_CALLBACK request_handler_on_before_browse(
             }
             free(text_base64);
           }
+        } else if (strncmp(action, "new-tab?url=", 12) == 0) {
+          const char *encoded_url = action + 12;
+          char *decoded = (char *)malloc(strlen(encoded_url) + 1);
+          if (decoded) {
+            size_t i = 0, j = 0;
+            while (encoded_url[i]) {
+              if (encoded_url[i] == '%' && encoded_url[i + 1] && encoded_url[i + 2]) {
+                char hex[3] = {encoded_url[i + 1], encoded_url[i + 2], '\0'};
+                decoded[j++] = (char)strtol(hex, NULL, 16);
+                i += 3;
+              } else if (encoded_url[i] == '+') {
+                decoded[j++] = ' ';
+                i++;
+              } else {
+                decoded[j++] = encoded_url[i];
+                i++;
+              }
+            }
+            decoded[j] = '\0';
+            CreateNewTab(win_ctx, decoded);
+            free(decoded);
+          }
         } else if (strcmp(action, "new-tab") == 0) {
           CreateNewTab(win_ctx, "lite://favorites");
         } else if (strncmp(action, "switch-tab?id=", 14) == 0) {
