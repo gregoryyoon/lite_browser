@@ -515,10 +515,16 @@ function closeAllPopups() {
   window.location.href = 'http://ui-action/collapse-ui';
 }
 
-function expandUI(height) {
+function expandUI(height, showBackdrop = true) {
   window.location.href = 'http://ui-action/expand-ui?height=' + height;
   const backdrop = document.getElementById('popup-backdrop');
-  if (backdrop) backdrop.classList.remove('hide');
+  if (backdrop) {
+    if (showBackdrop) {
+      backdrop.classList.remove('hide');
+    } else {
+      backdrop.classList.add('hide');
+    }
+  }
 }
 
 function toggleBookmarkAddPopup(event) {
@@ -912,6 +918,16 @@ document.addEventListener('DOMContentLoaded', () => {
       }, 200);
     });
   }
+
+  document.addEventListener('pointerdown', (e) => {
+    const dropdown = document.getElementById('omnibox-dropdown');
+    const addressBar = document.getElementById('address-bar');
+    if (dropdown && !dropdown.classList.contains('hide')) {
+      if (!dropdown.contains(e.target) && e.target !== addressBar) {
+        closeOmniboxDropdown();
+      }
+    }
+  });
 });
 
 function formatTimeAgo(timestamp) {
@@ -1010,7 +1026,32 @@ function updateOmniboxHeight() {
     const dropHeight = dropdown.offsetHeight || dropdown.scrollHeight || 0;
     // 툴바 높이(72px) + 오프셋 + 실제 드롭다운 높이 + 여백(16px) -> 스크롤 없이 가변 높이 확장
     const targetHeight = Math.min(650, Math.max(90, 72 + dropHeight + 16));
-    expandUI(targetHeight);
+    expandUI(targetHeight, false);
+  });
+}
+
+function navigateOmniboxUrl(url, isNewTab = false) {
+  if (!url) return;
+  const addressBar = document.getElementById('address-bar');
+  if (addressBar) {
+    addressBar.value = url;
+    addressBar.blur();
+  }
+  closeOmniboxDropdown();
+  if (isNewTab) {
+    window.location.href = 'http://ui-action/new-tab?url=' + encodeURIComponent(url);
+  } else {
+    window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(url);
+  }
+}
+
+function updateOmniSelection(newIndex) {
+  omniSelectedIndex = newIndex;
+  const dropdown = document.getElementById('omnibox-dropdown');
+  if (!dropdown) return;
+  const allItems = dropdown.querySelectorAll('.omni-item, .omni-google-item, .omni-history-item');
+  allItems.forEach((el, idx) => {
+    el.classList.toggle('selected', idx === omniSelectedIndex);
   });
 }
 
@@ -1026,12 +1067,20 @@ function renderOmniboxDropdown() {
     const itemIndex = globalIndex++;
     const item = document.createElement('div');
     item.className = 'omni-item' + (itemIndex === omniSelectedIndex ? ' selected' : '');
-    item.onclick = () => {
-      const addressBar = document.getElementById('address-bar');
-      if (addressBar) addressBar.blur();
-      window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(bm.url);
-      closeOmniboxDropdown();
-    };
+    item.addEventListener('mouseenter', () => updateOmniSelection(itemIndex));
+    item.addEventListener('mousedown', (e) => e.preventDefault());
+    item.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      navigateOmniboxUrl(bm.url, e.ctrlKey);
+    });
+    item.addEventListener('auxclick', (e) => {
+      if (e.button === 1) {
+        e.preventDefault();
+        e.stopPropagation();
+        navigateOmniboxUrl(bm.url, true);
+      }
+    });
 
     const tagsHtml = (bm.extractedTags || []).map(t => `<span class="omni-tag-chip">#${t}</span>`).join(' ');
     const timeAgoStr = formatTimeAgo(bm.context?.createdAt);
@@ -1062,13 +1111,21 @@ function renderOmniboxDropdown() {
     const googleItemIndex = globalIndex++;
     const googleItem = document.createElement('div');
     googleItem.className = 'omni-google-item' + (omniSelectedIndex === googleItemIndex ? ' selected' : '');
-    googleItem.onclick = () => {
-      const addressBar = document.getElementById('address-bar');
-      if (addressBar) addressBar.blur();
-      const searchUrl = 'https://www.google.com/search?q=' + encodeURIComponent(omniRawQuery);
-      window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(searchUrl);
-      closeOmniboxDropdown();
-    };
+    googleItem.addEventListener('mouseenter', () => updateOmniSelection(googleItemIndex));
+    googleItem.addEventListener('mousedown', (e) => e.preventDefault());
+    const searchUrl = 'https://www.google.com/search?q=' + encodeURIComponent(omniRawQuery);
+    googleItem.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      navigateOmniboxUrl(searchUrl, e.ctrlKey);
+    });
+    googleItem.addEventListener('auxclick', (e) => {
+      if (e.button === 1) {
+        e.preventDefault();
+        e.stopPropagation();
+        navigateOmniboxUrl(searchUrl, true);
+      }
+    });
     googleItem.innerHTML = `
       <span class="omni-icon">🔍</span>
       <span>구글 검색: "${omniRawQuery}"</span>
@@ -1081,12 +1138,20 @@ function renderOmniboxDropdown() {
     const histItemIndex = globalIndex++;
     const histItem = document.createElement('div');
     histItem.className = 'omni-history-item' + (histItemIndex === omniSelectedIndex ? ' selected' : '');
-    histItem.onclick = () => {
-      const addressBar = document.getElementById('address-bar');
-      if (addressBar) addressBar.blur();
-      window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(hist.url);
-      closeOmniboxDropdown();
-    };
+    histItem.addEventListener('mouseenter', () => updateOmniSelection(histItemIndex));
+    histItem.addEventListener('mousedown', (e) => e.preventDefault());
+    histItem.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      navigateOmniboxUrl(hist.url, e.ctrlKey);
+    });
+    histItem.addEventListener('auxclick', (e) => {
+      if (e.button === 1) {
+        e.preventDefault();
+        e.stopPropagation();
+        navigateOmniboxUrl(hist.url, true);
+      }
+    });
 
     const timeAgoStr = formatTimeAgo(hist.visitedAt);
     const visitCount = getItemVisitCount(hist);
@@ -1129,21 +1194,16 @@ function handleOmniboxKeydown(e) {
     const googleIndex = bookmarkCount;
 
     if (omniSelectedIndex < bookmarkCount) {
-      const targetUrl = omniResults[omniSelectedIndex].url;
-      window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(targetUrl);
+      navigateOmniboxUrl(omniResults[omniSelectedIndex].url);
     } else if (hasGoogle && omniSelectedIndex === googleIndex) {
       const searchUrl = 'https://www.google.com/search?q=' + encodeURIComponent(omniRawQuery);
-      window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(searchUrl);
+      navigateOmniboxUrl(searchUrl);
     } else {
       const histIdx = omniSelectedIndex - bookmarkCount - hasGoogle;
       if (histIdx >= 0 && histIdx < omniHistoryResults.length) {
-        const targetUrl = omniHistoryResults[histIdx].url;
-        window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(targetUrl);
+        navigateOmniboxUrl(omniHistoryResults[histIdx].url);
       }
     }
-    const addressBar = document.getElementById('address-bar');
-    if (addressBar) addressBar.blur();
-    closeOmniboxDropdown();
   } else if (e.key === 'Escape') {
     closeOmniboxDropdown();
   }
@@ -1152,6 +1212,7 @@ function handleOmniboxKeydown(e) {
 function closeOmniboxDropdown() {
   const dropdown = document.getElementById('omnibox-dropdown');
   if (dropdown) dropdown.classList.add('hide');
+  omniSelectedIndex = -1;
   closeAllPopups();
 }
 

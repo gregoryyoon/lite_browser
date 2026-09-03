@@ -23,6 +23,8 @@ body {
   flex-direction: column;
   height: 100%;
   width: 100%;
+  position: relative;
+  z-index: 100;
 }
 
 .tabs-bar {
@@ -213,6 +215,8 @@ body {
   -webkit-backdrop-filter: blur(12px);
   border-bottom: 1px solid rgba(0, 0, 0, 0.08);
   gap: 12px;
+  position: relative;
+  z-index: 101;
 }
 
 .nav-buttons {
@@ -387,6 +391,7 @@ body {
   gap: 10px;
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
+  z-index: 102;
 }
 
 .address-container:focus-within {
@@ -876,6 +881,7 @@ body {
   cursor: pointer;
   border-bottom: 1px solid #f4f4f5;
   transition: background 0.12s ease;
+  user-select: none;
 }
 
 .omni-item:hover, .omni-item.selected {
@@ -970,6 +976,7 @@ body {
   cursor: pointer;
   transition: background 0.12s ease;
   border-bottom: 1px solid #f4f4f5;
+  user-select: none;
 }
 
 .omni-google-item:hover, .omni-google-item.selected {
@@ -987,6 +994,7 @@ body {
   border-bottom: 1px solid #f4f4f5;
   transition: background 0.12s ease;
   font-size: 12.5px;
+  user-select: none;
 }
 
 .omni-history-item:hover, .omni-history-item.selected {
