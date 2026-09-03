@@ -912,6 +912,18 @@ document.addEventListener('DOMContentLoaded', () => {
   if (addressBar) {
     addressBar.addEventListener('input', handleOmniboxInput);
     addressBar.addEventListener('keydown', handleOmniboxKeydown);
+    addressBar.addEventListener('focus', () => {
+      if (!addressBar.value.trim()) {
+        handleOmniboxInput({ target: addressBar });
+      }
+    });
+    addressBar.addEventListener('click', () => {
+      const dropdown = document.getElementById('omnibox-dropdown');
+      const isClosed = !dropdown || dropdown.classList.contains('hide');
+      if (isClosed && !addressBar.value.trim()) {
+        handleOmniboxInput({ target: addressBar });
+      }
+    });
     addressBar.addEventListener('blur', () => {
       setTimeout(() => {
         closeOmniboxDropdown();
@@ -951,14 +963,58 @@ function handleOmniboxInput(e) {
   const dropdown = document.getElementById('omnibox-dropdown');
   if (!dropdown) return;
 
-  omniRawQuery = rawValue.trim();
+  const now = Date.now();
+  const thirtyDaysAgo = now - (30 * 24 * 60 * 60 * 1000);
 
+  // 1. When the address bar is empty (cleared via backspace/delete or focused while blank)
   if (!query) {
-    closeOmniboxDropdown();
+    omniRawQuery = '';
+    omniResults = [...(bookmarksData.bookmarks || [])];
+    omniHistoryResults = [...(historyData.history || [])];
+
+    // Sort Bookmarks: Priority 1 (30-day visit count desc), Priority 2 (createdAt desc)
+    omniResults.sort((a, b) => {
+      const visitsA = (a.visitTimestamps || []).filter(t => t >= thirtyDaysAgo).length;
+      const visitsB = (b.visitTimestamps || []).filter(t => t >= thirtyDaysAgo).length;
+      if (visitsB !== visitsA) {
+        return visitsB - visitsA;
+      }
+      const timeA = a.context?.createdAt || a.createdAt || 0;
+      const timeB = b.context?.createdAt || b.createdAt || 0;
+      return timeB - timeA;
+    });
+
+    // Sort History: Priority 1 (30-day visit count desc), Priority 2 (visitedAt desc)
+    omniHistoryResults.sort((a, b) => {
+      const visitsA = (a.visitTimestamps || []).filter(t => t >= thirtyDaysAgo).length;
+      const visitsB = (b.visitTimestamps || []).filter(t => t >= thirtyDaysAgo).length;
+      if (visitsB !== visitsA) {
+        return visitsB - visitsA;
+      }
+      const timeA = a.visitedAt || 0;
+      const timeB = b.visitedAt || 0;
+      return timeB - timeA;
+    });
+
+    // Show top 3 recommended bookmarks and top 3 recent history items
+    omniResults = omniResults.slice(0, 3);
+    omniHistoryResults = omniHistoryResults.slice(0, 3);
+
+    if (omniResults.length === 0 && omniHistoryResults.length === 0) {
+      closeOmniboxDropdown();
+      return;
+    }
+
+    omniSelectedIndex = -1;
+    renderOmniboxDropdown();
+    dropdown.classList.remove('hide');
+    updateOmniboxHeight();
     return;
   }
 
-  // 1. Multi-dimensional matching for Bookmarks
+  omniRawQuery = rawValue.trim();
+
+  // 2. Multi-dimensional matching for Bookmarks
   if (query.startsWith('#')) {
     const tagName = query.slice(1);
     omniResults = bookmarksData.bookmarks.filter(b => 
@@ -975,7 +1031,7 @@ function handleOmniboxInput(e) {
       return matchTitle || matchUrl || matchSnippet || matchIntent || matchTags;
     });
 
-    // 2. Matching for Browsing History
+    // Matching for Browsing History
     omniHistoryResults = (historyData.history || []).filter(h => {
       const matchTitle = (h.title || '').toLowerCase().includes(query);
       const matchUrl = (h.url || '').toLowerCase().includes(query);
@@ -984,9 +1040,6 @@ function handleOmniboxInput(e) {
   }
 
   // Sort Bookmarks: Priority 1 (30-day visit count desc), Priority 2 (createdAt desc)
-  const now = Date.now();
-  const thirtyDaysAgo = now - (30 * 24 * 60 * 60 * 1000);
-
   omniResults.sort((a, b) => {
     const visitsA = (a.visitTimestamps || []).filter(t => t >= thirtyDaysAgo).length;
     const visitsB = (b.visitTimestamps || []).filter(t => t >= thirtyDaysAgo).length;
