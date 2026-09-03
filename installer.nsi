@@ -28,6 +28,17 @@ RequestExecutionLevel admin
 !insertmacro MUI_LANGUAGE "English"
 !insertmacro MUI_LANGUAGE "Korean"
 
+; Version Information & Security Metadata
+VIProductVersion "1.0.0.0"
+VIFileVersion "1.0.0.0"
+
+VIAddVersionKey "ProductName" "Lite Browser"
+VIAddVersionKey "CompanyName" "Gregory Yoon"
+VIAddVersionKey "LegalCopyright" "Copyright (C) 2026 Gregory Yoon. All rights reserved."
+VIAddVersionKey "FileDescription" "Lite Browser Installer"
+VIAddVersionKey "FileVersion" "1.0.0.0"
+VIAddVersionKey "ProductVersion" "1.0.0.0"
+
 Section "Install"
   SetOutPath "$INSTDIR"
   

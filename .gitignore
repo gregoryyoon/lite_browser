@@ -64,3 +64,8 @@ LiteBrowserInstaller.exe
 
 LiteBrowserInstaller.zip
 LiteBrowserInstaller.7z
+
+# Ignore certificate private keys
+*.pfx
+scripts/certs/
+

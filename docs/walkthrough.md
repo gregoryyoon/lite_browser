@@ -823,4 +823,37 @@ CEF 149에서 CEF 151.3.24로 업그레이드한 이후 앱 실행부터 북마�
 3. **CEF 151.3.24 Debug 빌드**:
    - `cmake --build c:\projects\lite_browser\cef_binary_151.3.24\build --config Debug --target cefsimple_capi` (Exit code 0).
 
+---
+
+## 29. 인스톨러 PE 메타데이터 보강 및 Authenticode 코드 서명(Code Signing) 파이프라인 구축 (SmartScreen & Antivirus Trust Hardening)
+
+### 29.1 배경 및 개요
+Microsoft Edge 브라우저(SmartScreen)의 *"일반적으로 다운로드되지 않습니다"* 경고 및 시만텍 엔드포인트 프로텍션(SEP Insight / SONAR)의 실행 차단 문제를 근본적으로 해결하기 위해, 인스톨러 바이너리에 **정식 PE 버전 및 제작사 메타데이터**를 내장하고 **Authenticode 디지털 코드 서명(SHA-256 + DigiCert RFC 3161 타임스탬프)** 파이프라인을 구축했습니다.
+
+### 29.2 핵심 구현 내역
+1. **인스톨러 PE 메타데이터 주입 ([`installer.nsi`](file:///c:/projects/lite_browser/installer.nsi))**:
+   - `VIProductVersion "1.0.0.0"`, `VIFileVersion "1.0.0.0"`
+   - `VIAddVersionKey`:
+     - `ProductName`: `Lite Browser`
+     - `CompanyName`: `Gregory Yoon`
+     - `LegalCopyright`: `Copyright (C) 2026 Gregory Yoon. All rights reserved.`
+     - `FileDescription`: `Lite Browser Installer`
+   - 파일 속성 창의 [자세히] 탭에서 알 수 없는 게시자가 아닌 공인 제작사 및 제품 정보가 명확히 식별되도록 보강.
+2. **원클릭 코드 서명 자동화 도구 구축 ([`scripts/sign_installer.ps1`](file:///c:/projects/lite_browser/scripts/sign_installer.ps1))**:
+   - Windows 10/11 SDK의 최신 `signtool.exe` 자동 탐색.
+   - SHA-256 기반 인증서 및 **DigiCert RFC 3161 공인 타임스탬프 서버(`http://timestamp.digicert.com`)** 연동을 통해 인증서 유효기간 만료 후에도 서명이 영구적으로 유효하도록 보장.
+   - 로컬 개발용 자체 서명 인증서 자동 생성 지원 및 향후 공인 CA(`.pfx`) 교체 옵션(`-PfxPath`, `-PfxPassword`) 완비.
+3. **인증서 개인 키 보안 격리 ([`.gitignore`](file:///c:/projects/lite_browser/.gitignore))**:
+   - `*.pfx` 및 `scripts/certs/` 디렉터리를 Git 추적에서 원천 제외하여 보안 비밀키 유출 방지.
+4. **SmartScreen & 시만텍 평판 등록 프로세스 수립**:
+   - Microsoft 보안 인텔리전스(WDSI) 및 시만텍 SymSubmit을 통한 공식 오탐(False Positive) 해제 가이드 마련.
+
+### 29.3 검증 결과
+- **인스톨러 컴파일**: `makensis c:\projects\lite_browser\installer.nsi` 성공 (`Exit code 0`).
+- **전자서명 적용**: `powershell scripts\sign_installer.ps1` 실행 완료 (`Exit code 0`).
+- **서명 검증 ([`LiteBrowserInstaller.exe`](file:///c:/projects/lite_browser/LiteBrowserInstaller.exe))**:
+  - `Get-AuthenticodeSignature` 확인 결과 `Gregory Yoon (Lite Browser Project)` 서명 및 `DigiCert SHA256 Timestamp Responder` 타임스탬프가 정상 탑재됨을 확인.
+  - Windows 탐색기 속성 창에서 **[디지털 서명]** 탭이 정상 활성화됨.
+
+
 
