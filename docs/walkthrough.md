@@ -793,3 +793,34 @@ CEF 149에서 CEF 151.3.24로 업그레이드한 이후 앱 실행부터 북마�
 ### 27.3 빌드 및 검증
 - **CEF 151.3.24 Debug 빌드**: 성공 (Exit code 0).
 
+---
+
+## 28. 앱 아이콘 투명화, 타일 영역 극대화 및 탐색기 소형 뷰(16x16/24x24) 리소스 최적화
+
+### 28.1 배경 및 개요
+기존 앱 아이콘에 남아있던 불투명한 흰색 사각 여백(사방 42px)을 제거하고, 100% 알파 투명화(Transparent) 배경을 적용하며, 민트색 둥근 사각형(Squircle) 타일과 깃털/브라우저 그래픽이 캔버스 전체에 꽉 차도록 리마스터링했습니다. 아울러 파일 탐색기의 '작은 아이콘', '목록', '자세히' 보기 모드(16×16, 24×24)에서 구형 CEF 기본 창 아이콘이 표출되던 문제를 바이너리 PE 구조 분석을 통해 원인을 규명하고 리소스 주입 엔진을 업그레이드하여 완벽하게 해결했습니다.
+
+### 28.2 핵심 구현 및 최적화 내역
+1. **외곽 흰색 여백 제거 및 배경 100% 알파 투명화 ([`cefsimple.ico`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/win/cefsimple.ico), [`small.ico`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/win/small.ico))**:
+   - 256px 캔버스 중 172px만 차지하여 사방에 42px씩 남아있던 흰색 여백을 완전히 제거하고 100% 알파 투명화 처리.
+   - 4~6%의 최소 안전 여백(236px 타일)을 적용하여 둥근 모서리가 잘리지 않으면서도 캔버스에 꽉 찬 시각적 실루엣을 구현.
+   - 타일 하단에 은은한 반투명 소프트 섀도우(Soft Shadow)를 합성하여 Windows 다크 테마 및 라이트 테마 어디서나 테두리 잔상(Halo) 없이 자연스러운 입체감 제공.
+
+2. **16×16 및 24×24 소형 픽셀 선명화 (Pixel-fitted Optimization)**:
+   - 16×16 및 24×24 소형 해상도는 탐색기 목록/자세히 뷰의 흰색 배경에서 흐릿한 그림자로 인해 묻히지 않도록, 모서리 픽셀만 투명화한 꽉 찬 타일(Pixel-fitted)과 민트색 테두리/깃털 대비를 강화하여 시인성을 극대화.
+   - 32×32, 48×48 (32-bit Raw DIB) 및 256×256 (PNG 압축) 규격은 고해상도 소프트 섀도우 디자인 유지.
+
+3. **바이너리 리소스 주입 엔진 고도화 ([`inject_icon.py`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/win/inject_icon.py))**:
+   - **PE 리소스 파싱 & 구형 더미 아이콘 자동 소거**: `bootstrap.exe` 복사본에 잔존하던 구형 `RT_ICON 6, 7, 8`(CEF 기본 파란 창 아이콘)을 PE 섹션으로부터 동적 파싱하여 `UpdateResourceW(..., NULL, 0)`로 안전하게 소거.
+   - **삼중 표준 그룹 동시 주입**: `120 (IDI_CEFSIMPLE)`, `121 (IDI_SMALL)`, `32512 (IDI_APPLICATION)` 3개 그룹 모두에 신규 5개 프레임 아이콘을 동시 매핑하여 탐색기가 어떤 그룹을 요청하든 100% 동일한 신규 아이콘이 나오도록 보장.
+   - **탐색기 셸 캐시 즉시 갱신**: 주입 직후 `SHChangeNotify(SHCNE_ASSOCCHANGED, ...)`를 호출하여 Windows 셸이 새 아이콘 캐시를 즉각 갱신하도록 트리거.
+
+### 28.3 검증 결과
+1. **바이너리 PE 리소스 디렉터리 트리 검증**:
+   - `lite_browser.exe` PE 분석 결과 구형 `RT_ICON 6, 7, 8`이 완전히 제거되고 `RT_ICON 1..5` 및 `RT_GROUP_ICON 120, 121, 32512`가 정상 연결됨을 확인.
+2. **Windows Shell API (`PrivateExtractIconsW`) 추출 검증**:
+   - 16×16 및 24×24 비트맵을 Windows 셸로부터 직접 추출하여 구형 파란 창이 완전히 박멸되고 신규 민트색 깃털 아이콘이 선명하게 노출됨을 검증.
+3. **CEF 151.3.24 Debug 빌드**:
+   - `cmake --build c:\projects\lite_browser\cef_binary_151.3.24\build --config Debug --target cefsimple_capi` (Exit code 0).
+
+
