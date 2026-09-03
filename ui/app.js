@@ -251,6 +251,8 @@ window.updateAddress = function(url) {
       addressBar.value = 'lite://favorites';
     } else if (url.indexOf('ui/downloads.html') !== -1 || url.indexOf('lite://downloads') !== -1 || url.indexOf('edge://downloads') !== -1) {
       addressBar.value = 'lite://downloads';
+    } else if (url.indexOf('ui/settings.html') !== -1 || url.indexOf('lite://settings') !== -1 || url.indexOf('edge://settings') !== -1) {
+      addressBar.value = 'lite://settings';
     } else if (url.indexOf('ui/sidepanel.html') !== -1 || url.indexOf('lite://sidepanel') !== -1) {
       addressBar.value = 'lite://sidepanel';
     } else {
@@ -289,10 +291,11 @@ window.updateTabsList = function(tabs, activeId) {
   tabs.forEach(tab => {
     const isManager = tab.url && (tab.url.indexOf('ui/manager.html') !== -1 || tab.url.indexOf('lite://favorites') !== -1);
     const isDownloads = tab.url && (tab.url.indexOf('ui/downloads.html') !== -1 || tab.url.indexOf('lite://downloads') !== -1);
+    const isSettings = tab.url && (tab.url.indexOf('ui/settings.html') !== -1 || tab.url.indexOf('lite://settings') !== -1);
     const isSidepanel = tab.url && (tab.url.indexOf('ui/sidepanel.html') !== -1 || tab.url.indexOf('lite://sidepanel') !== -1);
-    const displayTitle = isManager ? '북마크 관리자' : (isDownloads ? '다운로드 관리자' : (isSidepanel ? 'AI 사이드패널' : (tab.title || '새 탭')));
+    const displayTitle = isManager ? '북마크 관리자' : (isDownloads ? '다운로드 관리자' : (isSettings ? '설정' : (isSidepanel ? 'AI 사이드패널' : (tab.title || '새 탭'))));
     if (tab.id === activeId) {
-      currentTitle = isManager ? '북마크 관리자' : (isDownloads ? '다운로드 관리자' : (isSidepanel ? 'AI 사이드패널' : (tab.title || '')));
+      currentTitle = isManager ? '북마크 관리자' : (isDownloads ? '다운로드 관리자' : (isSettings ? '설정' : (isSidepanel ? 'AI 사이드패널' : (tab.title || ''))));
     }
     const tabEl = document.createElement('div');
     tabEl.className = 'tab' + (tab.id === activeId ? ' active' : '');

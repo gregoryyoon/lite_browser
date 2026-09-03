@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>설정 - Lite Browser</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="settings.css">
+</head>
+<body class="settings-body">
+  <div class="settings-container">
+    <!-- Header -->
+    <header class="settings-header">
+      <div class="settings-header-icon">
+        <svg viewBox="0 0 24 24">
+          <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
+        </svg>
+      </div>
+      <div>
+        <h1 class="settings-title">설정</h1>
+        <p class="settings-subtitle">Lite Browser 환경 설정 및 시스템 기본 앱 관리</p>
+      </div>
+    </header>
+
+    <!-- Content Sections -->
+    <main class="settings-content">
+      <!-- Section 1: Default Browser -->
+      <section class="settings-card">
+        <div class="card-header">
+          <div class="card-title-group">
+            <svg class="section-icon" viewBox="0 0 24 24">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
+            </svg>
+            <div>
+              <h2 class="card-title">기본 브라우저</h2>
+              <p class="card-desc">웹 링크 및 HTML 문서를 열 때 Lite Browser를 기본 앱으로 사용하도록 설정합니다.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="card-body">
+          <div class="default-browser-status-box">
+            <div class="status-indicator-wrapper">
+              <div id="status-badge" class="status-badge status-checking">
+                <span class="status-dot"></span>
+                <span id="status-text">기본 브라우저 상태 확인 중...</span>
+              </div>
+            </div>
+
+            <div class="action-group">
+              <button id="btn-set-default" class="btn-primary" onclick="setAsDefaultBrowser()">
+                <svg viewBox="0 0 24 24"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg>
+                <span>기본 브라우저로 설정</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="info-tip">
+            <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+            <span>Windows 10 및 11에서는 버튼 클릭 후 열리는 시스템 설정 창에서 Lite Browser를 기본 브라우저로 선택해 주시면 즉시 적용됩니다.</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section 2: Browser Info -->
+      <section class="settings-card">
+        <div class="card-header">
+          <div class="card-title-group">
+            <svg class="section-icon" viewBox="0 0 24 24">
+              <path d="M11 7h2v2h-2zm0 4h2v6h-2zm1-9C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/>
+            </svg>
+            <div>
+              <h2 class="card-title">Lite Browser 정보</h2>
+              <p class="card-desc">경량 마이크로 모듈러 C API 기반 브라우징 엔진</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="card-body">
+          <div class="about-grid">
+            <div class="about-item">
+              <span class="about-label">버전</span>
+              <span class="about-value highlight">1.0.0 (Release 64-bit)</span>
+            </div>
+            <div class="about-item">
+              <span class="about-label">CEF 런타임</span>
+              <span class="about-value">151.3.24</span>
+            </div>
+            <div class="about-item">
+              <span class="about-label">Chromium 엔진</span>
+              <span class="about-value">134.0.6998.36</span>
+            </div>
+            <div class="about-item">
+              <span class="about-label">저작권</span>
+              <span class="about-value">© 2026 Gregory Yoon. All rights reserved.</span>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="settings.js"></script>
+</body>
+</html>

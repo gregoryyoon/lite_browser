@@ -22,6 +22,8 @@ set(CEFSIMPLE_CAPI_SRCS
   simple_auth.h
   simple_installer.c
   simple_installer.h
+  default_browser.c
+  default_browser.h
   simple_handler.c
   simple_handler.h
   simple_life_span_handler.c

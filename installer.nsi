@@ -91,11 +91,36 @@ Section "Install"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
                   "InstallLocation" "$\"$INSTDIR$\""
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
-                  "Publisher" "Lite Browser Developer"
+                  "Publisher" "Gregory Yoon"
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
                   "NoModify" 1
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
                   "NoRepair" 1
+
+  ; Register Lite Browser capabilities for Windows Default Apps
+  WriteRegStr HKLM "Software\Clients\StartMenuInternet\LiteBrowser" "" "Lite Browser"
+  WriteRegStr HKLM "Software\Clients\StartMenuInternet\LiteBrowser\DefaultIcon" "" "$\"$INSTDIR\lite_browser.exe$\",0"
+  WriteRegStr HKLM "Software\Clients\StartMenuInternet\LiteBrowser\shell\open\command" "" "$\"$INSTDIR\lite_browser.exe$\""
+
+  WriteRegStr HKLM "Software\Clients\StartMenuInternet\LiteBrowser\Capabilities" "ApplicationName" "Lite Browser"
+  WriteRegStr HKLM "Software\Clients\StartMenuInternet\LiteBrowser\Capabilities" "ApplicationIcon" "$\"$INSTDIR\lite_browser.exe$\",0"
+  WriteRegStr HKLM "Software\Clients\StartMenuInternet\LiteBrowser\Capabilities" "ApplicationDescription" "Lite Browser - Fast, lightweight, AI-integrated modern browser."
+
+  WriteRegStr HKLM "Software\Clients\StartMenuInternet\LiteBrowser\Capabilities\URLAssociations" "http" "LiteBrowserHTML"
+  WriteRegStr HKLM "Software\Clients\StartMenuInternet\LiteBrowser\Capabilities\URLAssociations" "https" "LiteBrowserHTML"
+
+  WriteRegStr HKLM "Software\Clients\StartMenuInternet\LiteBrowser\Capabilities\FileAssociations" ".htm" "LiteBrowserHTML"
+  WriteRegStr HKLM "Software\Clients\StartMenuInternet\LiteBrowser\Capabilities\FileAssociations" ".html" "LiteBrowserHTML"
+  WriteRegStr HKLM "Software\Clients\StartMenuInternet\LiteBrowser\Capabilities\FileAssociations" ".pdf" "LiteBrowserHTML"
+  WriteRegStr HKLM "Software\Clients\StartMenuInternet\LiteBrowser\Capabilities\FileAssociations" ".svg" "LiteBrowserHTML"
+
+  WriteRegStr HKLM "Software\RegisteredApplications" "LiteBrowser" "Software\Clients\StartMenuInternet\LiteBrowser\Capabilities"
+
+  ; Register ProgID
+  WriteRegStr HKLM "Software\Classes\LiteBrowserHTML" "" "Lite Browser Document"
+  WriteRegStr HKLM "Software\Classes\LiteBrowserHTML" "FriendlyTypeName" "Lite Browser Document"
+  WriteRegStr HKLM "Software\Classes\LiteBrowserHTML\DefaultIcon" "" "$\"$INSTDIR\lite_browser.exe$\",0"
+  WriteRegStr HKLM "Software\Classes\LiteBrowserHTML\shell\open\command" "" "$\"$INSTDIR\lite_browser.exe$\" $\"%1$\""
 SectionEnd
 
 Section "Uninstall"
@@ -129,5 +154,8 @@ Section "Uninstall"
   
   RMDir "$INSTDIR"
   
+  DeleteRegKey HKLM "Software\Clients\StartMenuInternet\LiteBrowser"
+  DeleteRegValue HKLM "Software\RegisteredApplications" "LiteBrowser"
+  DeleteRegKey HKLM "Software\Classes\LiteBrowserHTML"
   DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser"
 SectionEnd

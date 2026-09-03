@@ -7,6 +7,7 @@
 #include "tests/cefsimple_capi/simple_vault.h"
 #include "tests/cefsimple_capi/simple_auth.h"
 #include "tests/cefsimple_capi/simple_installer.h"
+#include "tests/cefsimple_capi/default_browser.h"
 
 #include <stdarg.h>
 #include <stdatomic.h>
@@ -983,6 +984,18 @@ int CEF_CALLBACK request_handler_on_before_browse(
         cef_string_utf8_clear(&url_utf8);
         cef_string_userfree_free(url_userfree);
         return 1;
+      } else if (strncmp(url_utf8.str, "lite://settings", 15) == 0 ||
+                 strncmp(url_utf8.str, "edge://settings", 15) == 0 ||
+                 strncmp(url_utf8.str, "chrome://settings", 17) == 0) {
+        char set_url_buf[MAX_PATH + 32];
+        ResolveUIFilePath("ui/settings.html", NULL, 0, set_url_buf, sizeof(set_url_buf));
+        cef_string_t set_url = {};
+        cef_string_from_utf8(set_url_buf, strlen(set_url_buf), &set_url);
+        frame->load_url(frame, &set_url);
+        cef_string_clear(&set_url);
+        cef_string_utf8_clear(&url_utf8);
+        cef_string_userfree_free(url_userfree);
+        return 1;
       }
     }
 
@@ -1764,6 +1777,23 @@ int CEF_CALLBACK request_handler_on_before_browse(
           }
         } else if (strcmp(action, "check-cef-update") == 0) {
           simple_installer_check_update_async(win_ctx);
+        } else if (strcmp(action, "get-default-browser-status") == 0) {
+          int is_def = default_browser_is_default();
+          char js_code[128];
+          snprintf(js_code, sizeof(js_code), "if (window.updateDefaultBrowserStatus) { window.updateDefaultBrowserStatus(%d); }", is_def);
+          cef_string_t js_str = {};
+          cef_string_from_utf8(js_code, strlen(js_code), &js_str);
+          frame->execute_java_script(frame, &js_str, NULL, 0);
+          cef_string_clear(&js_str);
+        } else if (strcmp(action, "set-default-browser") == 0) {
+          default_browser_open_settings();
+          int is_def = default_browser_is_default();
+          char js_code[128];
+          snprintf(js_code, sizeof(js_code), "if (window.updateDefaultBrowserStatus) { window.updateDefaultBrowserStatus(%d); }", is_def);
+          cef_string_t js_str = {};
+          cef_string_from_utf8(js_code, strlen(js_code), &js_str);
+          frame->execute_java_script(frame, &js_str, NULL, 0);
+          cef_string_clear(&js_str);
         } else if (strncmp(action, "show-menu?", 10) == 0) {
           int click_x = 0, click_y = 0;
           if (sscanf(action + 10, "x=%d&y=%d", &click_x, &click_y) == 2) {
@@ -1785,6 +1815,7 @@ int CEF_CALLBACK request_handler_on_before_browse(
             AppendMenuW(hMenu, MF_STRING, 1005, L"페이지 소스 보기");
             AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
             AppendMenuW(hMenu, MF_STRING, 1009, L"CEF 런타임 업데이트 확인");
+            AppendMenuW(hMenu, MF_STRING, 1010, L"설정");
             AppendMenuW(hMenu, MF_STRING, 1006, L"종료");
 
             int cmd = TrackPopupMenu(hMenu, TPM_RETURNCMD | TPM_RIGHTALIGN | TPM_TOPALIGN, pt.x, pt.y, 0, win_ctx->main_hwnd, NULL);
@@ -1798,6 +1829,8 @@ int CEF_CALLBACK request_handler_on_before_browse(
               CreateNewTab(win_ctx, "lite://downloads");
             } else if (cmd == 1009) {
               simple_installer_check_update_async(win_ctx);
+            } else if (cmd == 1010) {
+              CreateNewTab(win_ctx, "lite://settings");
             } else if (cmd == 1003) {
               if (cb) {
                 cef_browser_host_t* host = cb->get_host(cb);
