@@ -69,3 +69,8 @@ LiteBrowserInstaller.7z
 *.pfx
 scripts/certs/
 
+# Python cache
+__pycache__/
+*.pyc
+
+

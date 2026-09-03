@@ -75,9 +75,12 @@ Section "Install"
   WriteUninstaller "$INSTDIR\uninstall.exe"
   
   ; Shortcuts
-  CreateShortcut "$SMPROGRAMS\Lite Browser.lnk" "$INSTDIR\lite_browser.exe"
-  CreateShortcut "$DESKTOP\Lite Browser.lnk" "$INSTDIR\lite_browser.exe"
+  CreateShortcut "$SMPROGRAMS\Lite Browser.lnk" "$INSTDIR\lite_browser.exe" "" "$INSTDIR\lite_browser.exe" 0
+  CreateShortcut "$DESKTOP\Lite Browser.lnk" "$INSTDIR\lite_browser.exe" "" "$INSTDIR\lite_browser.exe" 0
   
+  ; Refresh Windows Shell icon cache immediately
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
+
   ; Add uninstall information to Add/Remove Programs
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
                   "DisplayName" "Lite Browser"
@@ -98,6 +101,9 @@ SectionEnd
 Section "Uninstall"
   Delete "$DESKTOP\Lite Browser.lnk"
   Delete "$SMPROGRAMS\Lite Browser.lnk"
+  
+  ; Refresh Windows Shell icon cache
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
   
   RMDir /r "$INSTDIR\locales"
   RMDir /r "$INSTDIR\ui"
