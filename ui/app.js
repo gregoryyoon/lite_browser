@@ -957,6 +957,18 @@ function formatTimeAgo(timestamp) {
   return `${d.getFullYear()}.${d.getMonth() + 1}.${d.getDate()}`;
 }
 
+function compareHistoryItems(a, b) {
+  const timeA = a.visitedAt || 0;
+  const timeB = b.visitedAt || 0;
+  if (timeB !== timeA) {
+    return timeB - timeA; // 1순위: 실제 방문 시각 최신순 (초/밀리초 단위 -> 방금 방문한 사이트가 무조건 1등)
+  }
+  // 2순위: 방문 시각이 완전히 동일한 경우에만 방문 횟수 많은 순
+  const visitsA = getItemVisitCount(a);
+  const visitsB = getItemVisitCount(b);
+  return visitsB - visitsA;
+}
+
 function handleOmniboxInput(e) {
   const rawValue = e.target.value;
   const query = rawValue.trim().toLowerCase();
@@ -984,17 +996,8 @@ function handleOmniboxInput(e) {
       return timeB - timeA;
     });
 
-    // Sort History: Priority 1 (30-day visit count desc), Priority 2 (visitedAt desc)
-    omniHistoryResults.sort((a, b) => {
-      const visitsA = (a.visitTimestamps || []).filter(t => t >= thirtyDaysAgo).length;
-      const visitsB = (b.visitTimestamps || []).filter(t => t >= thirtyDaysAgo).length;
-      if (visitsB !== visitsA) {
-        return visitsB - visitsA;
-      }
-      const timeA = a.visitedAt || 0;
-      const timeB = b.visitedAt || 0;
-      return timeB - timeA;
-    });
+    // Sort History: Priority 1 (Actual visitedAt desc), Priority 2 (Tie-breaker visit count desc)
+    omniHistoryResults.sort(compareHistoryItems);
 
     // Show top 3 recommended bookmarks and top 3 recent history items
     omniResults = omniResults.slice(0, 3);
@@ -1051,17 +1054,8 @@ function handleOmniboxInput(e) {
     return timeB - timeA;
   });
 
-  // Sort History: Priority 1 (30-day visit count desc), Priority 2 (visitedAt desc)
-  omniHistoryResults.sort((a, b) => {
-    const visitsA = (a.visitTimestamps || []).filter(t => t >= thirtyDaysAgo).length;
-    const visitsB = (b.visitTimestamps || []).filter(t => t >= thirtyDaysAgo).length;
-    if (visitsB !== visitsA) {
-      return visitsB - visitsA;
-    }
-    const timeA = a.visitedAt || 0;
-    const timeB = b.visitedAt || 0;
-    return timeB - timeA;
-  });
+  // Sort History: Priority 1 (Actual visitedAt desc), Priority 2 (Tie-breaker visit count desc)
+  omniHistoryResults.sort(compareHistoryItems);
 
   omniResults = omniResults.slice(0, 3);
   omniHistoryResults = omniHistoryResults.slice(0, 3);
