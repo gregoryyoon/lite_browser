@@ -6,34 +6,149 @@
   <title>설정 - Lite Browser</title>
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="settings.css">
+  <script src="theme.js"></script>
 </head>
 <body class="settings-body">
   <div class="settings-container">
     <!-- Header -->
     <header class="settings-header">
-      <div class="settings-header-icon">
-        <svg viewBox="0 0 24 24">
-          <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
-        </svg>
+      <div class="settings-header-left">
+        <div class="settings-header-icon">
+          <svg viewBox="0 0 24 24">
+            <line x1="4" x2="4" y1="21" y2="14"/><line x1="4" x2="4" y1="10" y2="3"/><line x1="12" x2="12" y1="21" y2="12"/><line x1="12" x2="12" y1="8" y2="3"/><line x1="20" x2="20" y1="21" y2="16"/><line x1="20" x2="20" y1="12" y2="3"/><line x1="1" x2="7" y1="14" y2="14"/><line x1="9" x2="15" y1="8" y2="8"/><line x1="17" x2="23" y1="16" y2="16"/>
+          </svg>
+        </div>
+        <div>
+          <h1 class="settings-title">설정 및 환경 구성</h1>
+          <p class="settings-subtitle">테마 스타일, 기본 브라우저, Chromium 엔진 최적화 및 시스템 정보</p>
+        </div>
       </div>
-      <div>
-        <h1 class="settings-title">설정</h1>
-        <p class="settings-subtitle">Lite Browser 환경 설정 및 시스템 기본 앱 관리</p>
+      <div class="settings-header-badge">
+        <span class="pulse-dot"></span>
+        <span>Bento Engine v2</span>
       </div>
     </header>
 
-    <!-- Content Sections -->
-    <main class="settings-content">
-      <!-- Section 1: Default Browser -->
-      <section class="settings-card">
+    <!-- Bento Grid Content -->
+    <main class="bento-grid settings-bento">
+
+      <!-- Bento 1: Theme Selector (12 Cols) -->
+      <section class="bento-card bento-col-12 bento-theme-section">
         <div class="card-header">
           <div class="card-title-group">
             <svg class="section-icon" viewBox="0 0 24 24">
-              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
+              <circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/>
             </svg>
             <div>
-              <h2 class="card-title">기본 브라우저</h2>
-              <p class="card-desc">웹 링크 및 HTML 문서를 열 때 Lite Browser를 기본 앱으로 사용하도록 설정합니다.</p>
+              <h2 class="card-title">화면 모드 및 테마 (Appearance)</h2>
+              <p class="card-desc">브라우저 전체(상단 크롬 툴바, 새 탭 대시보드, 사이드패널)에 실시간 적용할 시각 테마를 선택합니다.</p>
+            </div>
+          </div>
+          <span id="active-theme-pill" class="bento-badge">시스템 모드 적용 중</span>
+        </div>
+
+        <!-- 3 Visual Bento Theme Preview Cards -->
+        <div class="theme-bento-cards">
+          <!-- Light Theme Card -->
+          <div class="theme-card" id="theme-card-light" onclick="chooseTheme('light')">
+            <div class="theme-preview theme-preview-light">
+              <div class="preview-chrome">
+                <div class="preview-dots"><span></span><span></span><span></span></div>
+                <div class="preview-tab"></div>
+              </div>
+              <div class="preview-address"></div>
+              <div class="preview-body">
+                <div class="preview-bento-mock">
+                  <div class="mock-box w-60"></div>
+                  <div class="mock-box w-40"></div>
+                  <div class="mock-box w-100"></div>
+                </div>
+              </div>
+            </div>
+            <div class="theme-card-info">
+              <div class="theme-radio-row">
+                <input type="radio" id="theme-radio-light" name="theme-option" value="light">
+                <label for="theme-radio-light" class="theme-name">
+                  <span class="theme-icon">☀️</span> 라이트 모드 (Light)
+                </label>
+              </div>
+              <p class="theme-desc">맑고 깨끗한 쿨 화이트 배경과 높은 명도 대비의 모던 스타일</p>
+            </div>
+            <div class="theme-active-indicator">
+              <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
+          </div>
+
+          <!-- Dark Theme Card -->
+          <div class="theme-card" id="theme-card-dark" onclick="chooseTheme('dark')">
+            <div class="theme-preview theme-preview-dark">
+              <div class="preview-chrome">
+                <div class="preview-dots"><span></span><span></span><span></span></div>
+                <div class="preview-tab"></div>
+              </div>
+              <div class="preview-address"></div>
+              <div class="preview-body">
+                <div class="preview-bento-mock">
+                  <div class="mock-box w-60"></div>
+                  <div class="mock-box w-40"></div>
+                  <div class="mock-box w-100"></div>
+                </div>
+              </div>
+            </div>
+            <div class="theme-card-info">
+              <div class="theme-radio-row">
+                <input type="radio" id="theme-radio-dark" name="theme-option" value="dark">
+                <label for="theme-radio-dark" class="theme-name">
+                  <span class="theme-icon">🌙</span> 다크 모드 (Dark)
+                </label>
+              </div>
+              <p class="theme-desc">눈의 피로를 덜어주는 깊이 있는 슬레이트 챠콜 블랙 스타일</p>
+            </div>
+            <div class="theme-active-indicator">
+              <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
+          </div>
+
+          <!-- System Theme Card -->
+          <div class="theme-card" id="theme-card-system" onclick="chooseTheme('system')">
+            <div class="theme-preview theme-preview-system">
+              <div class="system-half light-half">
+                <div class="preview-chrome"><div class="preview-dots"><span></span></div></div>
+                <div class="preview-address"></div>
+                <div class="mock-box w-60"></div>
+              </div>
+              <div class="system-half dark-half">
+                <div class="preview-chrome"><div class="preview-dots"><span></span></div></div>
+                <div class="preview-address"></div>
+                <div class="mock-box w-60"></div>
+              </div>
+            </div>
+            <div class="theme-card-info">
+              <div class="theme-radio-row">
+                <input type="radio" id="theme-radio-system" name="theme-option" value="system" checked>
+                <label for="theme-radio-system" class="theme-name">
+                  <span class="theme-icon">💻</span> 시스템 설정 동기화
+                </label>
+              </div>
+              <p class="theme-desc">Windows OS 설정에 따라 낮과 밤에 맞춰 자동으로 테마 전환</p>
+            </div>
+            <div class="theme-active-indicator">
+              <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Bento 2: Default Browser (8 Cols) -->
+      <section class="bento-card bento-col-8">
+        <div class="card-header">
+          <div class="card-title-group">
+            <svg class="section-icon" viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>
+            </svg>
+            <div>
+              <h2 class="card-title">기본 브라우저 설정</h2>
+              <p class="card-desc">웹 링크 및 HTML 문서를 열 때 Lite Browser를 기본 앱으로 사용합니다.</p>
             </div>
           </div>
         </div>
@@ -49,29 +164,65 @@
 
             <div class="action-group">
               <button id="btn-set-default" class="btn-primary" onclick="setAsDefaultBrowser()">
-                <svg viewBox="0 0 24 24"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg>
+                <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
                 <span>기본 브라우저로 설정</span>
               </button>
             </div>
           </div>
 
           <div class="info-tip">
-            <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
-            <span>Windows 10 및 11에서는 버튼 클릭 후 열리는 시스템 설정 창에서 Lite Browser를 기본 브라우저로 선택해 주시면 즉시 적용됩니다.</span>
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+            <span>버튼 클릭 시 열리는 Windows 기본 앱 설정 창에서 Lite Browser를 선택하시면 즉시 반영됩니다.</span>
           </div>
         </div>
       </section>
 
-      <!-- Section 2: Performance & Memory Optimization -->
-      <section class="settings-card" id="optimization-card">
+      <!-- Bento 3: Quick System Specs (4 Cols) -->
+      <section class="bento-card bento-col-4">
         <div class="card-header">
           <div class="card-title-group">
             <svg class="section-icon" viewBox="0 0 24 24">
-              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14.5v-9l6 4.5-6 4.5z"/>
+              <rect width="16" height="16" x="4" y="4" rx="2"/><rect width="6" height="6" x="9" y="9" rx="1"/><path d="M15 2v2"/><path d="M15 20v2"/><path d="M2 15h2"/><path d="M2 9h2"/><path d="M20 15h2"/><path d="M20 9h2"/><path d="M9 2v2"/><path d="M9 20v2"/>
             </svg>
             <div>
-              <h2 class="card-title">성능 및 메모리 최적화</h2>
-              <p class="card-desc">사용 환경과 PC 사양에 맞춰 Chromium 런타임 엔진 동작 방식을 최적화합니다.</p>
+              <h2 class="card-title">엔진 제원</h2>
+              <p class="card-desc">아키텍처 정보</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="card-body">
+          <div class="bento-info-list">
+            <div class="bento-info-row">
+              <span class="info-k">버전</span>
+              <span class="info-v highlight">1.0.0 (64-bit)</span>
+            </div>
+            <div class="bento-info-row">
+              <span class="info-k">CEF 런타임</span>
+              <span class="info-v">151.3.24</span>
+            </div>
+            <div class="bento-info-row">
+              <span class="info-k">Chromium</span>
+              <span class="info-v">134.0.6998</span>
+            </div>
+            <div class="bento-info-row">
+              <span class="info-k">아키텍처</span>
+              <span class="info-v">Pure Win32 C CAPI</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Bento 4: Performance & Engine Tuning (12 Cols) -->
+      <section class="bento-card bento-col-12" id="optimization-card">
+        <div class="card-header">
+          <div class="card-title-group">
+            <svg class="section-icon" viewBox="0 0 24 24">
+              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+            </svg>
+            <div>
+              <h2 class="card-title">성능 및 메모리 최적화 튜닝 (Performance Engine)</h2>
+              <p class="card-desc">사용 환경과 PC 사양에 맞춰 Chromium 런타임 엔진 파라미터를 전환합니다.</p>
             </div>
           </div>
         </div>
@@ -83,11 +234,11 @@
               <div class="opt-card-header">
                 <div class="opt-radio-wrapper">
                   <input type="radio" id="radio-speed" name="opt-mode" value="speed" checked>
-                  <label for="radio-speed" class="opt-name">실행 속도 우선</label>
+                  <label for="radio-speed" class="opt-name">실행 속도 우선 (Speed Mode)</label>
                 </div>
                 <span class="opt-pill opt-pill-default">기본값 (권장)</span>
               </div>
-              <p class="opt-summary">GPU 하드웨어 가속 및 Zero-copy 타일 렌더링을 적용하여 초고속 페이지 로딩과 부드러운 스크롤링 및 화면 전환을 제공합니다.</p>
+              <p class="opt-summary">GPU 하드웨어 가속 및 Zero-copy 타일 렌더링을 적용하여 초고속 페이지 로딩과 부드러운 스크롤링을 제공합니다.</p>
               <div class="opt-feature-tags">
                 <span class="opt-feature-tag">--enable-gpu</span>
                 <span class="opt-feature-tag">--enable-zero-copy</span>
@@ -107,17 +258,16 @@
               <div class="opt-card-header">
                 <div class="opt-radio-wrapper">
                   <input type="radio" id="radio-memory" name="opt-mode" value="memory">
-                  <label for="radio-memory" class="opt-name">메모리 절감 우선</label>
+                  <label for="radio-memory" class="opt-name">메모리 절감 우선 (Memory Saver)</label>
                 </div>
                 <span class="opt-pill opt-pill-memory">저사양 / 절전</span>
               </div>
-              <p class="opt-summary">사이트 격리 프로세스를 통합하고 렌더러 수를 최대 2개로 제한하며, V8 힙 상한(256MB) 및 메모리 절약 모드를 활성화하여 RAM 점유율을 대폭 낮춥니다.</p>
+              <p class="opt-summary">사이트 격리 프로세스를 통합하고 렌더러 수를 최대 2개로 제한하며, V8 힙 상한(256MB) 및 메모리 절약 모드를 활성화합니다.</p>
               <div class="opt-feature-tags">
                 <span class="opt-feature-tag">--disable-site-isolation-trials</span>
                 <span class="opt-feature-tag">--renderer-process-limit=2</span>
                 <span class="opt-feature-tag">--js-flags="256MB"</span>
                 <span class="opt-feature-tag">MemorySaverMode</span>
-                <span class="opt-feature-tag">--disable-extensions</span>
               </div>
               <div class="opt-card-footer">
                 <div class="opt-status" id="opt-memory-status">
@@ -131,64 +281,20 @@
           <!-- Restart Alert Banner -->
           <div id="opt-restart-notice" class="opt-restart-notice" style="display: none;">
             <div class="restart-notice-left">
-              <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+              <svg viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" x2="12" y1="9" y2="13"/><line x1="12" x2="12.01" y1="17" y2="17"/></svg>
               <div>
                 <span class="restart-notice-title">브라우저 재시작 필요</span>
                 <p class="restart-notice-text">최적화 모드 변경 사항은 브라우저를 완전히 닫고 다시 실행하면 적용됩니다.</p>
               </div>
             </div>
             <button class="btn-restart" onclick="restartBrowser()">
-              <svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+              <svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
               <span>지금 재시작</span>
             </button>
           </div>
-
-          <div class="info-tip">
-            <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
-            <span>Chromium 엔진 시작 파라미터가 조정되므로 설정 변경 후 브라우저를 재시작해야 새로운 옵션이 적용됩니다. 일반 환경에서는 <strong>실행 속도 우선</strong>을 권장합니다.</span>
-          </div>
         </div>
       </section>
 
-      <!-- Section 3: Browser Info -->
-      <section class="settings-card">
-        <div class="card-header">
-          <div class="card-title-group">
-            <svg class="section-icon" viewBox="0 0 24 24">
-              <path d="M11 7h2v2h-2zm0 4h2v6h-2zm1-9C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/>
-            </svg>
-            <div>
-              <h2 class="card-title">Lite Browser 정보</h2>
-              <p class="card-desc">경량 마이크로 모듈러 C API 기반 브라우징 엔진</p>
-            </div>
-          </div>
-        </div>
-
-        <div class="card-body">
-          <div class="about-grid">
-            <div class="about-item">
-              <span class="about-label">버전</span>
-              <span class="about-value highlight">1.0.0 (Release 64-bit)</span>
-            </div>
-            <div class="about-item">
-              <span class="about-label">최적화 모드</span>
-              <span id="info-opt-mode" class="about-value highlight">실행 속도 우선 (세션 활성)</span>
-            </div>
-            <div class="about-item">
-              <span class="about-label">CEF 런타임</span>
-              <span class="about-value">151.3.24</span>
-            </div>
-            <div class="about-item">
-              <span class="about-label">Chromium 엔진</span>
-              <span class="about-value">134.0.6998.36</span>
-            </div>
-            <div class="about-item">
-              <span class="about-label">저작권</span>
-              <span class="about-value">© 2026 Gregory Yoon. All rights reserved.</span>
-            </div>
-          </div>
-        </div>
-      </section>
     </main>
   </div>
 

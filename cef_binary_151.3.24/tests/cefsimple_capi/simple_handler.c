@@ -116,6 +116,109 @@ static void ResolveUIFilePath(const char* relative_path, char* out_file_path, si
 #endif
 }
 
+static void get_theme_config_path(char* out_path, size_t max_len) {
+  const char* user_profile = getenv("USERPROFILE");
+  if (!user_profile) user_profile = "C:\\Users\\Default";
+  char dir_path[MAX_PATH];
+  snprintf(dir_path, sizeof(dir_path), "%s\\.lite-browser", user_profile);
+  CreateDirectoryA(dir_path, NULL);
+  snprintf(out_path, max_len, "%s\\theme_config.txt", dir_path);
+}
+
+void save_theme_config(const char* mode) {
+  if (!mode || !mode[0]) return;
+  char file_path[MAX_PATH];
+  get_theme_config_path(file_path, sizeof(file_path));
+  FILE* fp = fopen(file_path, "w");
+  if (fp) {
+    fprintf(fp, "%s", mode);
+    fclose(fp);
+  }
+}
+
+void get_theme_config(char* out_mode, size_t max_len) {
+  char file_path[MAX_PATH];
+  get_theme_config_path(file_path, sizeof(file_path));
+  FILE* fp = fopen(file_path, "r");
+  if (fp) {
+    if (fgets(out_mode, (int)max_len, fp)) {
+      size_t len = strlen(out_mode);
+      while (len > 0 && (out_mode[len - 1] == '\r' || out_mode[len - 1] == '\n' || out_mode[len - 1] == ' ')) {
+        out_mode[--len] = '\0';
+      }
+      fclose(fp);
+      if (strcmp(out_mode, "dark") == 0 || strcmp(out_mode, "light") == 0 || strcmp(out_mode, "system") == 0) {
+        return;
+      }
+    } else {
+      fclose(fp);
+    }
+  }
+  snprintf(out_mode, max_len, "system");
+}
+
+int is_theme_dark(void) {
+  char mode[32];
+  get_theme_config(mode, sizeof(mode));
+  if (strcmp(mode, "dark") == 0) return 1;
+  if (strcmp(mode, "light") == 0) return 0;
+
+  // System mode: query Windows AppsUseLightTheme
+  DWORD val = 1;
+  DWORD val_size = sizeof(val);
+  HKEY hKey;
+  if (RegOpenKeyExA(HKEY_CURRENT_USER, "Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+    RegQueryValueExA(hKey, "AppsUseLightTheme", NULL, NULL, (LPBYTE)&val, &val_size);
+    RegCloseKey(hKey);
+  }
+  return (val == 0) ? 1 : 0;
+}
+
+static void execute_theme_script_on_browser(cef_browser_t* browser, const char* mode) {
+  if (!browser) return;
+  cef_frame_t* frame = browser->get_main_frame(browser);
+  if (frame) {
+    char js_code[256];
+    snprintf(js_code, sizeof(js_code), "if (window.applyTheme) { window.applyTheme('%s'); }", mode);
+    cef_string_t js_str = {};
+    cef_string_from_utf8(js_code, strlen(js_code), &js_str);
+    frame->execute_java_script(frame, &js_str, NULL, 0);
+    cef_string_clear(&js_str);
+    frame->base.release(&frame->base);
+  }
+}
+
+void broadcast_theme_update(browser_window_t* win_ctx, const char* mode) {
+  if (!win_ctx || !mode) return;
+  
+  if (win_ctx->ui_browser) {
+    execute_theme_script_on_browser(win_ctx->ui_browser, mode);
+  }
+  if (win_ctx->sidepanel_browser) {
+    execute_theme_script_on_browser(win_ctx->sidepanel_browser, mode);
+  }
+  for (int i = 0; i < win_ctx->tab_count; i++) {
+    if (win_ctx->tabs[i].browser) {
+      execute_theme_script_on_browser(win_ctx->tabs[i].browser, mode);
+    }
+    if (win_ctx->tabs[i].is_split && win_ctx->tabs[i].right_browser) {
+      execute_theme_script_on_browser(win_ctx->tabs[i].right_browser, mode);
+    }
+  }
+
+  // Force repaint native window (borders, splitter bars, backgrounds) immediately
+  if (win_ctx->main_hwnd) {
+    int dark = is_theme_dark();
+    HBRUSH hbr = CreateSolidBrush(dark ? RGB(13, 15, 21) : RGB(228, 228, 231));
+    HBRUSH old_hbr = (HBRUSH)SetClassLongPtr(win_ctx->main_hwnd, GCLP_HBRBACKGROUND, (LONG_PTR)hbr);
+    if (old_hbr) {
+      DeleteObject(old_hbr);
+    }
+    InvalidateRect(win_ctx->main_hwnd, NULL, TRUE);
+    UpdateWindow(win_ctx->main_hwnd);
+  }
+}
+
 static void scan_directory_recursive(const char* dir_path, char** json_ptr, size_t* len_ptr, size_t* cap_ptr, int is_first_in_level) {
   char search_path[MAX_PATH];
   snprintf(search_path, sizeof(search_path), "%s\\*", dir_path);
@@ -1831,6 +1934,14 @@ int CEF_CALLBACK request_handler_on_before_browse(
             frame->execute_java_script(frame, &js_str, NULL, 0);
             cef_string_clear(&js_str);
           }
+        } else if (strncmp(action, "set-theme?", 10) == 0) {
+          const char* query = action + 10;
+          char* mode_val = get_query_param(query, "mode");
+          if (mode_val) {
+            save_theme_config(mode_val);
+            broadcast_theme_update(win_ctx, mode_val);
+            free(mode_val);
+          }
         } else if (strcmp(action, "restart-browser") == 0) {
 #if defined(OS_WIN)
           restart_browser_application();
@@ -1913,6 +2024,7 @@ int CEF_CALLBACK request_handler_on_before_browse(
 
                 cef_browser_settings_t browser_settings = {};
                 browser_settings.size = sizeof(cef_browser_settings_t);
+                browser_settings.background_color = is_theme_dark() ? 0xFF0D0F15 : 0xFFFFFFFF;
 
                 cef_window_info_t content_window_info = {};
                 content_window_info.size = sizeof(cef_window_info_t);
@@ -1992,6 +2104,7 @@ int CEF_CALLBACK request_handler_on_before_browse(
 
             cef_browser_settings_t browser_settings = {};
             browser_settings.size = sizeof(cef_browser_settings_t);
+            browser_settings.background_color = is_theme_dark() ? 0xFF0D0F15 : 0xFFFFFFFF;
 
             cef_window_info_t content_window_info = {};
             content_window_info.size = sizeof(cef_window_info_t);
@@ -2880,6 +2993,7 @@ void CEF_CALLBACK context_menu_on_before_context_menu(
           int ui_height = GetUIHeightForWindow(win_ctx->main_hwnd);
           cef_browser_settings_t browser_settings = {};
           browser_settings.size = sizeof(cef_browser_settings_t);
+          browser_settings.background_color = is_theme_dark() ? 0xFF0D0F15 : 0xFFFFFFFF;
           
           cef_window_info_t content_window_info = {};
           content_window_info.size = sizeof(cef_window_info_t);
@@ -2960,6 +3074,7 @@ void CreateNewTab(browser_window_t* win_ctx, const char* url) {
 
   cef_browser_settings_t browser_settings = {};
   browser_settings.size = sizeof(cef_browser_settings_t);
+  browser_settings.background_color = is_theme_dark() ? 0xFF0D0F15 : 0xFFFFFFFF;
 
   cef_window_info_t content_window_info = {};
   content_window_info.size = sizeof(cef_window_info_t);
@@ -3048,6 +3163,7 @@ void CreateRightSplitBrowser(browser_window_t* win_ctx, tab_info_t* tab, const c
 
   cef_browser_settings_t browser_settings = {};
   browser_settings.size = sizeof(cef_browser_settings_t);
+  browser_settings.background_color = is_theme_dark() ? 0xFF0D0F15 : 0xFFFFFFFF;
 
   cef_window_info_t right_window_info = {};
   right_window_info.size = sizeof(cef_window_info_t);

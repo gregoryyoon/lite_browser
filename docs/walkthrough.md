@@ -938,7 +938,90 @@ Microsoft Edge 브라우저(SmartScreen)의 *"일반적으로 다운로드되지
 - **Debug 빌드**: `cmake --build build --config Debug --target cefsimple_capi` 성공 (`Exit code 0`).
 - **Release 빌드**: `cmake --build build --config Release --target cefsimple_capi` 성공 (`Exit code 0`, LTCG 최적화 적용).
 
+---
 
+## 32. 윈도우 탐색기 다중 해상도(16~256px) 투명 앱 아이콘 및 셸 리소스 자동 주입 파이프라인 고도화 (Transparent Multi-Resolution Icon Pipeline)
 
+### 32.1 배경 및 문제 분석
+1. **흰색 불투명 배경 및 테두리 문제**:
+   - 기존 앱 아이콘에 흰색 테두리와 불투명 흰색 배경이 포함되어 있어, Windows 다크 모드 작업 표시줄, 바탕화면, 탐색기 등에서 배경색과 어우러지지 못하고 시각적 이질감을 발생시킴.
+2. **탐색기 보기 모드별 저해상도 아이콘 누락**:
+   - Windows 파일 탐색기에서 보기 모드를 "작은 아이콘", "목록", "자세히" 등으로 변경할 때 16x16, 24x24 해상도의 셸 아이콘 리소스가 누락되어 구형 CEF 기본 아이콘으로 fallback되거나 깨져 보이는 현상 발생.
 
+### 32.2 핵심 구현 내역
+1. **투명 배경 RGBA 및 꽉 찬 그래픽 에셋 생성**:
+   - 불투명 흰색 배경을 완전 투명화(Alpha = 0) 처리하고, 불필요한 패딩 여백을 제거하여 메인 브라우저 심볼이 아이콘 캔버스 전체에 꽉 차도록 최적화된 256x256 원본 에셋 제작.
+2. **다중 해상도(16, 24, 32, 48, 256px) 통합 ICO 번들링**:
+   - Windows 셸이 요구하는 표준 해상도 규격을 단일 ICO 파일([`cefsimple.ico`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/win/cefsimple.ico))로 통합 패키징:
+     - `16x16`: 탐색기 목록, 자세히 보기, 창 타이틀바
+     - `24x24`: 150% High DPI 셸 목록/작은 아이콘
+     - `32x32`: 탐색기 작은 아이콘, 알림 영역(트레이)
+     - `48x48`: 탐색기 보통/큰 아이콘
+     - `256x256`: 탐색기 아주 큰 아이콘 (PNG 압축 포맷)
+3. **PE 바이너리 리소스 자동 주입 및 셸 캐시 동기화 파이프라인 ([`inject_icon.py`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/inject_icon.py))**:
+   - 빌드 후처리 단계에서 생성된 `lite_browser.exe`에 `UpdateResourceW` API를 통해 `RT_ICON` 1~5번 슬롯 및 `RT_GROUP_ICON` (120, 121, 32512)을 정밀 주입.
+   - 레거시 잔여 아이콘 리소스(RT_ICON 6, 7, 8)를 안전하게 삭제하여 리소스 중복 충돌 방지.
+   - 주입 완료 후 Win32 `SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, NULL, NULL)`를 호출하여 재부팅이나 로그오프 없이도 Windows 셸 아이콘 캐시를 즉각 갱신.
 
+### 32.3 검증 결과
+- 파일 탐색기에서 "아주 큰 아이콘", "큰 아이콘", "보통 아이콘", "작은 아이콘", "목록", "자세히" 모든 보기 모드에서 흰색 테두리 없이 투명 배경의 선명한 신규 아이콘이 완벽하게 렌더링됨을 확인.
+
+---
+
+## 33. 차세대 벤토 그리드(Bento Grid) 테마 시스템, 다크/라이트 모드 실시간 토글 및 Win32 네이티브 동기화 (Bento Grid Theme & Win32 Dark Mode Sync)
+
+### 33.1 배경 및 목적
+- 기존 웹 UI(`ui/`)의 단일 테마 한계와 다크 모드 미지원 문제를 극복하고, 가독성과 정보 밀도를 극대화한 모던 카드 기반 **벤토 그리드(Bento Grid)** 디자인을 전면 적용.
+- 설정 화면에서 사용자가 원하는 테마(라이트/다크/시스템 모드)를 자유롭게 선택할 수 있는 실시간 토글 환경을 구축하고, 네이티브 C CAPI 윈도우 배경 및 DWM 타이틀바까지 흰색 깜빡임(White Flash) 없이 완벽히 동기화.
+
+### 33.2 핵심 구현 내역
+1. **글로벌 디자인 토큰 체계 구축 ([`ui/style.css`](file:///c:/projects/lite_browser/ui/style.css))**:
+   - `:root`(라이트 모드)와 `[data-theme="dark"]`(다크 모드) 선택자 기반으로 체계적인 CSS 변수 시스템 정의:
+     - 배경: `--bg-app`(전체 캔버스), `--bg-card`(벤토 카드 컨테이너), `--bg-card-subtle`(서브 영역), `--bg-card-hover`(호버 피드백)
+     - 보더: `--border-subtle`, `--border-medium`, `--border-focus`
+     - 텍스트: `--text-primary`, `--text-secondary`, `--text-muted`, `--text-dimmed`
+     - 강조/곡률: `--accent-primary`, `--accent-mint`, `--bento-radius`(`14px`), `--shadow-sm`/`--shadow-md`
+
+2. **실시간 테마 엔진 및 전역 브로드캐스트 ([`ui/theme.js`](file:///c:/projects/lite_browser/ui/theme.js), [`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c))**:
+   - `initTheme()` / `applyTheme()`: 로컬 스토리지 및 C 백엔드 설정 파일(`%USERPROFILE%\.lite-browser\theme_mode.txt`)과 실시간 동기화.
+   - `BroadcastChannel('lite-browser-theme')`과 C 백엔드 `http://ui-action/set-theme?mode=...` 라우팅을 통합하여, 한 창에서 테마 변경 시 열려 있는 모든 메인 윈도우, 서브 탭, 사이드패널, 설정창에 `data-theme` 속성을 즉시 브로드캐스트 전파.
+
+3. **전체 웹 UI 페이지 벤토 그리드 전면 리디자인**:
+   - **설정 대시보드 ([`ui/settings.html`](file:///c:/projects/lite_browser/ui/settings.html), [`ui/settings.css`](file:///c:/projects/lite_browser/ui/settings.css), [`ui/settings.js`](file:///c:/projects/lite_browser/ui/settings.js))**:
+     - 테마 설정 벤토 카드 추가 (라이트/다크/시스템 실시간 원클릭 선택 버튼).
+     - 기본 브라우저 연동 카드, 성능 및 메모리 최적화 모드 카드, 키보드 단축키 카드 등 일관된 벤토 그리드 배치.
+   - **북마크 및 히스토리 관리자 ([`ui/manager.html`](file:///c:/projects/lite_browser/ui/manager.html), [`ui/manager.css`](file:///c:/projects/lite_browser/ui/manager.css), [`ui/manager.js`](file:///c:/projects/lite_browser/ui/manager.js))**:
+     - Bento 카드 뷰, 통계 대시보드, 다크/라이트 테마 토큰 매핑.
+   - **다운로드 관리자 ([`ui/downloads.html`](file:///c:/projects/lite_browser/ui/downloads.html), [`ui/downloads.css`](file:///c:/projects/lite_browser/ui/downloads.css))**:
+     - 파일 다운로드 진행률 카드, 상태 배지, 다크/라이트 테마 연동.
+   - **AI 사이드패널 ([`ui/sidepanel.html`](file:///c:/projects/lite_browser/ui/sidepanel.html), [`ui/sidepanel.css`](file:///c:/projects/lite_browser/ui/sidepanel.css), [`ui/sidepanel.js`](file:///c:/projects/lite_browser/ui/sidepanel.js))**:
+     - AI 공급자(Ollama/Gemini/OpenAI) 카드 뷰 및 채팅 인터페이스 벤토 스타일 적용.
+
+4. **Lucide Icons 전면 교체 및 웹 UI 이모지 배제 현대화**:
+   - 외부 웹폰트나 CDN 없이 단독 오프라인 구동이 가능한 순수 인라인 **Lucide SVG(`viewBox="0 0 24 24"`, `stroke="currentColor"`)** 표준 규격 도입.
+   - 기존 UI 마크업 및 동적 JS 템플릿에 존재하던 유니코드 이모지(`🤖`, `🗑️`, `💳`, `🔑`, `⚙️`, `👁️`, `📁`, `🌐`)를 전면 배제하고 의미에 맞는 Lucide 벡터 아이콘으로 교체.
+
+5. **Win32 C CAPI 네이티브 창 배경 및 DWM 타이틀바 완벽 동기화 ([`simple_app.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c), [`simple_life_span_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_life_span_handler.c))**:
+   - `is_theme_dark()` 전역 판별 로직 신설.
+   - **`CreateWindowEx` 배경 브러시 분기**: 메인 윈도우, 분리 탭 윈도우, 팝업 윈도우 등록 시 `is_theme_dark()` 상태에 맞춰 `RGB(13, 15, 21)` vs `RGB(228, 228, 231)` 브러시 지정으로 화이트 플래시 원천 차단.
+   - **`WM_ERASEBKGND` 동적 처리**: 윈도우 배경 지우기 메시지 수신 시 실시간 테마 색상으로 `FillRect` 수행.
+   - **클래스 브러시 갱신 (`SetClassLongPtrW`)**: 테마 변경 즉시 `GCLP_HBRBACKGROUND`를 교체하고 `InvalidateRect`를 통해 즉각 리페인트.
+   - **CEF 자식 브라우저 배경색 동기화**: `settings->background_color`를 다크(`0xFF0D0F15`) / 라이트(`0xFFFFFFFF`)로 일치시키고, 주소창 UI 브라우저는 `0`(투명)을 유지하여 옴니박스 확장 시 부드러운 오버레이 보장.
+   - **분할 화면 보더 및 스플리터 바 연동**: 선택된 활성 탭 분할 화면 보더 색상(`RGB(56, 189, 248)` vs `RGB(0, 102, 204)`) 및 스플리터 바 테마 분기.
+   - **DWM 다크 타이틀바 연동**: `DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ...)` 호출로 네이티브 윈도우 캡션바 색상 동기화.
+
+6. **리스트 뷰 및 카드 레이아웃 불변식 (Text Alignment Invariants)**:
+   - **북마크 관리자 리스트 뷰 (`.list-row`)**:
+     - 제목 컬럼(`.list-row-title`)에 `300px` 고정 너비(`flex: 0 0 300px; width: 300px`)를 부여하여 본문 요약 스니펫의 시작 X좌표를 일치시킴.
+     - 제목, 하이라이트 뱃지, 스니펫 텍스트에 단일행 말줄임표(`white-space: nowrap; overflow: hidden; text-overflow: ellipsis;`) 적용.
+     - 우측 날짜 및 방문수 메타 정보 고정 정렬.
+   - **다운로드 관리자 카드 뷰 (`.dl-card`)**:
+     - 메타 정보 행의 불필요한 줄바꿈을 방지하고 파일 URL(`.dl-url`)에 `max-width` 및 `ellipsis` 처리, 액션 버튼 그룹 우측 고정 정돈.
+
+7. **Workspace Skill 및 영구 규칙(Rule) 보존**:
+   - 향후 다른 테마나 아이콘으로 변경 시 동일한 절차를 밟을 수 있도록 [`.agents/skills/theme-and-icon-customization/SKILL.md`](file:///c:/projects/lite_browser/.agents/skills/theme-and-icon-customization/SKILL.md) 런북 스킬을 신설하고, [`AGENTS.md`](file:///c:/projects/lite_browser/AGENTS.md)에 핵심 불변 규칙(인라인 SVG 필수, 윈도우 생성 브러시 분기, 리스트 단일행 말줄임표)을 영구 등록.
+
+### 33.3 검증 결과
+- **CEF 151.3.24 Debug 빌드**: `cmake --build ... --config Debug --target cefsimple_capi` 성공 (`Exit code 0`).
+- **테마 실시간 토글 검증**: 설정 페이지에서 라이트 모드 ↔ 다크 모드 전환 시 메인 창, 주소창, 옴니박스, 사이드패널, 북마크/다운로드 관리자 화면이 흰색 번쩍임 없이 실시간 동기화됨을 확인.
+- **텍스트 레이아웃 정돈 검증**: 북마크 및 다운로드 관리자에서 긴 텍스트 입력 시 레이아웃 깨짐 없이 단정한 단일행 말줄임표로 정렬 표출됨을 확인.

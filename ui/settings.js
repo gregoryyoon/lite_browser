@@ -1,6 +1,7 @@
 // Settings Page Logic
 
 document.addEventListener('DOMContentLoaded', () => {
+  initThemeUI();
   requestDefaultBrowserStatus();
   requestOptimizationMode();
 });
@@ -18,6 +19,50 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
+// ==========================================================================
+// Theme Selection Logic
+// ==========================================================================
+function initThemeUI() {
+  const currentMode = window.getCurrentThemeMode ? window.getCurrentThemeMode() : (localStorage.getItem('lite_theme') || 'system');
+  renderThemeUI(currentMode);
+}
+
+function chooseTheme(mode) {
+  if (mode !== 'light' && mode !== 'dark' && mode !== 'system') return;
+  if (window.setLiteTheme) {
+    window.setLiteTheme(mode);
+  } else if (window.applyTheme) {
+    window.applyTheme(mode);
+  }
+  renderThemeUI(mode);
+}
+
+function renderThemeUI(mode) {
+  ['light', 'dark', 'system'].forEach(m => {
+    const card = document.getElementById(`theme-card-${m}`);
+    const radio = document.getElementById(`theme-radio-${m}`);
+    const isActive = (m === mode);
+    if (card) card.classList.toggle('active', isActive);
+    if (radio) radio.checked = isActive;
+  });
+
+  const pill = document.getElementById('active-theme-pill');
+  if (pill) {
+    if (mode === 'light') pill.textContent = '라이트 모드 적용 중';
+    else if (mode === 'dark') pill.textContent = '다크 모드 적용 중';
+    else pill.textContent = '시스템 설정 동기화 중';
+  }
+}
+
+window.addEventListener('litethemechange', (e) => {
+  if (e.detail && e.detail.mode) {
+    renderThemeUI(e.detail.mode);
+  }
+});
+
+// ==========================================================================
+// Default Browser Status Logic
+// ==========================================================================
 function requestDefaultBrowserStatus() {
   window.location.href = 'http://ui-action/get-default-browser-status';
 }
@@ -64,8 +109,9 @@ window.updateDefaultBrowserStatus = function(isDefault) {
   }
 };
 
-// --- Performance & Memory Optimization Logic ---
-
+// ==========================================================================
+// Performance & Memory Optimization Logic
+// ==========================================================================
 let g_savedOptimizationMode = 'speed';
 let g_launchOptimizationMode = 'speed';
 
@@ -191,4 +237,3 @@ function renderOptimizationUI(savedMode, launchMode) {
     }
   }
 }
-

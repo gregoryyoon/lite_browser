@@ -163,6 +163,11 @@ void update_ui_nav_state(browser_window_t* win_ctx);
 void CreateNewTab(browser_window_t* win_ctx, const char* url);
 void CreateRightSplitBrowser(browser_window_t* win_ctx, tab_info_t* tab, const char* initial_url);
 
+void get_theme_config(char* out_mode, size_t max_len);
+void save_theme_config(const char* mode);
+void broadcast_theme_update(browser_window_t* win_ctx, const char* mode);
+int is_theme_dark(void);
+
 // extern cef_browser_t *g_ui_browser;
 // extern cef_browser_t *g_content_browser;
 extern char g_startup_url[4096];

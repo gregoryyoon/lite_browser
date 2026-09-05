@@ -8,8 +8,13 @@
 #include <stdlib.h>
 
 
-#if defined(OS_WIN)
+#if defined(_WIN32) || defined(OS_WIN)
 #include <windows.h>
+#include <dwmapi.h>
+#pragma comment(lib, "dwmapi.lib")
+#ifndef DWMWA_USE_IMMERSIVE_DARK_MODE
+#define DWMWA_USE_IMMERSIVE_DARK_MODE 20
+#endif
 #endif
 
 #include "include/capi/cef_app_capi.h"
@@ -47,6 +52,16 @@ static LRESULT CALLBACK LiteBrowserPopupWndProc(HWND hwnd, UINT message, WPARAM 
   popup_window_ctx_t* ctx = (popup_window_ctx_t*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
 
   switch (message) {
+  case WM_ERASEBKGND: {
+    HDC hdc = (HDC)wParam;
+    RECT r;
+    GetClientRect(hwnd, &r);
+    int dark = is_theme_dark();
+    HBRUSH bg_brush = CreateSolidBrush(dark ? RGB(13, 15, 21) : RGB(228, 228, 231));
+    FillRect(hdc, &r, bg_brush);
+    DeleteObject(bg_brush);
+    return 1;
+  }
   case WM_SIZE: {
     if (ctx && ctx->browser_hwnd) {
       int w = LOWORD(lParam);
@@ -333,6 +348,7 @@ int CEF_CALLBACK life_span_handler_on_before_popup(
 
     HINSTANCE hInstance = GetModuleHandle(NULL);
     static int s_popup_class_registered = 0;
+    int dark_init = is_theme_dark();
     if (!s_popup_class_registered) {
       WNDCLASSEXW wcex = {0};
       wcex.cbSize = sizeof(WNDCLASSEXW);
@@ -341,7 +357,7 @@ int CEF_CALLBACK life_span_handler_on_before_popup(
       wcex.hInstance = hInstance;
       wcex.hIcon = (HICON)LoadImage(hInstance, MAKEINTRESOURCE(120), IMAGE_ICON, 32, 32, LR_DEFAULTCOLOR);
       wcex.hCursor = LoadCursor(NULL, IDC_ARROW);
-      wcex.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+      wcex.hbrBackground = CreateSolidBrush(dark_init ? RGB(13, 15, 21) : RGB(228, 228, 231));
       wcex.lpszClassName = L"LiteBrowserPopupWnd";
       wcex.hIconSm = (HICON)LoadImage(hInstance, MAKEINTRESOURCE(120), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR);
       RegisterClassExW(&wcex);
@@ -353,6 +369,23 @@ int CEF_CALLBACK life_span_handler_on_before_popup(
         WS_OVERLAPPEDWINDOW | WS_VISIBLE | WS_CLIPCHILDREN,
         popup_x, popup_y, win_w, win_h,
         NULL, NULL, hInstance, NULL);
+
+    if (popup_hwnd) {
+      HBRUSH hbr = CreateSolidBrush(dark_init ? RGB(13, 15, 21) : RGB(228, 228, 231));
+      HBRUSH old_hbr = (HBRUSH)SetClassLongPtrW(popup_hwnd, GCLP_HBRBACKGROUND, (LONG_PTR)hbr);
+      if (old_hbr) DeleteObject(old_hbr);
+
+      if (dark_init) {
+        BOOL dark_mode_val = TRUE;
+        if (FAILED(DwmSetWindowAttribute(popup_hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark_mode_val, sizeof(dark_mode_val)))) {
+          DwmSetWindowAttribute(popup_hwnd, 19, &dark_mode_val, sizeof(dark_mode_val));
+        }
+      }
+    }
+
+    if (settings) {
+      settings->background_color = dark_init ? 0xFF0D0F15 : 0xFFFFFFFF;
+    }
 
     popup_window_ctx_t* pctx = (popup_window_ctx_t*)calloc(1, sizeof(popup_window_ctx_t));
     if (pctx) {

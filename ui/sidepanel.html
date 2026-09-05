@@ -4,232 +4,355 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Lite Browser - AI Side Panel</title>
+  <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="sidepanel.css">
+  <script src="theme.js"></script>
 </head>
 <body>
   <div class="sidepanel-container">
     <!-- Header -->
     <header class="sidepanel-header">
       <div class="header-left">
-        <span class="ai-icon">✨</span>
+        <span class="ai-icon"><svg viewBox="0 0 24 24"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg></span>
         <span class="header-title">AI Assistant</span>
         <span id="agent-status-badge" class="status-badge status-idle">IDLE</span>
       </div>
       <div class="header-right">
-        <button id="clear-chat-btn" class="icon-btn" title="대화 지우기">🗑️</button>
-        <button id="settings-btn" class="icon-btn" title="설정">⚙️</button>
-        <button id="close-panel-btn" class="icon-btn" title="사이드패널 닫기">✕</button>
+        <button id="clear-chat-btn" class="icon-btn" title="대화 지우기"><svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg></button>
+        <button id="settings-btn" class="icon-btn" title="설정"><svg viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
+        <button id="close-panel-btn" class="icon-btn" title="사이드패널 닫기"><svg viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
       </div>
     </header>
 
     <!-- Settings Overlay Panel -->
     <div id="settings-panel" class="settings-panel hidden">
       <div class="settings-header">
-        <h3>AI & 로컬 데이터 설정</h3>
-        <button id="close-settings-btn" class="icon-btn">✕</button>
+        <div class="settings-header-title">
+          <div class="settings-header-icon">
+            <svg viewBox="0 0 24 24"><line x1="4" x2="4" y1="21" y2="14"/><line x1="4" x2="4" y1="10" y2="3"/><line x1="12" x2="12" y1="21" y2="12"/><line x1="12" x2="12" y1="8" y2="3"/><line x1="20" x2="20" y1="21" y2="16"/><line x1="20" x2="20" y1="12" y2="3"/><line x1="1" x2="7" y1="14" y2="14"/><line x1="9" x2="15" y1="8" y2="8"/><line x1="17" x2="23" y1="16" y2="16"/></svg>
+          </div>
+          <div>
+            <h3>AI &amp; 로컬 데이터 설정</h3>
+            <p class="settings-subtitle">모델 엔진, 계정 인증, 보안 볼트 및 기억 제어</p>
+          </div>
+        </div>
+        <button id="close-settings-btn" class="icon-btn" title="닫기"><svg viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
       </div>
       <div class="settings-body">
         <!-- AI Provider Section -->
-        <div class="settings-section">
-          <h4>🤖 AI Provider 설정</h4>
-          <div class="form-group">
-            <label for="provider-select">제공업체 (Provider):</label>
-            <select id="provider-select">
-              <option value="gemini">Google Gemini (추천: Gemini 3.7 Flash)</option>
-              <option value="openai">OpenAI (GPT-4o)</option>
-              <option value="anthropic">Anthropic (Claude 3.7 Sonnet)</option>
-              <option value="ollama">Ollama (로컬 LLM)</option>
-            </select>
+        <section class="settings-section">
+          <div class="section-header">
+            <div class="section-title-group">
+              <div class="section-icon-wrap icon-blue">
+                <svg viewBox="0 0 24 24"><rect width="18" height="12" x="3" y="8" rx="2"/><path d="M12 8V4H8"/><line x1="2" x2="3" y1="14" y2="14"/><line x1="21" x2="22" y1="14" y2="14"/><line x1="9" x2="9.01" y1="13" y2="13"/><line x1="15" x2="15.01" y1="13" y2="13"/></svg>
+              </div>
+              <div>
+                <h4 class="section-title">AI Provider 설정</h4>
+                <p class="section-desc">연동할 AI 엔진 및 인증 방식을 구성합니다.</p>
+              </div>
+            </div>
           </div>
-
-          <div id="gemini-fields" class="provider-fields">
+          <div class="section-body">
             <div class="form-group">
-              <label>인증 방식:</label>
-              <div class="auth-type-toggle">
-                <button type="button" class="auth-toggle-btn active" data-provider="gemini" data-mode="subscription">💳 Google/Gemini 구독</button>
-                <button type="button" class="auth-toggle-btn" data-provider="gemini" data-mode="apikey">🔑 API Key</button>
-              </div>
-            </div>
-
-            <div id="gemini-sub-box" class="auth-sub-card">
-              <div class="auth-sub-status" id="gemini-sub-status">
-                <span class="auth-badge-unconnected">⚠️ 구독 미연결</span>
-                <p class="auth-hint">Google Gemini(Advanced) 계정 로그인 또는 OAuth Access Token을 등록하여 API 키 없이 사용하세요.</p>
-              </div>
-              <div class="auth-sub-actions">
-                <button type="button" class="btn btn-primary btn-sm auth-login-btn" data-provider="gemini">🌐 Google Gemini 로그인</button>
-                <button type="button" class="btn btn-danger-outline btn-sm auth-logout-btn hidden" data-provider="gemini">연결 해제</button>
-              </div>
-              <details class="auth-manual-details">
-                <summary>수동 액세스 토큰 등록 (OAuth / gcloud Token)</summary>
-                <div class="form-group" style="margin-top: 6px;">
-                  <input type="password" id="gemini-sub-token" placeholder="Bearer Token (gcloud auth print-access-token 또는 OAuth Token)">
-                  <button type="button" class="btn btn-secondary btn-sm auth-save-token-btn" data-provider="gemini" style="margin-top: 4px;">토큰 저장</button>
-                </div>
-              </details>
-            </div>
-
-            <div id="gemini-apikey-box" class="hidden">
-              <div class="form-group">
-                <label for="gemini-key">Gemini API Key:</label>
-                <input type="password" id="gemini-key" placeholder="AIzaSy...">
-              </div>
-            </div>
-
-            <div class="form-group">
-              <label for="gemini-model">모델:</label>
-              <select id="gemini-model">
-                <option value="gemini-3.7-flash" selected>gemini-3.7-flash (기본 권장)</option>
-                <option value="gemini-3.6-flash">gemini-3.6-flash</option>
-                <option value="gemini-3.5-flash">gemini-3.5-flash</option>
-                <option value="gemini-3.1-pro-preview">gemini-3.1-pro-preview</option>
+              <label for="provider-select">제공업체 (Provider):</label>
+              <select id="provider-select">
+                <option value="gemini">Google Gemini (추천: Gemini 3.7 Flash)</option>
+                <option value="openai">OpenAI (GPT-4o)</option>
+                <option value="anthropic">Anthropic (Claude 3.7 Sonnet)</option>
+                <option value="ollama">Ollama (로컬 LLM)</option>
               </select>
             </div>
-          </div>
 
-          <div id="openai-fields" class="provider-fields hidden">
-            <div class="form-group">
-              <label>인증 방식:</label>
-              <div class="auth-type-toggle">
-                <button type="button" class="auth-toggle-btn active" data-provider="openai" data-mode="subscription">💳 ChatGPT Plus/Pro 구독</button>
-                <button type="button" class="auth-toggle-btn" data-provider="openai" data-mode="apikey">🔑 API Key</button>
-              </div>
-            </div>
-
-            <div id="openai-sub-box" class="auth-sub-card">
-              <div class="auth-sub-status" id="openai-sub-status">
-                <span class="auth-badge-unconnected">⚠️ 구독 미연결</span>
-                <p class="auth-hint">ChatGPT Plus/Team/Pro 구독 계정을 연결하여 추가 API 요금 없이 사용하세요.</p>
-              </div>
-              <div class="auth-sub-actions">
-                <button type="button" class="btn btn-primary btn-sm auth-login-btn" data-provider="openai">🌐 ChatGPT 로그인</button>
-                <button type="button" class="btn btn-danger-outline btn-sm auth-logout-btn hidden" data-provider="openai">연결 해제</button>
-              </div>
-              <details class="auth-manual-details">
-                <summary>수동 세션 토큰 등록 (Access / Session Token)</summary>
-                <div class="form-group" style="margin-top: 6px;">
-                  <input type="password" id="openai-sub-token" placeholder="Bearer Token (DPAPI로 암호화 저장)">
-                  <button type="button" class="btn btn-secondary btn-sm auth-save-token-btn" data-provider="openai" style="margin-top: 4px;">토큰 저장</button>
-                </div>
-              </details>
-            </div>
-
-            <div id="openai-apikey-box" class="hidden">
+            <div id="gemini-fields" class="provider-fields">
               <div class="form-group">
-                <label for="openai-key">OpenAI API Key:</label>
-                <input type="password" id="openai-key" placeholder="sk-proj-...">
-              </div>
-            </div>
-
-            <div class="form-group">
-              <label for="openai-model">모델:</label>
-              <input type="text" id="openai-model" value="gpt-4o">
-            </div>
-          </div>
-
-          <div id="anthropic-fields" class="provider-fields hidden">
-            <div class="form-group">
-              <label>인증 방식:</label>
-              <div class="auth-type-toggle">
-                <button type="button" class="auth-toggle-btn active" data-provider="anthropic" data-mode="subscription">💳 Claude Pro 구독</button>
-                <button type="button" class="auth-toggle-btn" data-provider="anthropic" data-mode="apikey">🔑 API Key</button>
-              </div>
-            </div>
-
-            <div id="anthropic-sub-box" class="auth-sub-card">
-              <div class="auth-sub-status" id="anthropic-sub-status">
-                <span class="auth-badge-unconnected">⚠️ 구독 미연결</span>
-                <p class="auth-hint">Claude Pro/Team 구독 계정을 연결하여 추가 API 요금 없이 사용하세요.</p>
-              </div>
-              <div class="auth-sub-actions">
-                <button type="button" class="btn btn-primary btn-sm auth-login-btn" data-provider="anthropic">🌐 Claude 로그인</button>
-                <button type="button" class="btn btn-danger-outline btn-sm auth-logout-btn hidden" data-provider="anthropic">연결 해제</button>
-              </div>
-              <details class="auth-manual-details">
-                <summary>수동 세션 토큰 등록 (Session Key / Token)</summary>
-                <div class="form-group" style="margin-top: 6px;">
-                  <input type="password" id="anthropic-sub-token" placeholder="Session Token (DPAPI로 암호화 저장)">
-                  <button type="button" class="btn btn-secondary btn-sm auth-save-token-btn" data-provider="anthropic" style="margin-top: 4px;">토큰 저장</button>
+                <label>인증 방식:</label>
+                <div class="auth-type-toggle">
+                  <button type="button" class="auth-toggle-btn active" data-provider="gemini" data-mode="subscription">
+                    <svg viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="5" rx="2"/><line x1="2" x2="22" y1="10" y2="10"/></svg>
+                    <span>Google/Gemini 구독</span>
+                  </button>
+                  <button type="button" class="auth-toggle-btn" data-provider="gemini" data-mode="apikey">
+                    <svg viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></svg>
+                    <span>API Key</span>
+                  </button>
                 </div>
-              </details>
-            </div>
+              </div>
 
-            <div id="anthropic-apikey-box" class="hidden">
+              <div id="gemini-sub-box" class="auth-sub-card">
+                <div class="auth-sub-status" id="gemini-sub-status">
+                  <span class="auth-badge auth-badge-unconnected">
+                    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>
+                    <span>구독 미연결</span>
+                  </span>
+                  <p class="auth-hint">Google Gemini(Advanced) 계정 로그인 또는 OAuth Access Token을 등록하여 API 키 없이 사용하세요.</p>
+                </div>
+                <div class="auth-sub-actions">
+                  <button type="button" class="btn btn-primary btn-sm auth-login-btn" data-provider="gemini">
+                    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+                    <span>Google Gemini 로그인</span>
+                  </button>
+                  <button type="button" class="btn btn-danger-outline btn-sm auth-logout-btn hidden" data-provider="gemini">
+                    <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
+                    <span>연결 해제</span>
+                  </button>
+                </div>
+                <details class="auth-manual-details">
+                  <summary>수동 액세스 토큰 등록 (OAuth / gcloud Token)</summary>
+                  <div class="form-group" style="margin-top: 6px;">
+                    <input type="password" id="gemini-sub-token" placeholder="Bearer Token (gcloud auth print-access-token 또는 OAuth Token)">
+                    <button type="button" class="btn btn-secondary btn-sm auth-save-token-btn" data-provider="gemini" style="margin-top: 4px;">
+                      <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+                      <span>토큰 저장</span>
+                    </button>
+                  </div>
+                </details>
+              </div>
+
+              <div id="gemini-apikey-box" class="hidden">
+                <div class="form-group">
+                  <label for="gemini-key">Gemini API Key:</label>
+                  <input type="password" id="gemini-key" placeholder="AIzaSy...">
+                </div>
+              </div>
+
               <div class="form-group">
-                <label for="anthropic-key">Anthropic API Key:</label>
-                <input type="password" id="anthropic-key" placeholder="sk-ant-...">
+                <label for="gemini-model">모델:</label>
+                <select id="gemini-model">
+                  <option value="gemini-3.7-flash" selected>gemini-3.7-flash (기본 권장)</option>
+                  <option value="gemini-3.6-flash">gemini-3.6-flash</option>
+                  <option value="gemini-3.5-flash">gemini-3.5-flash</option>
+                  <option value="gemini-3.1-pro-preview">gemini-3.1-pro-preview</option>
+                </select>
               </div>
             </div>
 
-            <div class="form-group">
-              <label for="anthropic-model">모델:</label>
-              <input type="text" id="anthropic-model" value="claude-3-7-sonnet-20250219">
-            </div>
-          </div>
+            <div id="openai-fields" class="provider-fields hidden">
+              <div class="form-group">
+                <label>인증 방식:</label>
+                <div class="auth-type-toggle">
+                  <button type="button" class="auth-toggle-btn active" data-provider="openai" data-mode="subscription">
+                    <svg viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="5" rx="2"/><line x1="2" x2="22" y1="10" y2="10"/></svg>
+                    <span>ChatGPT Plus/Pro 구독</span>
+                  </button>
+                  <button type="button" class="auth-toggle-btn" data-provider="openai" data-mode="apikey">
+                    <svg viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></svg>
+                    <span>API Key</span>
+                  </button>
+                </div>
+              </div>
 
-          <div id="ollama-fields" class="provider-fields hidden">
-            <div class="form-group">
-              <label for="ollama-url">Base URL:</label>
-              <input type="text" id="ollama-url" value="http://localhost:11434">
+              <div id="openai-sub-box" class="auth-sub-card">
+                <div class="auth-sub-status" id="openai-sub-status">
+                  <span class="auth-badge auth-badge-unconnected">
+                    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>
+                    <span>구독 미연결</span>
+                  </span>
+                  <p class="auth-hint">ChatGPT Plus/Team/Pro 구독 계정을 연결하여 추가 API 요금 없이 사용하세요.</p>
+                </div>
+                <div class="auth-sub-actions">
+                  <button type="button" class="btn btn-primary btn-sm auth-login-btn" data-provider="openai">
+                    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+                    <span>ChatGPT 로그인</span>
+                  </button>
+                  <button type="button" class="btn btn-danger-outline btn-sm auth-logout-btn hidden" data-provider="openai">
+                    <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
+                    <span>연결 해제</span>
+                  </button>
+                </div>
+                <details class="auth-manual-details">
+                  <summary>수동 세션 토큰 등록 (Access / Session Token)</summary>
+                  <div class="form-group" style="margin-top: 6px;">
+                    <input type="password" id="openai-sub-token" placeholder="Bearer Token (DPAPI로 암호화 저장)">
+                    <button type="button" class="btn btn-secondary btn-sm auth-save-token-btn" data-provider="openai" style="margin-top: 4px;">
+                      <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+                      <span>토큰 저장</span>
+                    </button>
+                  </div>
+                </details>
+              </div>
+
+              <div id="openai-apikey-box" class="hidden">
+                <div class="form-group">
+                  <label for="openai-key">OpenAI API Key:</label>
+                  <input type="password" id="openai-key" placeholder="sk-proj-...">
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label for="openai-model">모델:</label>
+                <input type="text" id="openai-model" value="gpt-4o">
+              </div>
             </div>
-            <div class="form-group">
-              <label for="ollama-model">모델:</label>
-              <input type="text" id="ollama-model" value="llama3.2">
+
+            <div id="anthropic-fields" class="provider-fields hidden">
+              <div class="form-group">
+                <label>인증 방식:</label>
+                <div class="auth-type-toggle">
+                  <button type="button" class="auth-toggle-btn active" data-provider="anthropic" data-mode="subscription">
+                    <svg viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="5" rx="2"/><line x1="2" x2="22" y1="10" y2="10"/></svg>
+                    <span>Claude Pro 구독</span>
+                  </button>
+                  <button type="button" class="auth-toggle-btn" data-provider="anthropic" data-mode="apikey">
+                    <svg viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></svg>
+                    <span>API Key</span>
+                  </button>
+                </div>
+              </div>
+
+              <div id="anthropic-sub-box" class="auth-sub-card">
+                <div class="auth-sub-status" id="anthropic-sub-status">
+                  <span class="auth-badge auth-badge-unconnected">
+                    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>
+                    <span>구독 미연결</span>
+                  </span>
+                  <p class="auth-hint">Claude Pro/Team 구독 계정을 연결하여 추가 API 요금 없이 사용하세요.</p>
+                </div>
+                <div class="auth-sub-actions">
+                  <button type="button" class="btn btn-primary btn-sm auth-login-btn" data-provider="anthropic">
+                    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+                    <span>Claude 로그인</span>
+                  </button>
+                  <button type="button" class="btn btn-danger-outline btn-sm auth-logout-btn hidden" data-provider="anthropic">
+                    <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
+                    <span>연결 해제</span>
+                  </button>
+                </div>
+                <details class="auth-manual-details">
+                  <summary>수동 세션 토큰 등록 (Session Key / Token)</summary>
+                  <div class="form-group" style="margin-top: 6px;">
+                    <input type="password" id="anthropic-sub-token" placeholder="Session Token (DPAPI로 암호화 저장)">
+                    <button type="button" class="btn btn-secondary btn-sm auth-save-token-btn" data-provider="anthropic" style="margin-top: 4px;">
+                      <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+                      <span>토큰 저장</span>
+                    </button>
+                  </div>
+                </details>
+              </div>
+
+              <div id="anthropic-apikey-box" class="hidden">
+                <div class="form-group">
+                  <label for="anthropic-key">Anthropic API Key:</label>
+                  <input type="password" id="anthropic-key" placeholder="sk-ant-...">
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label for="anthropic-model">모델:</label>
+                <input type="text" id="anthropic-model" value="claude-3-7-sonnet-20250219">
+              </div>
+            </div>
+
+            <div id="ollama-fields" class="provider-fields hidden">
+              <div class="form-group">
+                <label for="ollama-url">Base URL:</label>
+                <input type="text" id="ollama-url" value="http://localhost:11434">
+              </div>
+              <div class="form-group">
+                <label for="ollama-model">모델:</label>
+                <input type="text" id="ollama-model" value="llama3.2">
+              </div>
             </div>
           </div>
-        </div>
+        </section>
 
         <!-- Security Vault Section -->
-        <div class="settings-section">
-          <h4>🔒 보안 자격 증명 볼트 (Local Vault)</h4>
-          <p class="section-desc">Windows DPAPI 암호화로 보호됩니다. 실제 비밀번호는 LLM 프롬프트에 절대 노출되지 않고 안전하게 대리 입력됩니다.</p>
-          
-          <div class="vault-add-form">
-            <input type="text" id="vault-domain" placeholder="도메인 (예: naver.com)">
-            <input type="text" id="vault-user" placeholder="아이디 / 이메일">
-            <input type="password" id="vault-pass" placeholder="비밀번호">
-            <button id="vault-add-btn" class="btn btn-secondary">볼트에 저장</button>
+        <section class="settings-section">
+          <div class="section-header">
+            <div class="section-title-group">
+              <div class="section-icon-wrap icon-mint">
+                <svg viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              </div>
+              <div>
+                <h4 class="section-title">보안 자격 증명 볼트 (Local Vault)</h4>
+                <p class="section-desc">Windows DPAPI 암호화 보호. LLM에 비밀번호 노출 없이 안전 대리 로그인</p>
+              </div>
+            </div>
+            <span class="bento-badge">DPAPI Encrypted</span>
           </div>
+          <div class="section-body">
+            <div class="vault-add-form">
+              <input type="text" id="vault-domain" placeholder="도메인 (예: naver.com)">
+              <input type="text" id="vault-user" placeholder="아이디 / 이메일">
+              <input type="password" id="vault-pass" placeholder="비밀번호">
+              <button id="vault-add-btn" class="btn btn-secondary">
+                <svg viewBox="0 0 24 24"><line x1="12" x2="12" y1="5" y2="19"/><line x1="5" x2="19" y1="12" y2="12"/></svg>
+                <span>볼트에 저장</span>
+              </button>
+            </div>
 
-          <div class="vault-list-container">
-            <h5>저장된 계정 목록</h5>
-            <div id="vault-list" class="vault-list">
-              <div class="empty-hint">저장된 계정이 없습니다.</div>
+            <div class="vault-list-container">
+              <h5>저장된 계정 목록</h5>
+              <div id="vault-list" class="vault-list">
+                <div class="empty-hint">저장된 계정이 없습니다.</div>
+              </div>
             </div>
           </div>
-        </div>
+        </section>
 
         <!-- Memory & Data Control Section -->
-        <div class="settings-section">
-          <h4>🧠 기억 및 데이터 제어 (Memory Control)</h4>
-          <div class="toggle-group">
-            <label class="switch-label">
-              <input type="checkbox" id="memory-index-toggle" checked>
-              <span class="switch-text">방문 기록 및 페이지 자동 시맨틱 인덱싱</span>
-            </label>
+        <section class="settings-section">
+          <div class="section-header">
+            <div class="section-title-group">
+              <div class="section-icon-wrap icon-purple">
+                <svg viewBox="0 0 24 24"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/><path d="M12 18v4"/></svg>
+              </div>
+              <div>
+                <h4 class="section-title">기억 및 데이터 제어 (Memory Control)</h4>
+                <p class="section-desc">로컬 시맨틱 인덱스 및 브라우징 컨텍스트 저장 제어</p>
+              </div>
+            </div>
           </div>
-          <div class="memory-stats-row">
-            <span>인덱싱된 컨텍스트: <strong id="memory-count-label">0개</strong></span>
-            <button id="clear-memory-btn" class="btn btn-danger-outline">기억 데이터 전체 삭제</button>
+          <div class="section-body">
+            <div class="toggle-group">
+              <label class="switch-label">
+                <input type="checkbox" id="memory-index-toggle" checked>
+                <span class="switch-slider"></span>
+                <span class="switch-text">방문 기록 및 페이지 자동 시맨틱 인덱싱</span>
+              </label>
+            </div>
+            <div class="memory-stats-row">
+              <span class="memory-count-text">인덱싱된 컨텍스트: <strong id="memory-count-label">0개</strong></span>
+              <button id="clear-memory-btn" class="btn btn-danger-outline btn-sm">
+                <svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                <span>기억 데이터 전체 삭제</span>
+              </button>
+            </div>
           </div>
-        </div>
+        </section>
       </div>
       <div class="settings-footer">
-        <button id="save-settings-btn" class="btn btn-primary">설정 저장</button>
+        <button id="save-settings-btn" class="btn btn-primary">
+          <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+          <span>설정 저장</span>
+        </button>
       </div>
     </div>
 
     <!-- Main Chat & Interaction Timeline -->
     <main class="chat-container" id="chat-container">
       <div class="welcome-card" id="welcome-card">
-        <div class="welcome-icon">🤖</div>
+        <div class="welcome-icon">
+          <svg viewBox="0 0 24 24"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>
+        </div>
         <h3>무엇을 도와드릴까요?</h3>
         <p>웹 페이지 요약, 폼 자동 완성, 데이터 수집 또는 브라우저 조작을 지시하세요.</p>
         <div class="suggestion-chips">
-          <button class="chip" data-prompt="현재 웹페이지의 핵심 내용을 3줄로 요약해줘">📄 현재 페이지 요약</button>
-          <button class="chip" data-prompt="이 사이트의 로그인 폼을 찾아 로컬 볼트로 대리 로그인해줘">🔑 볼트 대리 로그인</button>
-          <button class="chip" data-prompt="현재 페이지에서 주요 데이터와 링크 목록을 추출해줘">📊 데이터 추출</button>
-          <button class="chip" data-prompt="네이버에서 오늘 주요 뉴스를 검색해서 보여줘">📰 뉴스 검색</button>
+          <button class="chip" data-prompt="현재 웹페이지의 핵심 내용을 3줄로 요약해줘">
+            <svg viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><line x1="10" x2="14" y1="13" y2="13"/><line x1="10" x2="14" y1="17" y2="17"/></svg>
+            <span>현재 페이지 요약</span>
+          </button>
+          <button class="chip" data-prompt="이 사이트의 로그인 폼을 찾아 로컬 볼트로 대리 로그인해줘">
+            <svg viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></svg>
+            <span>볼트 대리 로그인</span>
+          </button>
+          <button class="chip" data-prompt="현재 페이지에서 주요 데이터와 링크 목록을 추출해줘">
+            <svg viewBox="0 0 24 24"><line x1="18" x2="18" y1="20" y2="10"/><line x1="12" x2="12" y1="20" y2="4"/><line x1="6" x2="6" y1="20" y2="14"/></svg>
+            <span>데이터 추출</span>
+          </button>
+          <button class="chip" data-prompt="네이버에서 오늘 주요 뉴스를 검색해서 보여줘">
+            <svg viewBox="0 0 24 24"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/><path d="M18 14h-8"/><path d="M15 18h-5"/><path d="M10 6h8v4h-8V6Z"/></svg>
+            <span>뉴스 검색</span>
+          </button>
         </div>
       </div>
 
@@ -238,7 +361,7 @@
       <!-- Intervention Card (Shown when STUCK / WAITING) -->
       <div id="intervention-card" class="intervention-card hidden">
         <div class="intervention-header">
-          <span class="intervention-icon">⚠️</span>
+          <span class="intervention-icon"><svg viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" x2="12" y1="9" y2="13"/><line x1="12" x2="12.01" y1="17" y2="17"/></svg></span>
           <strong>사용자 개입 필요</strong>
         </div>
         <p id="intervention-message">작업 중 오류가 발생했거나 추가 입력이 필요합니다.</p>
@@ -254,8 +377,8 @@
     <footer class="sidepanel-footer">
       <div class="input-container">
         <textarea id="prompt-input" rows="1" placeholder="AI 에이전트에게 브라우저 작업 지시..."></textarea>
-        <button id="send-btn" class="send-btn" title="전송">➤</button>
-        <button id="stop-btn" class="stop-btn hidden" title="생성 중단">■</button>
+        <button id="send-btn" class="send-btn" title="전송"><svg viewBox="0 0 24 24"><line x1="22" x2="11" y1="2" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
+        <button id="stop-btn" class="stop-btn hidden" title="생성 중단"><svg viewBox="0 0 24 24"><rect width="12" height="12" x="6" y="6" rx="2" fill="currentColor"/></svg></button>
       </div>
     </footer>
   </div>

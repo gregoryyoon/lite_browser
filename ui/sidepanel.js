@@ -95,14 +95,14 @@ document.addEventListener('DOMContentLoaded', () => {
       if (statusDiv) {
         if (item.connected) {
           statusDiv.innerHTML = `
-            <span class="auth-badge-connected">✅ ${escapeHtml(item.tier || '구독 연결됨')}</span>
+            <span class="auth-badge auth-badge-connected"><svg class="icon-inline" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg> <span>${escapeHtml(item.tier || '구독 연결됨')}</span></span>
             <p class="auth-hint"><strong>${escapeHtml(item.email || '계정 연결 완료')}</strong></p>
           `;
           if (loginBtn) loginBtn.classList.add('hidden');
           if (logoutBtn) logoutBtn.classList.remove('hidden');
         } else {
           statusDiv.innerHTML = `
-            <span class="auth-badge-unconnected">⚠️ 구독 미연결</span>
+            <span class="auth-badge auth-badge-unconnected"><svg class="icon-inline" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg> <span>구독 미연결</span></span>
             <p class="auth-hint">구독 계정으로 로그인하여 API 키 없이 사용하세요.</p>
           `;
           if (loginBtn) loginBtn.classList.remove('hidden');
@@ -273,7 +273,9 @@ document.addEventListener('DOMContentLoaded', () => {
           <strong>${escapeHtml(e.domain)}</strong>
           <span style="color: var(--text-secondary); margin-left: 6px;">(${escapeHtml(e.username || '비공개')})</span>
         </div>
-        <button class="icon-btn" title="삭제" data-domain="${escapeHtml(e.domain)}">🗑️</button>
+        <button class="icon-btn icon-btn-danger" title="삭제" data-domain="${escapeHtml(e.domain)}">
+          <svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
+        </button>
       `;
       item.querySelector('button').addEventListener('click', () => {
         window.location.href = `http://ui-action/vault-delete?domain=${encodeURIComponent(e.domain)}`;
@@ -348,7 +350,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const thinkingBox = document.createElement('details');
     thinkingBox.className = 'thinking-box hidden';
-    thinkingBox.innerHTML = '<summary>🧠 사고 과정 (Thinking)...</summary><div class="thinking-content"></div>';
+    thinkingBox.innerHTML = '<summary><svg class="icon-inline" viewBox="0 0 24 24"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/><path d="M12 18v4"/></svg> <span>사고 과정 (Thinking)...</span></summary><div class="thinking-content"></div>';
 
     const contentDiv = document.createElement('div');
     contentDiv.className = 'bubble-content';
@@ -373,8 +375,8 @@ document.addEventListener('DOMContentLoaded', () => {
     card.className = 'action-card';
     card.innerHTML = `
       <div class="action-header">
-        <span>🛠️ <strong>${escapeHtml(toolName)}</strong></span>
-        <span style="color: ${result?.isError ? 'var(--danger-color)' : 'var(--success-color)'}; font-size: 11px;">
+        <span class="action-title-wrap"><svg class="icon-inline" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg> <strong>${escapeHtml(toolName)}</strong></span>
+        <span class="action-status-badge ${result?.isError ? 'status-error' : 'status-ok'}">
           ${result?.isError ? '실패' : '완료'}
         </span>
       </div>
@@ -433,7 +435,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (currentAuthMode === 'subscription') {
         const subToken = await getSubscriptionToken(settings.provider);
         if (!subToken) {
-          throw new Error(`${settings.provider.toUpperCase()} 구독 계정이 연결되지 않았거나 세션이 만료되었습니다. 설정(⚙️)에서 구독 계정으로 로그인해주세요.`);
+          throw new Error(`${settings.provider.toUpperCase()} 구독 계정이 연결되지 않았거나 세션이 만료되었습니다. 설정에서 구독 계정으로 로그인해주세요.`);
         }
         settings.subscriptionToken = subToken;
       }
@@ -472,7 +474,7 @@ document.addEventListener('DOMContentLoaded', () => {
           onStatus: (statusInfo) => {
             if (statusInfo.type === 'rate_limit_retry') {
               bubble.statusNotice.classList.remove('hidden');
-              bubble.statusNotice.innerHTML = `<span>⏳</span><span>${escapeHtml(statusInfo.message)}</span>`;
+              bubble.statusNotice.innerHTML = `<svg class="icon-inline spin" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg> <span>${escapeHtml(statusInfo.message)}</span>`;
               window.taskRuntime.setState(TaskState.RUNNING, statusInfo.message);
               chatContainer.scrollTop = chatContainer.scrollHeight;
             }
@@ -566,7 +568,7 @@ document.addEventListener('DOMContentLoaded', () => {
       window.taskRuntime.setState(TaskState.DONE, '작업 완료');
     } catch (err) {
       if (err.name !== 'AbortError') {
-        appendAssistantMessage(`❌ 오류가 발생했습니다: ${err.message}`);
+        appendAssistantMessage(`오류가 발생했습니다: ${err.message}`);
         window.taskRuntime.setState(TaskState.IDLE, err.message);
       }
     } finally {

@@ -53,7 +53,13 @@ function renderSidebar() {
   const countHighlights = document.getElementById('count-highlights');
   const tagsContainer = document.getElementById('smart-tags-list');
 
+  // Bento Top Stat Widgets
+  const bentoTotal = document.getElementById('bento-stat-total');
+  const bentoHighlights = document.getElementById('bento-stat-highlights');
+  const bentoTagsCloud = document.getElementById('bento-top-tags');
+
   if (countAll) countAll.innerText = managerBookmarks.length;
+  if (bentoTotal) bentoTotal.innerText = managerBookmarks.length;
 
   const now = Date.now();
   const threeDaysMs = 3 * 24 * 60 * 60 * 1000;
@@ -62,6 +68,7 @@ function renderSidebar() {
 
   const highlightCount = managerBookmarks.filter(hasHighlightAnchor).length;
   if (countHighlights) countHighlights.innerText = highlightCount;
+  if (bentoHighlights) bentoHighlights.innerText = highlightCount;
 
   // Build Tag Map & Counts
   const tagCounts = {};
@@ -71,9 +78,27 @@ function renderSidebar() {
     });
   });
 
+  const sortedTags = Object.keys(tagCounts).sort((a,b) => tagCounts[b] - tagCounts[a]);
+
+  // Render Top 6 Tags in Bento Stat Cloud
+  if (bentoTagsCloud) {
+    bentoTagsCloud.innerHTML = '';
+    if (sortedTags.length === 0) {
+      bentoTagsCloud.innerHTML = '<span class="stat-sub">태그 없음</span>';
+    } else {
+      sortedTags.slice(0, 6).forEach(tag => {
+        const pill = document.createElement('button');
+        pill.className = 'bento-tag-pill' + (currentTag === tag ? ' active' : '');
+        pill.onclick = () => selectTag(tag);
+        pill.innerHTML = `<span>#${tag}</span><span class="badge">${tagCounts[tag]}</span>`;
+        bentoTagsCloud.appendChild(pill);
+      });
+    }
+  }
+
   if (tagsContainer) {
     tagsContainer.innerHTML = '';
-    Object.keys(tagCounts).sort((a,b) => tagCounts[b] - tagCounts[a]).forEach(tag => {
+    sortedTags.forEach(tag => {
       const btn = document.createElement('button');
       btn.className = 'tag-nav-btn' + (currentTag === tag ? ' active' : '');
       btn.onclick = () => selectTag(tag);
@@ -216,8 +241,9 @@ function renderMainView() {
       cardGrid.classList.remove('hide');
       cardGrid.innerHTML = '';
       filtered.forEach(bm => {
+        const isHighlight = hasHighlightAnchor(bm);
         const card = document.createElement('div');
-        card.className = 'bm-card';
+        card.className = 'bm-card' + (isHighlight ? ' bento-wide' : '');
         card.onclick = (e) => openBookmarkUrl(bm.url, e.ctrlKey);
         card.onauxclick = (e) => {
           if (e.button === 1) {
@@ -230,8 +256,8 @@ function renderMainView() {
           ? `<img src="${bm.thumbnailUrl}" class="card-thumb" onerror="this.outerHTML='<div class=\\'card-thumb-placeholder\\'>${(bm.title || 'B')[0]}</div>'">`
           : `<div class="card-thumb-placeholder">${(bm.title || 'B')[0]}</div>`;
 
-        const tagsHtml = (bm.extractedTags || []).map(t => `<span class="tag-chip">#${t}</span>`).join('');
-        const intentHtml = bm.context?.searchIntent ? `<span class="intent-chip">🔍 ${bm.context.searchIntent}</span>` : '';
+        const tagsHtml = (bm.extractedTags || []).map(t => `<span class="card-tag">#${t}</span>`).join('');
+        const intentHtml = bm.context?.searchIntent ? `<span class="card-intent">🔍 ${bm.context.searchIntent}</span>` : '';
         const timeAgo = formatTimeAgo(bm.context?.createdAt);
         const visitCount = getItemVisitCount(bm);
         
@@ -247,14 +273,18 @@ function renderMainView() {
             </div>
             ${highlightHtml}
             <div class="card-snippet" title="${bm.textSnippet || ''}">${bm.textSnippet || '본문 요약이 없습니다.'}</div>
-            <div class="card-meta-box">
+            <div class="card-meta-row">
               ${intentHtml}
               ${tagsHtml}
             </div>
           </div>
           <div class="card-footer">
             <span>${timeAgo} · 👁️ ${visitCount}회 방문</span>
-            <button class="card-delete-btn" title="삭제" onclick="deleteBookmarkManager('${bm.id}', event)">✕</button>
+            <div class="card-actions">
+              <button class="card-action-btn btn-del" title="삭제" onclick="deleteBookmarkManager('${bm.id}', event)">
+                <svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
+              </button>
+            </div>
           </div>
         `;
         cardGrid.appendChild(card);
@@ -283,11 +313,13 @@ function renderMainView() {
 
         row.innerHTML = `
           <img src="${bm.faviconUrl || ''}" class="card-favicon" onerror="this.style.display='none'">
-          <span class="list-row-title">${bm.title}</span>
+          <span class="list-row-title" title="${bm.title}">${bm.title}</span>
           ${highlightHtml}
-          <span class="list-row-snippet">${bm.textSnippet || bm.url}</span>
-          <span class="list-row-date" title="${timeAgo} · ${visitCount}회 방문">${timeAgo} · 👁️ ${visitCount}회</span>
-          <button class="card-delete-btn" title="삭제" onclick="deleteBookmarkManager('${bm.id}', event)">✕</button>
+          <span class="list-row-snippet" title="${bm.textSnippet || bm.url}">${bm.textSnippet || bm.url}</span>
+          <span class="list-row-date" title="${timeAgo} · ${visitCount}회 방문">${timeAgo} · <svg viewBox="0 0 24 24" style="width:12px;height:12px;display:inline-block;stroke:currentColor;fill:none;stroke-width:2;vertical-align:-1px;margin-right:2px;"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>${visitCount}회</span>
+          <button class="card-action-btn btn-del" title="삭제" onclick="deleteBookmarkManager('${bm.id}', event)">
+            <svg viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
         `;
         listTable.appendChild(row);
       });

@@ -447,6 +447,17 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
     }
     break;
   }
+  case WM_ERASEBKGND:
+  {
+    HDC hdc = (HDC)wParam;
+    RECT r;
+    GetClientRect(hwnd, &r);
+    int dark = is_theme_dark();
+    HBRUSH bg_brush = CreateSolidBrush(dark ? RGB(13, 15, 21) : RGB(228, 228, 231));
+    FillRect(hdc, &r, bg_brush);
+    DeleteObject(bg_brush);
+    return 1;
+  }
   case WM_PAINT:
   {
     PAINTSTRUCT ps;
@@ -458,6 +469,7 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
       int content_y = ui_height;
       int content_h = r.bottom - content_y;
       int total_w = r.right;
+      int dark = is_theme_dark();
 
       int sp_w = (win_ctx->show_sidepanel && win_ctx->sidepanel_width > 0) ? win_ctx->sidepanel_width : 0;
       int sp_splitter_w = (win_ctx->show_sidepanel) ? 4 : 0;
@@ -467,7 +479,7 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
       if (win_ctx->show_sidepanel) {
         int sp_bar_x = main_area_w;
         RECT sp_bar_rect = {sp_bar_x, content_y, sp_bar_x + sp_splitter_w, content_y + content_h};
-        HBRUSH sp_bar_brush = CreateSolidBrush(RGB(228, 230, 235));
+        HBRUSH sp_bar_brush = CreateSolidBrush(dark ? RGB(20, 23, 33) : RGB(228, 230, 235));
         FillRect(hdc, &sp_bar_rect, sp_bar_brush);
         DeleteObject(sp_bar_brush);
       }
@@ -486,9 +498,9 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
           int right_x = left_w + split_bar_w;
           int bar_x = left_w;
 
-          HBRUSH active_brush = CreateSolidBrush(RGB(0, 102, 204));
-          HBRUSH inactive_brush = CreateSolidBrush(RGB(220, 220, 225));
-          HBRUSH bar_brush = CreateSolidBrush(RGB(228, 230, 235));
+          HBRUSH active_brush = CreateSolidBrush(dark ? RGB(56, 189, 248) : RGB(0, 102, 204));
+          HBRUSH inactive_brush = CreateSolidBrush(dark ? RGB(34, 38, 52) : RGB(220, 220, 225));
+          HBRUSH bar_brush = CreateSolidBrush(dark ? RGB(20, 23, 33) : RGB(228, 230, 235));
 
           RECT left_rect = {left_x, content_y, left_x + left_w, content_y + content_h};
           RECT bar_rect = {bar_x, content_y, bar_x + split_bar_w, content_y + content_h};
@@ -979,6 +991,7 @@ void CreateSidepanelBrowser(browser_window_t* win_ctx) {
 
   cef_browser_settings_t browser_settings = {};
   browser_settings.size = sizeof(cef_browser_settings_t);
+  browser_settings.background_color = is_theme_dark() ? 0xFF0D0F15 : 0xFFFFFFFF;
 
   cef_window_info_t sidepanel_window_info = {};
   sidepanel_window_info.size = sizeof(cef_window_info_t);
@@ -1020,7 +1033,8 @@ browser_window_t* create_browser_window(const char* startup_url) {
     wcex.lpfnWndProc = LiteBrowserMainWndProc;
     wcex.hInstance = hInstance;
     wcex.hCursor = LoadCursor(NULL, IDC_ARROW);
-    wcex.hbrBackground = CreateSolidBrush(RGB(228, 228, 231));
+    int dark_init = is_theme_dark();
+    wcex.hbrBackground = CreateSolidBrush(dark_init ? RGB(13, 15, 21) : RGB(228, 228, 231));
     wcex.lpszClassName = L"LiteBrowserMainWindowClass";
     RegisterClassEx(&wcex);
     class_registered = 1;
@@ -1089,8 +1103,13 @@ browser_window_t* create_browser_window(const char* startup_url) {
   int width = rect.right;
   int height = rect.bottom;
 
+  cef_browser_settings_t ui_browser_settings = {};
+  ui_browser_settings.size = sizeof(cef_browser_settings_t);
+  ui_browser_settings.background_color = 0; // Transparent background for frameless UI expansion
+
   cef_browser_settings_t browser_settings = {};
   browser_settings.size = sizeof(cef_browser_settings_t);
+  browser_settings.background_color = is_theme_dark() ? 0xFF0D0F15 : 0xFFFFFFFF;
 
   int ui_height = GetUIHeightForWindow(main_hwnd);
   int content_y = ui_height;
@@ -1116,7 +1135,7 @@ browser_window_t* create_browser_window(const char* startup_url) {
   ui_handler->type = BROWSER_TYPE_UI;
 
   cef_browser_host_create_browser(&ui_window_info, &ui_handler->client,
-                                  &ui_url, &browser_settings, NULL, NULL);
+                                  &ui_url, &ui_browser_settings, NULL, NULL);
   cef_string_clear(&ui_url);
 
   // 2. Create Content child browser (Tab 1)
@@ -1196,6 +1215,11 @@ browser_window_t* create_browser_window_for_detached(cef_browser_t* detached_bro
   win_ctx->main_hwnd = main_hwnd;
   SetWindowLongPtr(main_hwnd, GWLP_USERDATA, (LONG_PTR)win_ctx);
 
+  int dark = is_theme_dark();
+  HBRUSH hbr = CreateSolidBrush(dark ? RGB(13, 15, 21) : RGB(228, 228, 231));
+  HBRUSH old_hbr = (HBRUSH)SetClassLongPtr(main_hwnd, GCLP_HBRBACKGROUND, (LONG_PTR)hbr);
+  if (old_hbr) DeleteObject(old_hbr);
+
   for (int i = 0; i < MAX_WINDOWS; i++) {
     if (g_windows[i] == NULL) {
       g_windows[i] = win_ctx;
@@ -1209,8 +1233,9 @@ browser_window_t* create_browser_window_for_detached(cef_browser_t* detached_bro
   int width = rect.right;
   int height = rect.bottom;
 
-  cef_browser_settings_t browser_settings = {};
-  browser_settings.size = sizeof(cef_browser_settings_t);
+  cef_browser_settings_t ui_browser_settings = {};
+  ui_browser_settings.size = sizeof(cef_browser_settings_t);
+  ui_browser_settings.background_color = 0; // Transparent background for frameless UI expansion
 
   int ui_height = GetUIHeightForWindow(main_hwnd);
   int content_y = ui_height;
@@ -1236,7 +1261,7 @@ browser_window_t* create_browser_window_for_detached(cef_browser_t* detached_bro
   ui_handler->type = BROWSER_TYPE_UI;
 
   cef_browser_host_create_browser(&ui_window_info, &ui_handler->client,
-                                  &ui_url, &browser_settings, NULL, NULL);
+                                  &ui_url, &ui_browser_settings, NULL, NULL);
   cef_string_clear(&ui_url);
 
   // 2. Attach the detached browser (SetParent)
