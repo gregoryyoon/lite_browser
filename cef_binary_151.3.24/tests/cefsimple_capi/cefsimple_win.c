@@ -52,6 +52,14 @@ static int RunMain(HINSTANCE hInstance,
     settings.no_sandbox = 1;
   }
 
+  // Set dedicated root_cache_path to prevent process singleton lock collisions
+  wchar_t local_app_data[MAX_PATH];
+  if (GetEnvironmentVariableW(L"LOCALAPPDATA", local_app_data, MAX_PATH) > 0) {
+    wchar_t root_cache[MAX_PATH];
+    swprintf(root_cache, MAX_PATH, L"%s\\LiteBrowser\\User Data", local_app_data);
+    cef_string_from_wide(root_cache, wcslen(root_cache), &settings.root_cache_path);
+  }
+
   // Automatically detect Windows OS default UI language and configure CEF locale / accept_language_list
   wchar_t wlocale[LOCALE_NAME_MAX_LENGTH] = {0};
   char locale_utf8[64] = "ko-KR";
@@ -92,6 +100,7 @@ static int RunMain(HINSTANCE hInstance,
   // Clear CEF strings allocated for settings
   cef_string_clear(&settings.locale);
   cef_string_clear(&settings.accept_language_list);
+  cef_string_clear(&settings.root_cache_path);
 
   if (!init_success) {
     // cef_initialize took ownership of the remaining app reference so we don't

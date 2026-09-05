@@ -855,5 +855,50 @@ Microsoft Edge 브라우저(SmartScreen)의 *"일반적으로 다운로드되지
   - `Get-AuthenticodeSignature` 확인 결과 `Gregory Yoon (Lite Browser Project)` 서명 및 `DigiCert SHA256 Timestamp Responder` 타임스탬프가 정상 탑재됨을 확인.
   - Windows 탐색기 속성 창에서 **[디지털 서명]** 탭이 정상 활성화됨.
 
+---
+
+## 30. Windows 기본 브라우저 연동 및 `lite://settings` 모던 설정 대시보드 구축 (Default Browser & Settings Page)
+
+### 30.1 배경 및 개요
+사용자가 Lite Browser 설치 후 브라우저 내에서 간편하게 Windows의 기본 브라우저(Default Browser)로 등록 및 전환하고 현재 상태를 확인할 수 있도록, **`lite://settings` 전용 설정 탭 페이지**, **3점 메뉴 연동**, **Windows Registry Capabilities/ProgID 등록 엔진**, 그리고 **인스톨러 시스템 레지스트리 자동 등록**을 구축했습니다.
+
+### 30.2 핵심 구현 내역
+1. **Windows 기본 브라우저 백엔드 모듈 신설 ([`default_browser.h`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/default_browser.h), [`default_browser.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/default_browser.c))**:
+   - **기본 브라우저 상태 판별 (`default_browser_is_default`)**: `HKCU\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice` 레지스트리의 `ProgId`를 조회하여 현재 기본 브라우저가 `LiteBrowserHTML`인지 실시간 판별.
+   - **기능 및 ProgID 자동 등록 (`default_browser_register_capabilities`)**:
+     - ProgID: `HKCU\Software\Classes\LiteBrowserHTML` (`shell\open\command`, `DefaultIcon`).
+     - 인터넷 클라이언트: `HKCU\Software\Clients\StartMenuInternet\LiteBrowser` 등록.
+     - 기능(Capabilities): `URLAssociations`(`http`, `https`), `FileAssociations`(`.htm`, `.html`, `.pdf`, `.svg`) 및 `RegisteredApplications` 표준 등록.
+   - **기본 앱 설정 창 호출 (`default_browser_open_settings`)**:
+     - 레지스트리 사전 등록 보정 후 Windows 10/11 공식 기본 앱 설정 URI(`ms-settings:defaultapps?registeredAppMachine=LiteBrowser` 및 `ms-settings:defaultapps`)를 `ShellExecuteW`로 즉시 팝업.
+
+2. **CEF 핸들러 및 3점 메뉴 연동 ([`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c))**:
+   - **`lite://settings` 스킴 라우팅**: 주소창 입력 및 탭 오픈 시 `on_before_browse`에서 `ResolveUIFilePath("ui/settings.html")`로 즉시 연결.
+   - **3점 메뉴 [설정] 항목 추가**: 메뉴 ID `1010` ("설정")을 추가하여 클릭 시 `CreateNewTab(win_ctx, "lite://settings")` 호출.
+   - **IPC 핸들링**:
+     - `http://ui-action/get-default-browser-status`: 프론트엔드로 현재 기본 브라우저 상태(1/0) 비동기 전달.
+     - `http://ui-action/set-default-browser`: 설정 창 실행 및 상태 즉시 갱신.
+
+3. **모던 다크 글래스모피즘 설정 대시보드 구축 ([`settings.html`](file:///c:/projects/lite_browser/ui/settings.html), [`settings.css`](file:///c:/projects/lite_browser/ui/settings.css), [`settings.js`](file:///c:/projects/lite_browser/ui/settings.js))**:
+   - 북마크(`manager.html`), 다운로드(`downloads.html`) 화면과 일관된 다크 글래스모피즘 룩앤필.
+   - **기본 브라우저 카드**: 실시간 상태 배지(초록색/주황색), [기본 브라우저로 설정] 원클릭 버튼, Windows 10/11 설정 안내 팁 제공.
+   - **포커스 복귀 시 자동 갱신(Auto-Refresh)**: Windows 설정 창에서 기본 브라우저를 변경하고 브라우저로 돌아오면(`focus`, `visibilitychange`), 새로고침 없이도 배지가 즉시 최신 상태로 갱신.
+   - **브라우저 정보 카드**: 버전(v1.0.0), Chromium 엔진(v134.0.6998.36), CEF 런타임(v151.3.24) 명시.
+
+4. **주소창 및 탭 타이틀 서빙 ([`app.js`](file:///c:/projects/lite_browser/ui/app.js))**:
+   - 주소창에 `lite://settings` 깔끔하게 포맷팅 및 상단 탭 타이틀을 '설정'으로 표출.
+
+5. **인스톨러 시스템 레지스트리 자동 등록 ([`installer.nsi`](file:///c:/projects/lite_browser/installer.nsi))**:
+   - 설치(`Install`) 시 Windows 시스템 전역(`HKLM\Software\Clients\StartMenuInternet\LiteBrowser` 및 `Capabilities`, `RegisteredApplications`)에 자동 등록.
+   - 제거(`Uninstall`) 시 관련 레지스트리 키 완전 삭제 처리.
+
+### 30.3 검증 결과
+- **CEF 151.3.24 Debug 빌드**: `cmake --build ... --config Debug --target cefsimple_capi` 성공 (`Exit code 0`).
+- **CEF 151.3.24 Release 빌드**: `cmake --build ... --config Release --target cefsimple_capi` 성공 (`Exit code 0`).
+- **코드 서명 및 무결성 아키텍처**: CEF Bootstrap의 `IsUnsignedOrValid()` 검증 규칙에 따라 내부 실행 파일(`lite_browser.exe`, `lite_browser.dll`)은 무서명(Unsigned) 상태를 유지하여 자체 서명으로 인한 `__debugbreak()`(0x800B0109) 크래시를 방지하고, 최종 배포 인스톨러(`LiteBrowserInstaller.exe`)에 Authenticode SHA-256 서명 및 DigiCert RFC 3161 공인 타임스탬프를 적용.
+- **독립 캐시 경로 분리**: `settings.root_cache_path`를 `%LOCALAPPDATA%\LiteBrowser\User Data`로 명시 지정하여 기본 CEF 캐시 공유로 인한 프로세스 싱글톤 락 충돌 방지.
+- **기능 검증**: Release 모드 정상 구동 확인, 3점 메뉴 [설정] 클릭 시 `lite://settings` 오픈, 기본 브라우저 상태 배지 표출 및 Windows 설정 앱 연동 정상 동작 확인.
+
+
 
 
