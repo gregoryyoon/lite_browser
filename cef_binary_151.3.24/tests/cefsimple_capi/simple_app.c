@@ -46,6 +46,7 @@ int GetUIHeightForWindow(HWND hwnd) {
 #include "tests/cefsimple_capi/simple_handler.h"
 #include "tests/cefsimple_capi/simple_utils.h"
 #include "tests/cefsimple_capi/simple_views.h"
+#include "tests/cefsimple_capi/simple_optimization.h"
 
 static void LogMsg(const char *format, ...) {
   FILE *f = fopen("C:\\projects\\lite_browser\\debug_c.txt", "a");
@@ -235,6 +236,9 @@ void CEF_CALLBACK simple_app_on_before_command_line_processing(
   }
   cef_string_clear(&lang_switch);
 #endif
+
+  // Apply configured performance or memory optimization switches
+  optimization_apply_command_line_switches(command_line);
 }
 
 // Returns the browser process handler.
@@ -1477,3 +1481,24 @@ simple_app_t *simple_app_create(void) {
 
   return app;
 }
+
+#if defined(OS_WIN)
+void restart_browser_application(void) {
+  char exe_path[MAX_PATH];
+  if (GetModuleFileNameA(NULL, exe_path, MAX_PATH) > 0) {
+    char cmd_args[MAX_PATH * 2 + 128];
+    // Launch a detached background process that delays before starting the new instance.
+    // This guarantees the current process has completely exited, cef_shutdown() has executed,
+    // and the CEF User Data cache singleton lock has been fully released.
+    snprintf(cmd_args, sizeof(cmd_args), "/c ping 127.0.0.1 -n 2 >nul & start \"\" \"%s\"", exe_path);
+    ShellExecuteA(NULL, "open", "cmd.exe", cmd_args, NULL, SW_HIDE);
+
+    // Close all open browser windows so the message loop exits cleanly and cef_shutdown() runs
+    for (int i = 0; i < MAX_WINDOWS; i++) {
+      if (g_windows[i] && g_windows[i]->main_hwnd && IsWindow(g_windows[i]->main_hwnd)) {
+        PostMessage(g_windows[i]->main_hwnd, WM_CLOSE, 0, 0);
+      }
+    }
+  }
+}
+#endif

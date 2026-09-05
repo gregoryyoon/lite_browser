@@ -52,6 +52,7 @@ simple_app_t* simple_app_create(void);
 
 #if defined(OS_WIN)
 int GetUIHeightForWindow(HWND hwnd);
+void restart_browser_application(void);
 #endif
 
 #endif  // CEF_TESTS_CEFSIMPLE_CAPI_SIMPLE_APP_H_

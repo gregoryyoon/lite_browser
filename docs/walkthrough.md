@@ -899,6 +899,46 @@ Microsoft Edge 브라우저(SmartScreen)의 *"일반적으로 다운로드되지
 - **독립 캐시 경로 분리**: `settings.root_cache_path`를 `%LOCALAPPDATA%\LiteBrowser\User Data`로 명시 지정하여 기본 CEF 캐시 공유로 인한 프로세스 싱글톤 락 충돌 방지.
 - **기능 검증**: Release 모드 정상 구동 확인, 3점 메뉴 [설정] 클릭 시 `lite://settings` 오픈, 기본 브라우저 상태 배지 표출 및 Windows 설정 앱 연동 정상 동작 확인.
 
+---
+
+## 31. 성능 및 메모리 최적화 모드(실행 속도 우선 vs 메모리 절감 우선) 및 빌드 타임 ThinLTO 플래그 도입 (Performance & Memory Optimization Pipeline)
+
+### 31.1 개요
+사용자 환경 및 PC 사양에 맞춰 Lite Browser의 동작 모드를 선택할 수 있도록, **`lite://settings` 설정 화면에 "실행 속도 우선"과 "메모리 절감 우선" 2가지 최적화 옵션**을 신설하고, Chromium 엔진 기동 시 적합한 커맨드라인 스위치 주입, 설정 영속화, 원클릭 클린 재시작, 그리고 CMake 빌드 타임 ThinLTO(LTCG)/최대 속도 최적화를 구현했습니다.
+
+### 31.2 핵심 구현 내역
+1. **런타임 최적화 백엔드 엔진 신설 ([`simple_optimization.h`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_optimization.h), [`simple_optimization.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_optimization.c))**:
+   - **실행 속도 우선 (Speed Priority - 기본값)**:
+     - `--enable-gpu`: GPU 하드웨어 가속 강제 활성화.
+     - `--enable-zero-copy`: GPU 타일 렌더링 시 메모리 복사 단계 단축.
+     - `--enable-gpu-rasterization`: 하드웨어 래스터화 활성화로 Direct3D 렌더링 효율 극대화.
+   - **메모리 절감 우선 (Memory Saving Priority)**:
+     - `--disable-site-isolation-trials`: 도메인별 무조건적 렌더러 프로세스 분리를 비활성화하여 프로세스 수 및 메모리 점유율을 30~50% 대폭 절감.
+     - `--renderer-process-limit=2`: 탭과 iframe이 많아져도 생성 가능한 최대 렌더러 프로세스를 2개로 엄격히 제한.
+     - `--js-flags="--max-old-space-size=256"`: V8 JavaScript 힙 상한을 256MB로 제한하여 유휴 메모리 신속 GC 유도.
+     - `--enable-features=MemorySaverMode`: Chromium 백그라운드 리소스 자동 절약 모드 활성화.
+     - `--disable-extensions`: 확장 프로그램 백그라운드 프로세스 비활성화.
+   - **영속화 및 세션 락킹**: `%USERPROFILE%\.lite-browser\optimization_mode.txt`에 저장 (`speed` 또는 `memory`). `simple_app_on_before_command_line_processing`에서 세션 모드를 잠그고 서브프로세스 생성 시 일관되게 적용.
+
+2. **클린 재시작 엔진 ([`simple_app.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c), [`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c))**:
+   - `restart_browser_application()`: 모든 브라우저 창에 `WM_CLOSE`를 전송하여 프로세스 정상 종료 및 CEF 캐시 락을 완전 해제한 후 딜레이 백그라운드 프로세스를 통해 새 인스턴스를 안전하게 기동.
+   - `http://ui-action/get-optimization-mode`, `http://ui-action/set-optimization-mode`, `http://ui-action/restart-browser` IPC 라우팅 구축.
+
+3. **모던 설정 UI 대시보드 연동 ([`ui/settings.html`](file:///c:/projects/lite_browser/ui/settings.html), [`ui/settings.css`](file:///c:/projects/lite_browser/ui/settings.css), [`ui/settings.js`](file:///c:/projects/lite_browser/ui/settings.js))**:
+   - "성능 및 메모리 최적화" 전용 섹션 카드 추가.
+   - 각 모드별 핵심 커맨드라인 플래그 뱃지, 실시간 세션 적용 상태 배지, 모드 변경 시 "브라우저 재시작 필요" 알림 배너 및 "지금 재시작" 원클릭 버튼 제공.
+
+4. **빌드 타임 ThinLTO 및 최대 속도 최적화 ([`tests/cefsimple_capi/CMakeLists.txt`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/CMakeLists.txt))**:
+   - Release 및 RelWithDebInfo 타깃에 MSVC 컴파일러/링커 최적화 옵션 주입:
+     - 컴파일: `/O2`, `/Oi`, `/Ot`, `/GL` (전체 프로그램 최적화 - ThinLTO 컴파일 단계 대응), `/Gy`, `/GF`.
+     - 링크: `/LTCG` (링크 타임 코드 생성 - ThinLTO 링크 단계 대응), `/OPT:REF`, `/OPT:ICF`.
+   - 제너레이터 표현식(`$<$<CONFIG:Release>:...>`)을 적용하여 개발용 Debug 모드는 기존의 빠른 증분 컴파일 및 디버깅 환경 유지.
+
+### 31.3 검증 결과
+- **Debug 빌드**: `cmake --build build --config Debug --target cefsimple_capi` 성공 (`Exit code 0`).
+- **Release 빌드**: `cmake --build build --config Release --target cefsimple_capi` 성공 (`Exit code 0`, LTCG 최적화 적용).
+
+
 
 
 

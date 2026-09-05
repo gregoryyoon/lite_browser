@@ -62,7 +62,95 @@
         </div>
       </section>
 
-      <!-- Section 2: Browser Info -->
+      <!-- Section 2: Performance & Memory Optimization -->
+      <section class="settings-card" id="optimization-card">
+        <div class="card-header">
+          <div class="card-title-group">
+            <svg class="section-icon" viewBox="0 0 24 24">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14.5v-9l6 4.5-6 4.5z"/>
+            </svg>
+            <div>
+              <h2 class="card-title">성능 및 메모리 최적화</h2>
+              <p class="card-desc">사용 환경과 PC 사양에 맞춰 Chromium 런타임 엔진 동작 방식을 최적화합니다.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="card-body">
+          <div class="opt-grid">
+            <!-- Option 1: 실행 속도 우선 (Speed Priority) -->
+            <div class="opt-card selected" id="opt-card-speed" onclick="selectOptimizationMode('speed')">
+              <div class="opt-card-header">
+                <div class="opt-radio-wrapper">
+                  <input type="radio" id="radio-speed" name="opt-mode" value="speed" checked>
+                  <label for="radio-speed" class="opt-name">실행 속도 우선</label>
+                </div>
+                <span class="opt-pill opt-pill-default">기본값 (권장)</span>
+              </div>
+              <p class="opt-summary">GPU 하드웨어 가속 및 Zero-copy 타일 렌더링을 적용하여 초고속 페이지 로딩과 부드러운 스크롤링 및 화면 전환을 제공합니다.</p>
+              <div class="opt-feature-tags">
+                <span class="opt-feature-tag">--enable-gpu</span>
+                <span class="opt-feature-tag">--enable-zero-copy</span>
+                <span class="opt-feature-tag">--enable-gpu-rasterization</span>
+                <span class="opt-feature-tag">Zero-Copy</span>
+              </div>
+              <div class="opt-card-footer">
+                <div class="opt-status active" id="opt-speed-status">
+                  <span class="status-dot"></span>
+                  <span class="opt-status-label">현재 세션 적용 중 (기본값)</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Option 2: 메모리 절감 우선 (Memory Saving Priority) -->
+            <div class="opt-card" id="opt-card-memory" onclick="selectOptimizationMode('memory')">
+              <div class="opt-card-header">
+                <div class="opt-radio-wrapper">
+                  <input type="radio" id="radio-memory" name="opt-mode" value="memory">
+                  <label for="radio-memory" class="opt-name">메모리 절감 우선</label>
+                </div>
+                <span class="opt-pill opt-pill-memory">저사양 / 절전</span>
+              </div>
+              <p class="opt-summary">사이트 격리 프로세스를 통합하고 렌더러 수를 최대 2개로 제한하며, V8 힙 상한(256MB) 및 메모리 절약 모드를 활성화하여 RAM 점유율을 대폭 낮춥니다.</p>
+              <div class="opt-feature-tags">
+                <span class="opt-feature-tag">--disable-site-isolation-trials</span>
+                <span class="opt-feature-tag">--renderer-process-limit=2</span>
+                <span class="opt-feature-tag">--js-flags="256MB"</span>
+                <span class="opt-feature-tag">MemorySaverMode</span>
+                <span class="opt-feature-tag">--disable-extensions</span>
+              </div>
+              <div class="opt-card-footer">
+                <div class="opt-status" id="opt-memory-status">
+                  <span class="status-dot"></span>
+                  <span class="opt-status-label">미적용</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Restart Alert Banner -->
+          <div id="opt-restart-notice" class="opt-restart-notice" style="display: none;">
+            <div class="restart-notice-left">
+              <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+              <div>
+                <span class="restart-notice-title">브라우저 재시작 필요</span>
+                <p class="restart-notice-text">최적화 모드 변경 사항은 브라우저를 완전히 닫고 다시 실행하면 적용됩니다.</p>
+              </div>
+            </div>
+            <button class="btn-restart" onclick="restartBrowser()">
+              <svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+              <span>지금 재시작</span>
+            </button>
+          </div>
+
+          <div class="info-tip">
+            <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+            <span>Chromium 엔진 시작 파라미터가 조정되므로 설정 변경 후 브라우저를 재시작해야 새로운 옵션이 적용됩니다. 일반 환경에서는 <strong>실행 속도 우선</strong>을 권장합니다.</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section 3: Browser Info -->
       <section class="settings-card">
         <div class="card-header">
           <div class="card-title-group">
@@ -81,6 +169,10 @@
             <div class="about-item">
               <span class="about-label">버전</span>
               <span class="about-value highlight">1.0.0 (Release 64-bit)</span>
+            </div>
+            <div class="about-item">
+              <span class="about-label">최적화 모드</span>
+              <span id="info-opt-mode" class="about-value highlight">실행 속도 우선 (세션 활성)</span>
             </div>
             <div class="about-item">
               <span class="about-label">CEF 런타임</span>

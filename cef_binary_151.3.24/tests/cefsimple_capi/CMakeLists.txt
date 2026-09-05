@@ -31,6 +31,8 @@ set(CEFSIMPLE_CAPI_SRCS
   simple_utils.h
   simple_views.c
   simple_views.h
+  simple_optimization.c
+  simple_optimization.h
   )
 set(CEFSIMPLE_CAPI_SRCS_LINUX
   cefsimple_linux.c
@@ -302,6 +304,33 @@ if(OS_WINDOWS)
   # Must use set_property instead of CEF_C_COMPILER_FLAGS because the Visual Studio
   # generator doesn't properly handle this flag when passed through generator expressions.
   set_property(TARGET ${CEF_TARGET} APPEND PROPERTY COMPILE_OPTIONS "/experimental:c11atomics")
+
+  # High-performance build-time optimizations for Release (equivalent to is_official_build / use_thin_lto)
+  # Maximum speed (/O2, /Oi, /Ot), Whole Program Optimization (/GL), Link-Time Code Generation (/LTCG),
+  # Function-level linking (/Gy), String pooling (/GF), and COMDAT folding (/OPT:REF, /OPT:ICF).
+  target_compile_options(${CEF_TARGET} PRIVATE
+    $<$<CONFIG:Release>:/O2>
+    $<$<CONFIG:Release>:/Oi>
+    $<$<CONFIG:Release>:/Ot>
+    $<$<CONFIG:Release>:/GL>
+    $<$<CONFIG:Release>:/Gy>
+    $<$<CONFIG:Release>:/GF>
+    $<$<CONFIG:RelWithDebInfo>:/O2>
+    $<$<CONFIG:RelWithDebInfo>:/Oi>
+    $<$<CONFIG:RelWithDebInfo>:/Ot>
+    $<$<CONFIG:RelWithDebInfo>:/GL>
+    $<$<CONFIG:RelWithDebInfo>:/Gy>
+    $<$<CONFIG:RelWithDebInfo>:/GF>
+  )
+
+  target_link_options(${CEF_TARGET} PRIVATE
+    $<$<CONFIG:Release>:/LTCG>
+    $<$<CONFIG:Release>:/OPT:REF>
+    $<$<CONFIG:Release>:/OPT:ICF>
+    $<$<CONFIG:RelWithDebInfo>:/LTCG>
+    $<$<CONFIG:RelWithDebInfo>:/OPT:REF>
+    $<$<CONFIG:RelWithDebInfo>:/OPT:ICF>
+  )
 
   # Copy binary and resource files to the target output directory.
   COPY_FILES("${CEF_TARGET}" "${CEF_BINARY_FILES}" "${CEF_BINARY_DIR}" "${CEF_TARGET_OUT_DIR}")

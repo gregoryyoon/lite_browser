@@ -8,6 +8,8 @@
 #include "tests/cefsimple_capi/simple_auth.h"
 #include "tests/cefsimple_capi/simple_installer.h"
 #include "tests/cefsimple_capi/default_browser.h"
+#include "tests/cefsimple_capi/simple_optimization.h"
+#include "tests/cefsimple_capi/simple_app.h"
 
 #include <stdarg.h>
 #include <stdatomic.h>
@@ -1794,6 +1796,45 @@ int CEF_CALLBACK request_handler_on_before_browse(
           cef_string_from_utf8(js_code, strlen(js_code), &js_str);
           frame->execute_java_script(frame, &js_str, NULL, 0);
           cef_string_clear(&js_str);
+        } else if (strcmp(action, "get-optimization-mode") == 0) {
+          optimization_mode_t cur_mode = optimization_get_mode();
+          optimization_mode_t launch_mode = optimization_get_launch_mode();
+          if (frame) {
+            char js_code[256];
+            snprintf(js_code, sizeof(js_code),
+                     "if (window.updateOptimizationMode) { window.updateOptimizationMode('%s', '%s'); }",
+                     optimization_mode_to_string(cur_mode),
+                     optimization_mode_to_string(launch_mode));
+            cef_string_t js_str = {};
+            cef_string_from_utf8(js_code, strlen(js_code), &js_str);
+            frame->execute_java_script(frame, &js_str, NULL, 0);
+            cef_string_clear(&js_str);
+          }
+        } else if (strncmp(action, "set-optimization-mode?", 22) == 0) {
+          const char* query = action + 22;
+          char* mode_val = get_query_param(query, "mode");
+          if (mode_val) {
+            optimization_mode_t new_mode = optimization_mode_from_string(mode_val);
+            optimization_set_mode(new_mode);
+            free(mode_val);
+          }
+          optimization_mode_t cur_mode = optimization_get_mode();
+          optimization_mode_t launch_mode = optimization_get_launch_mode();
+          if (frame) {
+            char js_code[256];
+            snprintf(js_code, sizeof(js_code),
+                     "if (window.updateOptimizationMode) { window.updateOptimizationMode('%s', '%s'); }",
+                     optimization_mode_to_string(cur_mode),
+                     optimization_mode_to_string(launch_mode));
+            cef_string_t js_str = {};
+            cef_string_from_utf8(js_code, strlen(js_code), &js_str);
+            frame->execute_java_script(frame, &js_str, NULL, 0);
+            cef_string_clear(&js_str);
+          }
+        } else if (strcmp(action, "restart-browser") == 0) {
+#if defined(OS_WIN)
+          restart_browser_application();
+#endif
         } else if (strncmp(action, "show-menu?", 10) == 0) {
           int click_x = 0, click_y = 0;
           if (sscanf(action + 10, "x=%d&y=%d", &click_x, &click_y) == 2) {
