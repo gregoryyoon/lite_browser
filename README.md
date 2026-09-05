@@ -1,7 +1,7 @@
 # 🌐 Lite Browser
 
 <p align="center">
-  <img src="cef_binary_151.3.24/tests/cefsimple_capi/win/cefsimple.ico" width="108" height="108" alt="Lite Browser Logo" />
+  <img src="docs/logo.png" width="108" height="108" alt="Lite Browser Logo" />
 </p>
 
 <p align="center">
@@ -68,7 +68,7 @@ HTML5/CSS3/JavaScript 기반의 현대적 **벤토 그리드(Bento Grid) 웹 UI*
 ### 6. 🚀 런타임 성능 모드 전환 & 빌드 타임 ThinLTO / LTCG 최적화
 - **사용자 맞춤 런타임 성능 모드 (`lite://settings`)**:
   - **실행 속도 우선 (Speed Priority - 기본값)**: GPU 하드웨어 가속(`--enable-gpu`), 타일 메모리 복사 단축(`--enable-zero-copy`), Direct3D 래스터화(`--enable-gpu-rasterization`)로 초고속 렌더링 제공.
-  - **메모리 절감 우선 (Memory Saver Priority)**: 무조건적 도메인 격리를 축소(`--disable-site-isolation-trials`), 최대 렌더러 프로세스를 2개로 엄격 제한(`--renderer-process-limit=2`), V8 JS 힙 상한 256MB 제한(`--js-flags="--max-old-space-size=256"`), 백그라운드 절전(`MemorySaverMode`)을 활성화하여 저사양 PC에서 RAM 점유율을 30~50% 대폭 절감.
+  - **메모리 절감 우선 (Memory Saver Priority)**: 무조건적 도메인 격리를 축소(`--disable-site-isolation-trials`), 최대 렌더러 프로세스를 2개로 엄격 제한(`--renderer-process-limit=2`), V8 JS 힙 상한 256MB 제한(`--js-flags="--max-old-space-size=256"`), 백그라운드 절전(`MemorySaverMode`), 확장 기능 비활성화(`--disable-extensions`)를 활성화하여 저사양 PC에서 RAM 점유율을 30~50% 대폭 절감.
   - 설정 영속화(`%USERPROFILE%\.lite-browser\optimization_mode.txt`) 및 **원클릭 클린 재시작 엔진 (`restart_browser_application`)**을 탑재하여 모든 창에 `WM_CLOSE`를 전송, CEF 캐시 락을 안전하게 해제한 후 신규 인스턴스를 무결하게 기동합니다.
 - **빌드 타임 ThinLTO / LTCG 최적화**:
   - Release 빌드 시 MSVC 컴파일러/링커의 전체 프로그램 최적화(`/GL`), 링크 타임 코드 생성(`/LTCG`), 최대 속도 최적화(`/O2`, `/Oi`, `/Ot`), 함수 레벨 링크(`/Gy`), 문자열 풀링(`/GF`), 중복 COMDAT 제거(`/OPT:REF`, `/OPT:ICF`)를 적용하여 릴리즈 바이너리의 실행 성능을 극대화했습니다.
@@ -78,14 +78,14 @@ HTML5/CSS3/JavaScript 기반의 현대적 **벤토 그리드(Bento Grid) 웹 UI*
 
 ### 8. 🎨 리마스터 100% 알파 투명 HiDPI 아이콘 & 윈도우 셸 연동
 - 흰색 사각 배경을 제거한 **100% 알파 투명 배경** 및 부드러운 소프트 섀도우를 결합한 모던 둥근 타일(Squircle) 아이콘을 적용했습니다.
-- Windows 표준 5개 해상도(`16x16`, `24x24`, `32x32`, `48x48`, `256x256`)를 단일 ICO 파일([`cefsimple.ico`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/win/cefsimple.ico))로 통합 번들링하고, 탐색기 소형 뷰(16x16, 24x24)를 픽셀 단위로 선명화(Pixel-fitted)했습니다.
-- PE 리소스 주입 스크립트([`inject_icon.py`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/inject_icon.py))를 통해 바이너리 내 구형 더미 아이콘을 제거하고 3개 그룹(`120`, `121`, `32512`)에 정밀 주입합니다.
+- Windows 표준 5개 해상도(`16x16`, `24x24`, `32x32`, `48x48`, `256x256`)를 단일 ICO 파일([`cefsimple.ico`](cef_binary_151.3.24/tests/cefsimple_capi/win/cefsimple.ico))로 통합 번들링하고, 탐색기 소형 뷰(16x16, 24x24)를 픽셀 단위로 선명화(Pixel-fitted)했습니다.
+- PE 리소스 주입 스크립트([`inject_icon.py`](cef_binary_151.3.24/tests/cefsimple_capi/win/inject_icon.py))를 통해 바이너리 내 구형 더미 아이콘을 제거하고 3개 그룹(`120`, `121`, `32512`)에 정밀 주입합니다.
 - 빌드 후처리 및 인스톨러/언인스톨러 실행 시 `SHChangeNotify(SHCNE_ASSOCCHANGED, ...)`를 호출하여 재부팅 없이도 Windows 셸 아이콘 캐시를 즉시 갱신합니다.
 
 ### 9. 🔒 보안 메타데이터 및 Authenticode 전자서명 파이프라인 (Code Signing)
 - 배포 인스톨러 바이너리에 정식 PE 버전 및 제작사 메타데이터(`ProductName`, `CompanyName`, `LegalCopyright`, `FileVersion`)를 탑재했습니다.
-- 원클릭 코드 서명 스크립트([`scripts/sign_installer.ps1`](file:///c:/projects/lite_browser/scripts/sign_installer.ps1))를 통해 SHA-256 인증서 및 **DigiCert RFC 3161 공인 타임스탬프(`http://timestamp.digicert.com`)**를 적용하여 인증서 만료 후에도 서명이 영구 유효하도록 보장합니다.
-- **CEF 무결성 검증 규칙 준수**: CEF Bootstrap의 `IsUnsignedOrValid()` 규칙에 따라 내부 바이너리는 무서명 상태를 유지하여 자체 서명으로 인한 `__debugbreak()`(0x800B0109) 충돌을 방지하고, 최종 배포 인스톨러([`LiteBrowserInstaller.exe`](file:///c:/projects/lite_browser/LiteBrowserInstaller.exe))에 전자서명을 적용하여 Microsoft SmartScreen 및 백신 신뢰도를 확보했습니다.
+- 원클릭 코드 서명 스크립트([`scripts/sign_installer.ps1`](scripts/sign_installer.ps1))를 통해 SHA-256 인증서 및 **DigiCert RFC 3161 공인 타임스탬프(`http://timestamp.digicert.com`)**를 적용하여 인증서 만료 후에도 서명이 영구 유효하도록 보장합니다.
+- **CEF 무결성 검증 규칙 준수**: CEF Bootstrap의 `IsUnsignedOrValid()` 규칙에 따라 내부 바이너리는 무서명 상태를 유지하여 자체 서명으로 인한 `__debugbreak()`(0x800B0109) 충돌을 방지하고, 최종 배포 인스톨러(`LiteBrowserInstaller.exe`)에 전자서명을 적용하여 Microsoft SmartScreen 및 백신 신뢰도를 확보했습니다.
 
 ### 10. 📥 다운로드 관리자 대시보드 (`lite://downloads`)
 - `%USERPROFILE%\Downloads` 고정 저장 및 동일 파일 존재 시 자동 순서 번호 부여(`filename (1).ext`)로 파일 덮어쓰기를 방지합니다.
@@ -94,7 +94,7 @@ HTML5/CSS3/JavaScript 기반의 현대적 **벤토 그리드(Bento Grid) 웹 UI*
 - 한글 및 공백/특수문자가 포함된 파일도 Windows Unicode API(`CheckFileExistsUtf8`)를 통해 파일 실존 여부를 100% 정합 판정합니다.
 
 ### 11. 🔖 지능형 옴니박스 & 차세대 북마크 대시보드 (`lite://favorites`)
-- **맥락 추출 및 스마트 200자 요약 엔진 ([`ui/extractor.js`](file:///c:/projects/lite_browser/ui/extractor.js))**: `iframe` 심층 탐색, UI 노이즈 필터링, 헤딩 가중치 기반 핵심 키워드 태그 5개 추출 및 중요도 점수 기반 본문 200자 요약을 자동 생성합니다.
+- **맥락 추출 및 스마트 200자 요약 엔진 ([`ui/extractor.js`](ui/extractor.js))**: `iframe` 심층 탐색, UI 노이즈 필터링, 헤딩 가중치 기반 핵심 키워드 태그 5개 추출 및 중요도 점수 기반 본문 200자 요약을 자동 생성합니다.
 - **스마트 옴니박스**: 주소창 입력 시 북마크(상단) ➔ 웹 검색 ➔ 방문 기록(하단) 통합 카드 렌더링, `#` 태그 검색 숏컷, 최근 30일 방문 빈도 및 최신성 2단계 정렬, 누적 방문 횟수(`👁️ N회 방문`) 실시간 카운트 표시.
 - **북마크 대시보드 (`lite://favorites`)**: 타임라인 슬라이더, 태그 필터링, 카드/리스트 뷰 전환 및 드래그 텍스트 하이라이트 앵커 표출.
 
@@ -102,7 +102,7 @@ HTML5/CSS3/JavaScript 기반의 현대적 **벤토 그리드(Bento Grid) 웹 UI*
 - 탭 전환이나 새 탭 생성 시에도 대화 세션이 단절되지 않고 상시 도킹을 유지하는 독립 네이티브 자식 브라우저(`win_ctx->sidepanel_browser`).
 - **Chrome Gemini 스타일 5단계 본문 파싱**: YouTube 특화 초경량 Markdown 전처리(노이즈 및 댓글 원천 배제) 및 뷰포트 중심 본문 블록 추출.
 - **다형성 AI Provider & 429 내결함성**: Gemini 3.7 Flash 기본 탑재, CoT 사고 과정(Thinking) 아코디언 스트리밍, 429 Rate Limit 발생 시 지수 백오프 자동 재시도(1.5초, 3.0초, 6.0초).
-- **Windows DPAPI 보안 볼트 ([`simple_vault.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_vault.c))**: `CryptProtectData` 기반으로 `%USERPROFILE%\.lite-browser\vault.dat`에 사용자 자격증명을 OS 수준에서 안전하게 암호화 보관.
+- **Windows DPAPI 보안 볼트 ([`simple_vault.c`](cef_binary_151.3.24/tests/cefsimple_capi/simple_vault.c))**: `CryptProtectData` 기반으로 `%USERPROFILE%\.lite-browser\vault.dat`에 사용자 자격증명을 OS 수준에서 안전하게 암호화 보관.
 
 ---
 
@@ -165,41 +165,41 @@ PowerShell 터미널에서 프로젝트 루트 디렉터리를 기준으로 아�
 
 ```powershell
 # 1) Debug 모드 빌드 (개발 및 디버깅용 - 빠른 증분 컴파일)
-cmake --build c:\projects\lite_browser\cef_binary_151.3.24\build --config Debug --target cefsimple_capi
+cmake --build cef_binary_151.3.24\build --config Debug --target cefsimple_capi
 
 # 2) Release 모드 빌드 (배포용 - Whole Program Optimization / LTCG 적용)
-cmake --build c:\projects\lite_browser\cef_binary_151.3.24\build --config Release --target cefsimple_capi
+cmake --build cef_binary_151.3.24\build --config Release --target cefsimple_capi
 ```
 
 빌드가 성공하면 실행 파일 및 의존 리소스가 아래 경로에 자동 생성 및 아이콘 주입됩니다:
-- **Debug 바이너리**: `c:\projects\lite_browser\cef_binary_151.3.24\build\tests\cefsimple_capi\Debug\lite_browser.exe`
-- **Release 바이너리**: `c:\projects\lite_browser\cef_binary_151.3.24\build\tests\cefsimple_capi\Release\lite_browser.exe`
+- **Debug 바이너리**: `cef_binary_151.3.24\build\tests\cefsimple_capi\Debug\lite_browser.exe`
+- **Release 바이너리**: `cef_binary_151.3.24\build\tests\cefsimple_capi\Release\lite_browser.exe`
 
 ---
 
 ### 3. NSIS 인스톨러 생성 & Authenticode 전자서명
 
-독립 배포용 단일 설치 파일([`LiteBrowserInstaller.exe`](file:///c:/projects/lite_browser/LiteBrowserInstaller.exe))을 패키징하고 디지털 서명을 적용합니다:
+독립 배포용 단일 설치 파일(`LiteBrowserInstaller.exe`)을 패키징하고 디지털 서명을 적용합니다:
 
 ```powershell
 # Step 1: NSIS 인스톨러 컴파일
-& "C:\Program Files (x86)\NSIS\makensis.exe" c:\projects\lite_browser\installer.nsi
+& "C:\Program Files (x86)\NSIS\makensis.exe" installer.nsi
 
 # Step 2: Authenticode SHA-256 전자서명 및 DigiCert RFC 3161 공인 타임스탬프 적용
-powershell -ExecutionPolicy Bypass -File c:\projects\lite_browser\scripts\sign_installer.ps1
+powershell -ExecutionPolicy Bypass -File scripts\sign_installer.ps1
 ```
 
-- **최종 결과물**: [`LiteBrowserInstaller.exe`](file:///c:/projects/lite_browser/LiteBrowserInstaller.exe) (~174MB, Authenticode 디지털 서명 탑재)
+- **최종 결과물**: `LiteBrowserInstaller.exe` (~180MB, Authenticode 디지털 서명 탑재)
 
 ---
 
 ## 📂 프로젝트 구조 (Project Structure)
 
 ```text
-c:\projects\lite_browser\
+lite_browser\
 ├── README.md                                  # GitHub 프로젝트 대표 안내 문서
+├── LICENSE                                    # BSD 3-Clause 오픈소스 라이선스
 ├── installer.nsi                              # NSIS 64-bit 인스톨러 패키징 스크립트
-├── LiteBrowserInstaller.exe                   # 최종 배포용 인스톨러 (Authenticode 서명 완료)
 ├── scripts\                                   # 자동화 및 빌드 보조 스크립트
 │   ├── sign_installer.ps1                     # signtool 기반 SHA-256 + DigiCert RFC 3161 코드 서명기
 │   └── certs\                                 # 코드 서명 인증서 디렉터리 (.gitignore 대상)
@@ -213,6 +213,7 @@ c:\projects\lite_browser\
 │   ├── extractor.js                           # 웹페이지 중요도 점수 기반 본문 200자 요약기
 │   ├── content_extractor.js                   # Chrome Gemini 스타일 5단계 본문/YouTube 마크다운 파서
 │   ├── ai_providers.js                        # 다형성 AI 어댑터 (Gemini 3.7 Flash, 429 지수 백오프)
+│   ├── agent_memory.js                        # AI 에이전트 세션 메모리 관리
 │   └── task_runtime.js                        # 자율 브라우저 동작 제어 런타임
 ├── cef_binary_151.3.24\                       # CEF 151.3.24 바이너리 배포본 (Chromium 134.0.6998.36)
 │   └── tests\cefsimple_capi\                  # 순수 C11 C API 메인 백엔드 소스 디렉터리
@@ -230,6 +231,8 @@ c:\projects\lite_browser\
 │           ├── cefsimple.ico / small.ico      # 100% 알파 투명 5개 해상도 HiDPI 아이콘 리소스
 │           └── inject_icon.py                 # Win32 Resource API 기반 PE 리소스 자동 주입기
 └── docs\                                      # 상세 기술 및 아키텍처 문서
+    ├── logo.png                               # 256x256 HiDPI 투명 브라우저 로고 에셋
+    ├── prompt.md                              # 아키텍처 사양 및 제약 사항 문서
     └── walkthrough.md                         # 전체 기능 및 마일스톤 통합 기술 보고서 (Walkthrough)
 ```
 
@@ -241,4 +244,4 @@ c:\projects\lite_browser\
 
 - **Chromium / CEF**: [BSD 3-Clause License](https://opensource.org/licenses/BSD-3-Clause)
 - **Lite Browser Source Code**: Copyright (C) 2026 Gregory Yoon. All rights reserved.
-- 자세한 라이선스 조항은 [`cef_binary_151.3.24/LICENSE.txt`](file:///c:/projects/lite_browser/cef_binary_151.3.24/LICENSE.txt)를 참조하십시오.
+- 자세한 라이선스 조항은 [`LICENSE`](LICENSE) 및 [`cef_binary_151.3.24/LICENSE.txt`](cef_binary_151.3.24/LICENSE.txt)를 참조하십시오.
