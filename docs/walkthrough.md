@@ -1190,4 +1190,29 @@ Microsoft Edge 브라우저(SmartScreen)의 *"일반적으로 다운로드되지
   - 3점 메뉴에서 '비밀번호 관리자' 클릭 시 별도 창 없이 내부 자식 탭(`WS_CHILD`)으로 즉시 생성.
   - 주소창에 `lite://passwords`, `chrome://passwords` 입력 시 `chrome://password-manager/passwords`로 현재 탭에서 매끄럽게 정규화 이동.
 
+---
+
+## 39. Chromium 기본 다운로드 완료 팝업(Download Bubble) 완벽 억제 및 프로필 레벨 Preference 주입 (Download Bubble Suppression via Profile Preferences)
+
+### 39.1 배경 및 간헐적 노출 원인 분석
+1. **문제 현상**:
+   - 다운로드 완료 시 Chromium 내부 완료 토스트(Download Bubble Partial View)가 간헐적/랜덤하게 화면에 노출되는 현상 발생.
+2. **원인 규명**:
+   - **Preference 레벨 불일치**: 기존의 `cef_preference_manager_get_global()`은 시스템 전역 `Local State`만 제어할 수 있어 프로필 전용 설정인 `download_bubble.partial_view_enabled`를 설정할 수 없었음(`can_set_preference == 0`). 따라서 내부적으로는 상시 활성화(`true`) 상태가 유지됨.
+   - **간헐적 노출의 원인**: Chromium 코어가 포그라운드 윈도우 활성화 여부(`browser->window()->IsActive()`), 다운로드 시작 탭과 현재 활성 탭 일치 여부, 사용자 마우스/키보드 입력에 의한 즉시 닫힘(`set_close_on_deactivate(true)`), 파일 크기 및 전송 속도에 따라 조건부로 팝업을 스킵하기 때문이었음.
+
+### 39.2 핵심 구현 내역
+1. **프로필 레벨 RequestContext Preference 주입 ([`cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c))**:
+   - `cef_request_context_get_global_context()`를 통해 전역 프로필 RequestContext 인터페이스(`cef_request_context_t`)를 획득.
+   - `chrome://settings/downloads`의 "Show downloads when they're done" 토글에 대응하는 공식 프로필 설정인 `download_bubble.partial_view_enabled` 및 `download.prompt_for_download`를 `false(0)`로 주입.
+2. **CEF C API 참조 카운팅 소유권(Ownership) 안정화**:
+   - CEF CppToC 브리지(`CefCppToCRefCounted::Unwrap`)가 `set_preference` 호출 시 전달된 `cef_value_t`의 소유권을 가져가며 내부적으로 `Release()`를 수행하므로, 호출 측의 중복 `release`를 방지하여 시작 시 이중 해제(Double Release) 크래시를 원천 차단.
+
+### 39.3 빌드 및 검증 결과
+- **Debug 빌드**: `cmake --build c:\projects\lite_browser\cef_binary_151.3.24\build --config Debug --target cefsimple_capi` 성공 (`Exit code 0`).
+- **바이너리 생성**: `cef_binary_151.3.24\build\tests\cefsimple_capi\Debug\lite_browser.exe` 정상 컴파일 및 리소스 주입 완료.
+- **동작 검증**:
+  - `download_bubble.partial_view_enabled` 및 `download.prompt_for_download` 설정 성공(`result=1`) 확인.
+  - 브라우저 정상 기동 및 다운로드 완료 시 순정 부동 팝업이 100% 영구 차단되고 LiteBrowser 전용 툴바 프로그레스 링 & 완료 체크마크(`✓`)만 깔끔하게 동작함을 확인.
+
 

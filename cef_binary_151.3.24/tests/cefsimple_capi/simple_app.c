@@ -1,6 +1,7 @@
 #include "tests/cefsimple_capi/simple_app.h"
 #include "tests/cefsimple_capi/simple_installer.h"
 #include "include/capi/cef_preference_capi.h"
+#include "include/capi/cef_request_context_capi.h"
 #include "include/capi/cef_values_capi.h"
 
 #include <stdatomic.h>
@@ -1449,12 +1450,12 @@ void CEF_CALLBACK browser_process_handler_on_context_initialized(
     cef_string_utf8_clear(&url_utf8);
   }
 
-  // Suppress Chromium download bubble partial view and auto-open popups via global preferences
-  cef_preference_manager_t* pref_mgr = cef_preference_manager_get_global();
-  if (pref_mgr) {
+  // Suppress Chromium download bubble partial view and prompt popups via global RequestContext Profile Preferences
+  cef_request_context_t* req_ctx = cef_request_context_get_global_context();
+  if (req_ctx) {
+    cef_preference_manager_t* pref_mgr = &req_ctx->base;
     const char* prefs[] = {
       "download_bubble.partial_view_enabled",
-      "download_bubble.auto_open",
       "download.prompt_for_download",
       NULL
     };
@@ -1466,8 +1467,11 @@ void CEF_CALLBACK browser_process_handler_on_context_initialized(
         val->set_bool(val, 0);
         cef_string_t err = {};
         pref_mgr->set_preference(pref_mgr, &name, val, &err);
-        cef_string_clear(&err);
-        val->base.release(&val->base);
+        if (err.str) {
+          cef_string_clear(&err);
+        }
+        // Note: CppToC takes ownership of val upon Unwrap inside SetPreference,
+        // so no explicit release of val is performed.
       }
       cef_string_clear(&name);
     }

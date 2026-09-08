@@ -6,6 +6,9 @@
 * Thread safety and atomic operations
 * Complete working examples
 
+### CEF 최신 소스 코드 참조
+- `C:\projects\cef-latest\cef_source`: 항상 최신 버전의 CEF 공식 소스 코드가 저장되어 있으므로, CEF 내부 동작 원리, C/C++ API 정의, Chromium WebUI 및 런타임 구현 상세를 분석할 때 적극 참고할 것.
+
 ### 빌드룰
 - 코드 수정 및 빌드는 cef_binary_151.3.24 폴더만 해줘
 - 빌드는 디버그 모드만 해줘
