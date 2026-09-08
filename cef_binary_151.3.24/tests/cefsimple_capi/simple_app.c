@@ -7,6 +7,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 
 #if defined(OS_WIN)
 #include <windows.h>
@@ -271,6 +272,7 @@ IMPLEMENT_REFCOUNTING_SIMPLE(simple_browser_process_handler_t,
 
 #if defined(OS_WIN)
 #include "tests/cefsimple_capi/browser_context.h"
+#include "tests/cefsimple_capi/simple_handler.h"
 #include <commctrl.h>
 #pragma comment(lib, "comctl32.lib")
 
@@ -1309,6 +1311,108 @@ browser_window_t* create_browser_window_for_detached(cef_browser_t* detached_bro
 }
 #endif
 
+// Extracts target URL from command-line switches (--url=...) or positional arguments (e.g. from Windows Shell/Outlook)
+static int extract_url_from_command_line(cef_command_line_t* command_line, char* out_url, size_t max_len) {
+  if (!command_line || !out_url || max_len == 0) return 0;
+  out_url[0] = '\0';
+
+  // 1. Check explicit --url switch
+  cef_string_t url_switch = {};
+  cef_string_from_ascii("url", 3, &url_switch);
+  cef_string_userfree_t url_value = command_line->get_switch_value(command_line, &url_switch);
+  cef_string_clear(&url_switch);
+
+  if (url_value && url_value->length > 0) {
+    cef_string_utf8_t url_utf8 = {};
+    cef_string_to_utf8(url_value->str, url_value->length, &url_utf8);
+    if (url_utf8.str && url_utf8.length > 0) {
+      strncpy(out_url, url_utf8.str, max_len - 1);
+      out_url[max_len - 1] = '\0';
+    }
+    cef_string_utf8_clear(&url_utf8);
+    cef_string_userfree_free(url_value);
+    if (out_url[0] != '\0') return 1;
+  }
+  if (url_value) {
+    cef_string_userfree_free(url_value);
+  }
+
+  // 2. Check positional arguments (passed by Windows Shell / Outlook etc: argv[1])
+  if (command_line->has_arguments && command_line->has_arguments(command_line)) {
+    cef_string_list_t args = cef_string_list_alloc();
+    command_line->get_arguments(command_line, args);
+    size_t arg_count = cef_string_list_size(args);
+
+    for (size_t i = 0; i < arg_count; i++) {
+      cef_string_t arg_str = {};
+      if (cef_string_list_value(args, i, &arg_str) && arg_str.length > 0) {
+        cef_string_utf8_t arg_utf8 = {};
+        cef_string_to_utf8(arg_str.str, arg_str.length, &arg_utf8);
+
+        if (arg_utf8.str && arg_utf8.length > 0) {
+          const char* p = arg_utf8.str;
+          // Trim leading spaces or quotes
+          while (*p == ' ' || *p == '\t' || *p == '"' || *p == '\'') p++;
+
+          // Ignore switches and flags
+          if (*p != '-' && *p != '/' && *p != '\0') {
+            char cleaned[4096] = {0};
+            strncpy(cleaned, p, sizeof(cleaned) - 1);
+
+            // Trim trailing spaces or quotes
+            size_t clen = strlen(cleaned);
+            while (clen > 0 && (cleaned[clen - 1] == '"' || cleaned[clen - 1] == '\'' ||
+                                cleaned[clen - 1] == ' ' || cleaned[clen - 1] == '\t')) {
+              cleaned[--clen] = '\0';
+            }
+
+            if (clen > 0) {
+              if (_strnicmp(cleaned, "http://", 7) == 0 ||
+                  _strnicmp(cleaned, "https://", 8) == 0 ||
+                  _strnicmp(cleaned, "file://", 7) == 0 ||
+                  _strnicmp(cleaned, "lite://", 7) == 0 ||
+                  _strnicmp(cleaned, "chrome://", 9) == 0 ||
+                  _strnicmp(cleaned, "edge://", 7) == 0 ||
+                  _strnicmp(cleaned, "ftp://", 6) == 0) {
+                strncpy(out_url, cleaned, max_len - 1);
+                out_url[max_len - 1] = '\0';
+              } else if (_strnicmp(cleaned, "www.", 4) == 0) {
+                snprintf(out_url, max_len, "https://%s", cleaned);
+              } else if (isalpha((unsigned char)cleaned[0]) && cleaned[1] == ':' &&
+                         (cleaned[2] == '\\' || cleaned[2] == '/')) {
+                // Windows local path e.g. C:\foo\bar.html -> file:///C:/foo/bar.html
+                char file_url[4096] = "file:///";
+                size_t prefix_len = 8;
+                for (size_t c = 0; cleaned[c] && (prefix_len + c < sizeof(file_url) - 1); c++) {
+                  file_url[prefix_len + c] = (cleaned[c] == '\\') ? '/' : cleaned[c];
+                  file_url[prefix_len + c + 1] = '\0';
+                }
+                strncpy(out_url, file_url, max_len - 1);
+                out_url[max_len - 1] = '\0';
+              } else if (strchr(cleaned, '.') || strchr(cleaned, '/')) {
+                // e.g. domain or path without protocol
+                snprintf(out_url, max_len, "https://%s", cleaned);
+              } else {
+                strncpy(out_url, cleaned, max_len - 1);
+                out_url[max_len - 1] = '\0';
+              }
+              cef_string_utf8_clear(&arg_utf8);
+              cef_string_clear(&arg_str);
+              cef_string_list_free(args);
+              return 1;
+            }
+          }
+        }
+        cef_string_utf8_clear(&arg_utf8);
+        cef_string_clear(&arg_str);
+      }
+    }
+    cef_string_list_free(args);
+  }
+
+  return 0;
+}
+
 // Called after CEF initialization to create the browser.
 void CEF_CALLBACK browser_process_handler_on_context_initialized(
     cef_browser_process_handler_t *self)
@@ -1321,35 +1425,22 @@ void CEF_CALLBACK browser_process_handler_on_context_initialized(
   cef_browser_settings_t browser_settings = {};
   browser_settings.size = sizeof(cef_browser_settings_t);
 
-  // Get the URL from command line or use default.
-  cef_string_t url_switch = {};
-  cef_string_from_ascii("url", 3, &url_switch);
-  cef_string_userfree_t url_value =
-      command_line->get_switch_value(command_line, &url_switch);
-  cef_string_clear(&url_switch);
-
+  // Get the URL from command line switch, positional argument, or fallback to default.
+  char launch_url[4096] = "";
   cef_string_t url = {};
-  if (url_value && url_value->length > 0)
-  {
-    cef_string_copy(url_value->str, url_value->length, &url);
-  }
-  else
-  {
-    ResolveManagerPath(&url);
-  }
-
-  cef_string_utf8_t url_utf8 = {};
-  cef_string_to_utf8(url.str, url.length, &url_utf8);
-  if (url_utf8.str && url_utf8.length > 0)
-  {
-    strncpy(g_startup_url, url_utf8.str, sizeof(g_startup_url) - 1);
+  if (extract_url_from_command_line(command_line, launch_url, sizeof(launch_url))) {
+    cef_string_from_utf8(launch_url, strlen(launch_url), &url);
+    strncpy(g_startup_url, launch_url, sizeof(g_startup_url) - 1);
     g_startup_url[sizeof(g_startup_url) - 1] = '\0';
-  }
-  cef_string_utf8_clear(&url_utf8);
-
-  if (url_value)
-  {
-    cef_string_userfree_free(url_value);
+  } else {
+    ResolveManagerPath(&url);
+    cef_string_utf8_t url_utf8 = {};
+    cef_string_to_utf8(url.str, url.length, &url_utf8);
+    if (url_utf8.str && url_utf8.length > 0) {
+      strncpy(g_startup_url, url_utf8.str, sizeof(g_startup_url) - 1);
+      g_startup_url[sizeof(g_startup_url) - 1] = '\0';
+    }
+    cef_string_utf8_clear(&url_utf8);
   }
 
   // Suppress Chromium download bubble partial view and auto-open popups via global preferences
@@ -1404,40 +1495,43 @@ int CEF_CALLBACK browser_process_handler_on_already_running_app_relaunch(
   (void)current_directory;
 
   char target_url[4096] = "";
-  if (g_startup_url[0] != '\0') {
-    strncpy(target_url, g_startup_url, sizeof(target_url) - 1);
-  } else {
+  if (!extract_url_from_command_line(command_line, target_url, sizeof(target_url))) {
     strcpy(target_url, "lite://favorites");
   }
 
-  if (command_line) {
-    cef_string_t url_switch = {};
-    cef_string_from_ascii("url", 3, &url_switch);
-    cef_string_userfree_t url_value =
-        command_line->get_switch_value(command_line, &url_switch);
-    cef_string_clear(&url_switch);
-
-    if (url_value && url_value->length > 0) {
-      cef_string_utf8_t url_utf8 = {};
-      cef_string_to_utf8(url_value->str, url_value->length, &url_utf8);
-      if (url_utf8.str && url_utf8.length > 0) {
-        strncpy(target_url, url_utf8.str, sizeof(target_url) - 1);
-        target_url[sizeof(target_url) - 1] = '\0';
-      }
-      cef_string_utf8_clear(&url_utf8);
+#if defined(OS_WIN)
+  // Find active or topmost window among existing windows
+  browser_window_t* target_win = NULL;
+  HWND fg = GetForegroundWindow();
+  for (int i = 0; i < g_window_count; i++) {
+    if (g_windows[i] && g_windows[i]->main_hwnd == fg) {
+      target_win = g_windows[i];
+      break;
     }
-    if (url_value) {
-      cef_string_userfree_free(url_value);
+  }
+  if (!target_win && g_window_count > 0) {
+    for (int i = g_window_count - 1; i >= 0; i--) {
+      if (g_windows[i] && IsWindow(g_windows[i]->main_hwnd)) {
+        target_win = g_windows[i];
+        break;
+      }
     }
   }
 
-#if defined(OS_WIN)
-  browser_window_t* win_ctx = create_browser_window(target_url);
-  if (win_ctx && win_ctx->main_hwnd) {
-    if (IsIconic(win_ctx->main_hwnd)) {
-      ShowWindow(win_ctx->main_hwnd, SW_RESTORE);
+  if (target_win && target_win->main_hwnd && IsWindow(target_win->main_hwnd)) {
+    if (IsIconic(target_win->main_hwnd)) {
+      ShowWindow(target_win->main_hwnd, SW_RESTORE);
     }
-    SetForegroundWindow(win_ctx->main_hwnd);
+    SetForegroundWindow(target_win->main_hwnd);
+    CreateNewTab(target_win, target_url);
+  } else {
+    browser_window_t* new_win = create_browser_window(target_url);
+    if (new_win && new_win->main_hwnd) {
+      if (IsIconic(new_win->main_hwnd)) {
+        ShowWindow(new_win->main_hwnd, SW_RESTORE);
+      }
+      SetForegroundWindow(new_win->main_hwnd);
+    }
   }
 #endif
 

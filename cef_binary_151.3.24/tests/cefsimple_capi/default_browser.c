@@ -71,8 +71,8 @@ void default_browser_register_capabilities(void) {
   reg_set_str(HKEY_CURRENT_USER, smi_base, NULL, L"Lite Browser");
   reg_set_str(HKEY_CURRENT_USER, L"Software\\Clients\\StartMenuInternet\\LiteBrowser\\DefaultIcon", NULL, icon_path);
 
-  wchar_t smi_cmd[MAX_PATH + 16] = {0};
-  swprintf_s(smi_cmd, MAX_PATH + 16, L"\"%s\"", exe_path);
+  wchar_t smi_cmd[MAX_PATH + 32] = {0};
+  swprintf_s(smi_cmd, MAX_PATH + 32, L"\"%s\" \"%%1\"", exe_path);
   reg_set_str(HKEY_CURRENT_USER, L"Software\\Clients\\StartMenuInternet\\LiteBrowser\\shell\\open\\command", NULL, smi_cmd);
 
   // Capabilities

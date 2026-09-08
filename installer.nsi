@@ -100,7 +100,7 @@ Section "Install"
   ; Register Lite Browser capabilities for Windows Default Apps
   WriteRegStr HKLM "Software\Clients\StartMenuInternet\LiteBrowser" "" "Lite Browser"
   WriteRegStr HKLM "Software\Clients\StartMenuInternet\LiteBrowser\DefaultIcon" "" "$\"$INSTDIR\lite_browser.exe$\",0"
-  WriteRegStr HKLM "Software\Clients\StartMenuInternet\LiteBrowser\shell\open\command" "" "$\"$INSTDIR\lite_browser.exe$\""
+  WriteRegStr HKLM "Software\Clients\StartMenuInternet\LiteBrowser\shell\open\command" "" "$\"$INSTDIR\lite_browser.exe$\" $\"%1$\""
 
   WriteRegStr HKLM "Software\Clients\StartMenuInternet\LiteBrowser\Capabilities" "ApplicationName" "Lite Browser"
   WriteRegStr HKLM "Software\Clients\StartMenuInternet\LiteBrowser\Capabilities" "ApplicationIcon" "$\"$INSTDIR\lite_browser.exe$\",0"

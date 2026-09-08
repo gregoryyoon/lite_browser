@@ -1111,3 +1111,46 @@ Microsoft Edge 브라우저(SmartScreen)의 *"일반적으로 다운로드되지
 - **CEF 151.3.24 Debug 빌드**: `cmake --build ... --config Debug --target cefsimple_capi` 성공 (`Exit code 0`).
 - **테마 실시간 토글 검증**: 설정 페이지에서 라이트 모드 ↔ 다크 모드 전환 시 메인 창, 주소창, 옴니박스, 사이드패널, 북마크/다운로드 관리자 화면이 흰색 번쩍임 없이 실시간 동기화됨을 확인.
 - **텍스트 레이아웃 정돈 검증**: 북마크 및 다운로드 관리자에서 긴 텍스트 입력 시 레이아웃 깨짐 없이 단정한 단일행 말줄임표로 정렬 표출됨을 확인.
+
+---
+
+## 37. 외부 프로그램(Outlook 등) 링크 연동 버그 수정 및 프로세스 재실행/새 탭 통합 (External App URL Launch & Warm Relaunch Tab Integration)
+
+### 37.1 배경 및 문제 분석
+1. **외부 애플리케이션 링크 클릭 시 북마크 관리자 노출 문제**:
+   - Outlook, Slack, Teams 등 외부 프로그램에서 링크 클릭 시, Lite Browser가 기본 브라우저로 등록되어 있어 프로세스가 실행되지만 해당 링크 URL로 바로 접속하지 않고 기본 시작 페이지인 북마크 관리자(`lite://favorites`, `ui/manager.html`)가 열리는 문제 발생.
+2. **원인 분석**:
+   - **명령줄 위치 인자(Positional Arguments) 파싱 누락**:
+     Windows 셸 및 기본 브라우저 연동 프로토콜(`http`, `https`, `StartMenuInternet`)은 `lite_browser.exe "https://example.com"` 형식으로 URL을 첫 번째 위치 인자(`argv[1]`)로 전달함. 기존 `simple_app.c`에서는 명시적인 `--url=...` 스위치(`command_line->get_switch_value("url")`)만 확인하였기 때문에 위치 인자로 전달된 외부 링크를 인식하지 못하고 기본 경로(`ResolveManagerPath`)로 fallback됨.
+   - **StartMenuInternet 레지스트리 오픈 커맨드 인자 미비**:
+     `default_browser.c` 및 `installer.nsi`의 `Software\Clients\StartMenuInternet\LiteBrowser\shell\open\command` 레지스트리 키에 `"%1"` 파라미터가 누락되어 있었음.
+   - **프로세스 이미 실행 중일 때(Warm Relaunch) 새 창 중복 오픈**:
+     브라우저가 이미 백그라운드나 전면에 실행 중일 때 외부 링크를 클릭하면 새 탭이 아니라 새로운 창이 불필요하게 추가 생성되는 UX 한계가 있었음.
+
+### 37.2 핵심 구현 내역
+1. **명령줄 인자(URL) 추출 헬퍼 함수 구현 ([`cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c))**:
+   - `extract_url_from_command_line(cef_command_line_t* command_line, char* out_url, size_t max_len)` 함수 신설.
+   - 명시적인 `--url` 스위치가 있으면 우선 추출.
+   - 스위치가 없는 경우 `command_line->get_arguments(command_line, args_list)`를 통해 첫 번째 위치 인자를 획득.
+   - `http://`, `https://`, `ftp://`, `file:///`, `lite://` 등 프로토콜 스킴을 자동 인식하며, 로컬 윈도우 파일 경로(예: `C:\path\file.html`)가 전달된 경우 `file:///` 포맷으로 자동 변환.
+
+2. **브라우저 최초 기동(Cold Start) 시 시작 URL 동적 반영**:
+   - `browser_process_handler_on_context_initialized`에서 `extract_url_from_command_line`을 호출하여 유효한 외부 URL이 전달된 경우 기본 북마크 관리자 페이지 대신 해당 외부 URL을 즉시 `g_startup_url`로 설정하여 최초 윈도우에서 열리도록 처리.
+
+3. **기존 브라우저 실행 중(Warm Relaunch) 새 탭 오픈 및 최상위 윈도우 활성화**:
+   - `browser_process_handler_on_already_running_app_relaunch` 콜백 수정:
+   - 외부 URL을 추출한 후 활성 메인 윈도우 목록(`g_windows`)에서 현재 전면 윈도우 컨텍스트(`win_ctx`)를 획득.
+   - 최소화된 창 복원(`ShowWindow(hwnd, SW_RESTORE)` / `SW_SHOW`) 및 포그라운드 활성화(`SetForegroundWindow(hwnd)`).
+   - `CreateNewTab(win_ctx, target_url)`을 호출하여 기존 창의 **새 탭**으로 외부 링크를 즉시 열어 크롬/엣지 등 모던 브라우저 표준 UX와 완벽 동기화.
+
+4. **기본 브라우저 레지스트리 커맨드 포맷 보강 ([`default_browser.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/default_browser.c), [`installer.nsi`](file:///c:/projects/lite_browser/installer.nsi))**:
+   - `Software\Clients\StartMenuInternet\LiteBrowser\shell\open\command` 등록 시 `L"\"%s\" \"%%1\""` (NSIS: `$\"%1$\"`) 포맷을 적용하여 OS가 외부 링크를 정확히 인자로 넘기도록 보장.
+
+### 37.3 빌드 및 검증 결과
+- **Debug / Release 빌드**: `cmake --build build --config Release --target cefsimple_capi` 완료 (`Exit code 0`).
+- **인스톨러 패키징 및 서명**:
+  - `makensis.exe c:\projects\lite_browser\installer.nsi` 성공 (`LiteBrowserInstaller.exe` 생성).
+  - Authenticode SHA-256 및 DigiCert RFC 3161 타임스탬프 서명 완료.
+- **실제 동작 검증**:
+  - 외부 애플리케이션(Outlook, Slack 등)에서 웹 링크 클릭 시 정상적으로 해당 URL로 바로 접속됨을 사용자 실기 테스트를 통해 검증 완료.
+
