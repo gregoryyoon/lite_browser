@@ -232,7 +232,6 @@ lite_browser\
 │           └── inject_icon.py                 # Win32 Resource API 기반 PE 리소스 자동 주입기
 └── docs\                                      # 상세 기술 및 아키텍처 문서
     ├── logo.png                               # 256x256 HiDPI 투명 브라우저 로고 에셋
-    ├── prompt.md                              # 아키텍처 사양 및 제약 사항 문서
     └── walkthrough.md                         # 전체 기능 및 마일스톤 통합 기술 보고서 (Walkthrough)
 ```
 

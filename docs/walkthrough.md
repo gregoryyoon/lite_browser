@@ -1,15 +1,83 @@
 # Lite Browser 전체 기능 & 시스템 구현 보고서 (Walkthrough)
 
-본 문서는 **Lite Browser** 프로젝트의 전체 아키텍처 및 주요 기능별 구현 내역(기본 언어 설정, 다중 탭 및 윈도우 관리, 차세대 북마크 & 지능형 주소창, 커스텀 아이콘 리소스 자동화 파이프라인, 다운로드 관리자, 듀얼 탭/창 분할 시스템)을 통합하여 관리하는 전체 통합 기술 가이드입니다.
+본 문서는 **Lite Browser** 프로젝트의 빌드 및 실행 환경, CEF C API 아키텍처, 순수 Win32 + 이중 자식 브라우저 구조 및 전체 기능별 구현 내역(기본 언어 설정, 다중 탭 및 윈도우 관리, 차세대 북마크 & 지능형 주소창, 커스텀 아이콘 리소스 자동화 파이프라인, 다운로드 관리자, 듀얼 탭/창 분할 시스템, AI 에이전트 브라우저, 0px 심리스 레이아웃, 벤토 그리드 테마 등)을 통합하여 관리하는 전체 통합 기술 가이드입니다.
 
 ---
 
-## 1. 기본 시스템 및 OS 언어 설정 (OS Default Language Sync)
+## 1. 빌드 및 실행 환경 (Build & Runtime Environment)
 
 ### 1.1 개요
+Lite Browser는 64-bit Windows 환경에서 순수 Win32 C API와 CEF(Chromium Embedded Framework) C API를 결합하여 제작된 고성능 초경량 데스크톱 브라우저입니다.
+
+### 1.2 시스템 사양 및 환경
+- **실행 환경**: 64-bit Windows 10/11, CEF binary distribution 151.3.24 (Chromium 151.0.7922.174)
+- **빌드 환경**: Visual Studio 2022/2026 IDE (MSVC x64), CMake 3.25+ 사용
+- **빌드 결과물 디렉토리**: `C:\projects\lite_browser\cef_binary_151.3.24\build`
+- **주요 바이너리 타깃**:
+  - Debug: `cef_binary_151.3.24\build\tests\cefsimple_capi\Debug\lite_browser.exe`
+  - Release: `cef_binary_151.3.24\build\tests\cefsimple_capi\Release\lite_browser.exe`
+- **배포 인스톨러**: NSIS (Nullsoft Scriptable Install System) 기반 원클릭 설치 관리자 ([`LiteBrowserInstaller.exe`](file:///c:/projects/lite_browser/LiteBrowserInstaller.exe))
+
+---
+
+## 2. cefsimple_capi 구조 분석 및 C API 제약 사항 (CEF C API Architecture & Constraints)
+
+### 2.1 개요
+Lite Browser의 C 백엔드는 CEF 공식 배포판의 `cefsimple_capi` 예제를 기반으로 확장 개발되었습니다. 이는 C++ 스마트 포인터(`CefRefPtr`)와 클래스 상속 체계 대신 **순수 C 언어로 구현된 CEF 인터페이스**를 사용함을 의미합니다.
+
+### 2.2 순수 C API 핵심 제약 및 개발 규칙
+1. **C++ 문법 사용 절대 금지**:
+   - C++ 컴파일러 전용 문법(클래스 상속, 가상 함수 테이블 수동 조작 외의 상속, 네임스페이스, 템플릿, `new`/`delete`, 스마트 포인터)은 사용할 수 없으며, 엄격한 C11/C99 표준 C 문법으로 작성됩니다.
+2. **수동 참조 카운팅 관리 (Manual Reference Counting)**:
+   - CEF의 모든 객체는 `cef_base_ref_counted_t` 기반의 `add_ref`와 `release` 함수 포인터를 통해 수동으로 수명 주기를 제어합니다.
+   - 포인터 전달 시 소유권(Ownership) 규칙을 명확히 준수해야 하며, 누락 시 Use-After-Free 또는 메모리 누수가 발생합니다.
+3. **C API 함수 포인터 호출 패턴 (`self` 매핑)**:
+   - 모든 CEF 인터페이스는 함수 포인터를 포함하는 C 구조체로 정의되어 있으며, 첫 번째 인자로 해당 구조체 자신의 포인터를 전달하는 방식을 사용합니다 (예: `browser->get_main_frame(browser)`).
+4. **CEF 문자열 라이프사이클 관리**:
+   - `cef_string_t` 구조체를 활용하며, `cef_string_utf8_to_utf16` / `cef_string_utf16_to_utf8` 변환 후 처리가 끝나면 반드시 `cef_string_clear`를 호출하여 힙 메모리를 해제해야 합니다.
+5. **C API 메모리 참조 마샬링 소유권 회수 가드 (중요)**:
+   - `cef_browser_view_get_for_browser` 등과 같은 CEF 전역 함수에 브라우저 포인터를 인자로 전달할 경우, CEF 내부 API 마샬링에 의해 소유권이 회수(Release)되므로 전달 직전 반드시 `browser->base.add_ref((cef_base_ref_counted_t*)browser)`를 호출하여 레퍼런스 카운트 붕괴(Access Violation)를 사전에 방지해야 합니다.
+
+---
+
+## 3. 구현된 하이브리드 브라우저 아키텍처 (순수 Win32 + 이중 자식 브라우저) (Hybrid Browser Architecture)
+
+CEF Views 프레임워크의 다중 브라우저 뷰 바인딩 한계와 초기 화면 렌더링 누락 문제를 완벽하게 회피하기 위해, 순수 Win32 메인 창 구조 아래 두 개의 네이티브 자식 브라우저를 임베딩하는 방식으로 설계 및 검증이 완료되었습니다.
+
+### 3.1 윈도우 관리 및 레이아웃
+1. **CEF Views 비활성화**:
+   - `simple_app.c`에서 `use_views = 0`으로 고정하여 항상 네이티브 Win32 분기가 실행되도록 합니다.
+2. **메인 윈도우 생성**:
+   - `simple_app.c`에서 커스텀 윈도우 클래스(`LiteBrowserMainWindowClass`)를 등록하고, `CreateWindowEx`를 호출하여 상위 메인 윈도우(`g_main_hwnd` / `win_ctx->main_hwnd`)를 띄웁니다.
+3. **이중 자식 브라우저 임베딩**:
+   - 메인 윈도우 생성 직후 두 개의 자식 브라우저를 독립적으로 생성합니다:
+     - **상단 주소창 UI 브라우저**: 로컬 HTML 주소창(`ui/index.html`)을 로드하며, 상단 고정/DPI 스케일 높이의 자식 창(`WS_CHILD`)으로 생성됩니다.
+     - **하단 웹 콘텐츠 브라우저**: 메인 웹페이지(`g_startup_url`)를 로드하며, 나머지 클라이언트 전체 영역을 차지하는 자식 창(`WS_CHILD`)으로 생성됩니다.
+
+### 3.2 윈도우 메시지 프로시저 (`LiteBrowserMainWndProc`)
+1. **`WM_SIZE`**:
+   - 상단 주소창 브라우저(DPI 비례 동적 높이)와 하단 콘텐츠 브라우저(나머지 영역)의 윈도우 핸들을 획득하여 Win32 `MoveWindow` API로 크기를 실시간 조정하고 다시 그립니다.
+2. **`WM_CLOSE` / `WM_DESTROY`**:
+   - 윈도우 종료 신호 시 자식 창들과 브라우저 리소스를 안전하게 해제하고, 활성 창 카운트를 감시하여 마지막 창이 닫힐 때 메시지 루프를 안전하게 이탈(`cef_quit_message_loop()`)시킵니다.
+
+### 3.3 주요 연동 제어 및 이벤트 처리
+1. **비동기 생성 즉시 렌더링**:
+   - 자식 브라우저 생성이 비동기로 완료되는 시점(`simple_life_span_handler.c`의 `life_span_handler_on_after_created`)에 캐시된 브라우저 포인터(`win_ctx->ui_browser`, `win_ctx->content_browser`)를 통해 메인 윈도우에 `WM_SIZE` 메시지를 강제로 전송(`PostMessage`)하여 기동 즉시 주소창이 깔끔하게 렌더링되도록 보장합니다.
+2. **주소창 입력 연동 (`http://ui-action/load?url=...`)**:
+   - 주소창의 입력 폼에서 `http://ui-action/load?url=...` 프로토콜로 요청이 인입되면, C 백엔드의 `on_before_browse` 콜백에서 파싱하여 하단 콘텐츠 브라우저에 해당 URL을 `load_url` 합니다.
+3. **타이틀 바 동기화**:
+   - 콘텐츠 브라우저 로딩 중 타이틀 변경 이벤트(`display_handler_on_title_change` -> `simple_handler_platform_title_change`) 수신 시, 상위 윈도우인 `main_hwnd`에 `SetWindowTextW`를 호출하여 실시간 동기화합니다.
+4. **C API 메모리 참조 관리 규칙 준수**:
+   - CEF C API 함수 인자 전달 시 레퍼런스 카운트 회수 규칙을 방어하기 위해 전달 전 `add_ref`를 호출하여 프로그램 무결성을 확보합니다.
+
+---
+
+## 4. 기본 시스템 및 OS 언어 설정 (OS Default Language Sync)
+
+### 4.1 개요
 LiteBrowser 실행 시 Windows OS의 사용자 기본 로캘(UI Language)을 자동 감지하여 CEF의 내장 UI 및 웹페이지 언어 설정에 동적으로 반영하는 기능을 구현했습니다.
 
-### 1.2 주요 구현 내용
+### 4.2 주요 구현 내용
 1. **Windows OS 기본 언어 감지 (`GetUserDefaultLocaleName`)**:
    - Win32 API `GetUserDefaultLocaleName`을 호출하여 사용자 시스템의 기본 로캘(예: `ko-KR`)을 추출합니다. (실패 시 fallback: `ko-KR`)
 2. **CEF 내장 UI 언어 설정 (`settings.locale`)**:
@@ -19,14 +87,14 @@ LiteBrowser 실행 시 Windows OS의 사용자 기본 로캘(UI Language)을 자
 4. **메모리 관리**:
    - CEF 브라우저 프로세스 초기화(`cef_initialize`) 직후 동적 생성된 CEF 문자열 리소스(`settings.locale`, `settings.accept_language_list`)를 `cef_string_clear`로 안전하게 해제합니다.
 
-### 1.3 관련 소스 코드
-- [`cef_binary_149.0.6/tests/cefsimple_capi/cefsimple_win.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/cefsimple_win.c)
+### 4.3 관련 소스 코드
+- [`cef_binary_151.3.24/tests/cefsimple_capi/cefsimple_win.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/cefsimple_win.c)
 
 ---
 
-## 2. 탭 및 윈도우 관리 아키텍처 (Tab & Window Subsystem)
+## 5. 탭 및 윈도우 관리 아키텍처 (Tab & Window Subsystem)
 
-### 2.1 하이브리드 브라우저 아키텍처 (Win32 + 이중 자식 브라우저)
+### 5.1 하이브리드 브라우저 아키텍처 (Win32 + 이중 자식 브라우저)
 1. **CEF Views 우회 및 순수 Win32 윈도우 임베딩**:
    - CEF Views 프레임워크의 다중 브라우저 뷰 바인딩 제약 및 렌더링 누락 문제를 방지하고자 `simple_app.c`에서 `use_views = 0`으로 지정하여 순수 Win32 메시지 프로시저 기반 분기를 기동합니다.
    - 메인 윈도우 클래스(`LiteBrowserMainWindowClass`)를 등록한 뒤 `CreateWindowEx`로 최상위 메인 윈도우(`g_main_hwnd`)를 띄우고, 그 하위에 두 개의 독립된 자식 브라우저(`WS_CHILD`)를 임베딩합니다:
@@ -35,7 +103,7 @@ LiteBrowser 실행 시 Windows OS의 사용자 기본 로캘(UI Language)을 자
 2. **C API 참조 관리 (Ref-Counting) 규칙**:
    - C++ 스마트 포인터가 없는 순수 C 환경이므로, CEF 전역 API(`cef_browser_view_get_for_browser` 등) 호출 시 포인터 소유권 마샬링으로 인한 레퍼런스 카운트 파손을 막고자 인자 전달 전 `browser->base.add_ref`를 수동 호출하여 메모리 안전성(Access Violation 예외 차단)을 보장합니다.
 
-### 2.2 동적 컨텍스트 기반 다중 탭(Multi-Tab) 및 멀티 윈도우 관리
+### 5.2 동적 컨텍스트 기반 다중 탭(Multi-Tab) 및 멀티 윈도우 관리
 1. **창별 동적 컨텍스트 구조체 (`browser_window_t`)**:
    - 싱글 윈도우 전역 변수를 제거하고, 윈도우 인스턴스 생성 시마다 `browser_window_t` 구조체를 동적 할당하여 Win32 `GWLP_USERDATA` 및 전역 관리 배열(`g_windows`)에 바인딩했습니다.
    - 개별 윈도우마다 `tabs` 배열(최대 10개), `active_tab_index`, `tab_count`를 가지고 있어 탭 목록, URL, Title, HWND 등의 상태를 독립적으로 관리합니다.
@@ -45,7 +113,7 @@ LiteBrowser 실행 시 Windows OS의 사용자 기본 로캘(UI Language)을 자
 3. **현재 활성 탭 바로 우측 위치 새 탭 삽입 (Active Tab Relative Insertion)**:
    - 새 탭 생성 시 무조건 전체 탭의 맨 우측 끝에 추가되던 기존 방식을 개편하여, 크롬/엣지 표준 UX와 동일하게 **현재 활성화된 탭의 바로 오른쪽(`active_tab_index + 1`) 위치에 새 탭이 즉시 삽입(Insert)**되도록 `CreateNewTab` 공통 함수 내 탭 배열 시프트(Shift) 알고리즘을 구현했습니다.
 
-### 2.3 비동기 탭 분리(Reparenting) 및 드래그앤드롭 새 창 생성
+### 5.3 비동기 탭 분리(Reparenting) 및 드래그앤드롭 새 창 생성
 1. **새로고침 없는 탭 Reparenting**:
    - 활성화된 자식 콘텐츠 브라우저 창의 부모 윈도우를 Win32 `SetParent` API로 신규 메인 윈도우에 동적 연결합니다.
    - 스타일 비트(`WS_POPUP` 해제, `WS_CHILD` 적용) 갱신 후 `MoveWindow` 및 `host->was_resized(host)`, `host->set_focus(host, 1)`를 수행하여 기존 웹 세션을 새로고침 없이 실시간 새 창으로 이관합니다.
@@ -53,14 +121,21 @@ LiteBrowser 실행 시 Windows OS의 사용자 기본 로캘(UI Language)을 자
    - HTML5 DnD API 사용 시 OS 제한으로 윈도우 외부 드롭 시 포인터가 🚫(드롭 금지)로 고착되는 현상을 해결하고자 **PointerEvent `setPointerCapture`**를 도입했습니다.
    - 탭바 이탈 시 포인터 커서를 복사/추가 기호가 결합된 **`copy` 커서**로 실시간 전환하고, 마우스를 놓는 순간 스크린 좌표(`GetCursorPos`)를 백엔드로 넘겨 새 메인 윈도우를 해당 좌표에 스냅 팝업시킵니다.
 
-### 2.4 비동기 수명 주기 및 메모리 안정성 (Use-After-Free 크래시 방지)
+### 5.4 비동기 수명 주기 및 메모리 안정성 (Use-After-Free 크래시 방지)
 1. **비동기 메모리 소멸 위임 (UAF 크래시 차단)**:
    - Win32 `WM_DESTROY` 메시지가 수신되었을 때 `free(win_ctx)`를 성급하게 수행하면, CEF 내부 스레드의 비동기 브라우저 소멸 과정(`life_span_handler_on_before_close`)에서 댕글링 포인터를 참조하여 세그멘테이션 크래시가 유발됩니다.
    - 이를 막고자 `WM_DESTROY`에서는 브라우저 closure만 요청하고, **해당 창 내부의 UI 브라우저 및 모든 자식 탭 브라우저들의 소멸 콜백(`on_before_close`)이 100% 완료되어 카운트가 `0`이 되는 최종 시점에 비로소 `free(win_ctx)`가 실행되도록 소멸 라이프사이클을 격리**했습니다.
 2. **개별 창 종료 표준 가드 (`_WIN32`)**:
    - 플랫폼 빌드 매크로 가드를 표준 **`_WIN32`**로 보정하여, 다중 창 구동 중 개별 팝업/분리 창을 닫았을 때 전체 프로그램이 동시 종료되는 문제를 막고, 메인 창 카운트(`g_window_count == 0`)가 마지막 1개일 때만 CEF 메시지 루프(`cef_quit_message_loop`)가 이탈되도록 보장했습니다.
 
-### 2.5 커스텀 프레임리스 윈도우, High DPI & 듀얼 모니터 최대화 보정
+### 5.5 커스텀 프레임리스 윈도우, High DPI & 듀얼 모니터 최대화 보정
+1. **창 위치/크기 영속 복원 및 스냅 기동 (Flicker-free Startup)**:
+   - `SHGetSpecialFolderPathA` (CSIDL_PROFILE)를 사용하여 사용자 프로필 경로 하위에 `.lite-browser` 폴더를 자동 생성하고, `window_config.txt` 텍스트 포맷으로 창 좌표(`WINDOWPLACEMENT`)를 영속화합니다.
+   - `CreateWindowEx` 시점에 창 스타일에서 `WS_VISIBLE`을 제외하여 숨김 창으로 띄우고, 저장된 이전 좌표 복원 처리를 마친 후에 `UpdateWindow`로 스냅 노출하여 기동 즉시 크기가 뒤바뀌며 발생할 수 있는 레이아웃 번쩍임(Flicker)을 원천 차단했습니다.
+   - 윈도우가 최소화 상태에서 종료되더라도 다음 기동 시 최소화로 고착되는 것을 막고자 최소화 감지 시 일반 화면(`SW_SHOWNORMAL`) 복원 코드를 구현했습니다.
+2. **작업 표시줄 보호 및 자동 숨기기(Auto-hide Taskbar) 1px 핫존 보장**:
+   - `SHAppBarMessage(ABM_GETSTATE)`로 작업 표시줄의 자동 숨기기(`ABS_AUTOHIDE`) 여부를 실시간 감지합니다.
+   - 자동 숨기기가 활성화되어 있으면 `ABM_GETTASKBARPOS`로 작업 표시줄의 숨김 방향(Edge)을 알아낸 뒤 해당 경계 좌표를 딱 **1픽셀 차감**하여 최대화 크기(`ptMaxSize`/`ptMaxPosition`)를 설정합니다. 이 1px 핫존 개방 덕분에 OS 셸이 마우스 호버 이벤트를 차단하지 않고 작업 표시줄을 안정적으로 팝업시킵니다.
 1. **커스텀 타이틀바 및 탭바 마우스 드래그 이동**:
    - `WS_POPUP | WS_THICKFRAME` 프레임리스 구조를 채택하고 `DwmExtendFrameIntoClientArea` 그림자 효과를 입혔습니다.
    - HTML 탭바 여백 구역 마우스 다운 시 `drag-window` IPC를 쏘아, 백엔드에서 **`ReleaseCapture()` 후 `SendMessage(win_ctx->main_hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0)`**을 동기 호출하여 마우스 드래그로 자연스럽게 창이 이동되도록 구현했습니다.
@@ -69,7 +144,10 @@ LiteBrowser 실행 시 Windows OS의 사용자 기본 로캘(UI Language)을 자
 3. **듀얼/멀티 모니터 `WM_GETMINMAXINFO` 오프셋 상대 좌표 보정**:
    - Win32 `WM_GETMINMAXINFO` 의 `mmi->ptMaxPosition` 은 가상 화면 전역 절대 좌표가 아닌 **"해당 모니터 오리진 기준 상대 좌표(Relative Coordinates)"**를 요구하므로 `mmi->ptMaxPosition.x = mi.rcWork.left - mi.rcMonitor.left` 및 `y = mi.rcWork.top - mi.rcMonitor.top` 공식을 적용하여 보조 모니터 위치와 관계없이 항상 해당 디스플레이 내에서 정밀하게 전체화면 최대화가 동작하도록 수정했습니다.
 
-### 2.6 링크/팝업 가로채기, 비동기 레이스 차단 & UX 고도화
+### 5.6 링크/팝업 가로채기, 비동기 레이스 차단 & UX 고도화
+1. **주소 표시창 최초 포커스 시 전체 텍스트 자동 선택**:
+   - 주소창에 포커스가 없던 상태에서 마우스로 주소창을 처음 클릭할 때 텍스트 박스 전체 문자열이 즉각 드래그 선택 상태(`select()`)가 되도록 `ui/app.js` 이벤트를 설계했습니다.
+   - `focus`, `mouseup`, `blur` 이벤트를 유기적으로 활용하여 포커스가 이미 있는 상태에서의 텍스트 편집 동작을 방해하지 않으면서도 신규 포커스 인입 시 주소 전체 교체 편의성을 극대화했습니다.
 1. **네이티브 팝업 차단 후 비동기 리디렉션 (Chromium 네임드 팝업 크래시 근절)**:
    - `window.open(url, "name")` 기반 네임드 팝업 인입 시 `on_before_popup` 콜백 내에서 팝업 생성을 원천 거부(`return 1`)하고 가로챈 URL을 `CreateNewTab(win_ctx, target_url_str)`로 넘겨 안정적인 새 탭으로 오픈시켰습니다.
 2. **비동기 탭-핸들러 일대일 포인터 매칭 (`void* tab_handler`)**:
@@ -86,35 +164,43 @@ LiteBrowser 실행 시 Windows OS의 사용자 기본 로캘(UI Language)을 자
    - CEF `cef_request_handler_t` 구조체에 `on_open_urlfrom_tab` 콜백 핸들러(`request_handler_on_open_urlfrom_tab`)를 추가 바인딩했습니다.
    - 사용자가 웹페이지 내 일반 링크를 **Ctrl + 좌클릭** 또는 **휠클릭(Middle-click)**하는 이벤트를 가로채 target URL을 `CreateNewTab(win_ctx, target_url_str)`로 넘겨 기존 메인 창의 새 탭으로 오픈하고, `return 1`을 반환하여 Chromium 디폴트 팝업/새 창 생성을 원천 차단했습니다.
 
-### 2.7 긴 URL(네이버 리다이렉트 링크) 잘림 버그 수정 및 URL 버퍼 확장 (Long URL Buffer Expansion)
+### 5.7 긴 URL(네이버 리다이렉트 링크) 잘림 버그 수정 및 URL 버퍼 확장 (Long URL Buffer Expansion)
 1. **문제 원인 분석**:
    - 네이버 검색 결과('한강밤핑' 등) 섬네일 클릭 시 호출되는 긴 리다이렉트/추적 URL(1,332자 이상) 인입 시, C API 내부 URL 버퍼 크기가 `1024`자로 제한되어 있어 쿼리 스트링의 리다이렉트 타겟 파라미터(`&u=https%3A%2F%2Fcontents...`)가 잘려(Truncated) 손상된 URL이 CEF에 전달됨.
    - 손상된 URL을 수신한 네이버 서버가 리다이렉트 목표 지점을 정상 해석하지 못하고 디폴트 메인 페이지(`https://www.naver.com`)로 302/JS 리다이렉트하는 현상 발생.
 2. **구현 및 버퍼 확장**:
    - C API 데이터 구조체 및 주요 핸들러의 URL 버퍼 규격을 **`1024`자에서 `4096`자**로 일괄 확장:
-     - [`browser_context.h`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/browser_context.h): `tab_info_t.url` 버퍼 크기 `4096`자로 확장.
-     - [`simple_life_span_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_life_span_handler.c): `life_span_handler_on_before_popup` 내 `target_url_str[4096]` 버퍼 확장.
-     - [`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_handler.c): `g_startup_url[4096]`, `on_open_urlfrom_tab` 내 `target_url_str[4096]`, `detach-tab`/`drag-end` 내 `target_url[4096]` 확장.
+     - [`browser_context.h`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/browser_context.h): `tab_info_t.url` 버퍼 크기 `4096`자로 확장.
+     - [`simple_life_span_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_life_span_handler.c): `life_span_handler_on_before_popup` 내 `target_url_str[4096]` 버퍼 확장.
+     - [`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c): `g_startup_url[4096]`, `on_open_urlfrom_tab` 내 `target_url_str[4096]`, `detach-tab`/`drag-end` 내 `target_url[4096]` 확장.
      - `update_ui_tabs` 및 `update_ui_nav_state` 내 `escaped_url[4096]`, `tab_str[5000]`, `json[65536]`, `js_code[70000]` 버퍼 크기를 확장하여 JSON 잘림 오작동 원천 차단.
-     - [`simple_app.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_app.c): `create_browser_window` 내 `target_url[4096]` 확장.
+     - [`simple_app.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c): `create_browser_window` 내 `target_url[4096]` 확장.
 3. **검증**:
    - 1,300자 이상의 긴 리다이렉트 URL 클릭 시에도 URL이 잘리지 않고 원래 연결 목적지(`https://contents.premium.naver.com/...`)로 정상 이동하는 것을 확인.
 
-### 2.8 네이버 메일 삭제 UI 미갱신 버그 수정 (`disable-web-security` 제거)
+### 5.8 네이버 메일 삭제 UI 미갱신 버그 수정 (`disable-web-security` 제거)
 1. **문제 원인 분석**:
    - 네이버 홈 `my-iframe`(`https://www.naver.com/my.html`) 메일 탭에서 메일 삭제 시, AJAX 요청으로 서버 상 메일은 정상 삭제되지만 `iframe` ↔ 메인 프레임 간 `window.postMessage` 비동기 이벤트를 통해 UI를 리렌더링하는 과정에서 이벤트가 무시되는 현상 발생.
    - 원인은 C 백엔드 `simple_app.c`의 `simple_app_on_before_command_line_processing` 수신기에서 `--disable-web-security` 커맨드 라인 플래그가 적용되어 있어, Chromium이 `postMessage` 이벤트의 `event.origin`을 오염/누락 전달함으로써 네이버 프론트엔드의 `if (event.origin !== 'https://www.naver.com') return;` 보안 검증을 통과하지 못한 것.
 2. **구현 및 해결책**:
-   - [`simple_app.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_app.c#L167-L175): `disable-web-security` 커맨드 라인 스위치 주입 코드 제거.
+   - [`simple_app.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c#L167-L175): `disable-web-security` 커맨드 라인 스위치 주입 코드 제거.
    - 로컬 UI 통신(`ui/index.html`, `ui/editor.html`)은 `http://ui-action/...` URL 가로채기 방식이므로 보안 플래그 제거 후에도 100% 정상 작동함을 확인.
 3. **검증**:
    - 네이버 홈 메인 프레임 내 메일 탭에서 메일 삭제 시 `event.origin` 검증이 정상 통과되어, 새로고침 없이 메일 리스트 항목이 화면에서 즉시 제거되는 것을 검증 완료.
 
+### 5.9 중복 실행 시 기본 Chromium 창 노출 방지 및 프로세스 재실행 (`on_already_running_app_relaunch`)
+1. **문제 원인 분석**:
+   - Lite Browser가 이미 실행 중인 상태에서 추가로 실행 파일(`lite_browser.exe`)을 실행할 경우, 동일한 `root_cache_path` 프로필을 사용하는 싱글톤 프로세스 메커니즘에 의해 두 번째 프로세스는 기존 프로세스로 인자를 전달하고 종료됩니다.
+   - 이때 기존 프로세스에 `on_already_running_app_relaunch` 콜백이 정의되어 있지 않으면(NULL 또는 0 반환), CEF 기본 동작이 작동하여 불필요한 **기본 Chromium 스타일 윈도우**가 팝업되는 현상이 발생했습니다.
+2. **구현 및 해결책**:
+   - `simple_app.c`의 `cef_browser_process_handler_t` 콜백에 `browser_process_handler_on_already_running_app_relaunch`를 탑재했습니다.
+   - 재실행 전달 신호를 수신하면 커맨드 라인 인자(`--url`)를 파싱하여 대상 URL을 구하고, `create_browser_window`를 호출해 Lite Browser 네이티브 메인 윈도우를 새로 생성하여 최전면(`SetForegroundWindow`)으로 복원한 뒤 `1` (true)을 반환함으로써 기본 Chromium 창이 노출되는 문제를 원천 차단했습니다.
+
 ---
 
-## 3. 차세대 북마크 & 지능형 주소창 UX (Smart Omnibox & Bookmark)
+## 6. 차세대 북마크 & 지능형 주소창 UX (Smart Omnibox & Bookmark)
 
-### 3.1 맥락 자동 추출 및 문장 점수 기반 본문 요약 엔진 (Context & Extractive Summarization Engine)
+### 6.1 맥락 자동 추출 및 문장 점수 기반 본문 요약 엔진 (Context & Extractive Summarization Engine)
 - **소스**: [`ui/extractor.js`](file:///c:/projects/lite_browser/ui/extractor.js)
 - **심층 iframe 추출 (`getDeepSelectionText` & `getDeepBodyText`)**:
   - 네이버 블로그(`mainFrame`) 등 `iframe` 구조 페이지에서도 최상위 창과 자식 프레임을 심층 탐색하여 마우스 드래그 선택 문장 및 실체 본문 텍스트를 100% 수집.
@@ -126,10 +212,10 @@ LiteBrowser 실행 시 Windows OS의 사용자 기본 로캘(UI Language)을 자
   - 마침표/물음표/느낌표 기반 완전한 문장 분할 후 문단 위치, 제목 어휘, 스마트 태그 포함 여부 3가지 지표로 문장별 중요도 점수(Score)를 산출하여 상위 2~3개 고득점 문장을 이은 깔끔한 200자 요약문 생성.
 - **저장 항목**: `og:image` 썸네일, `og:description` 또는 스마트 본문 요약 스니펫, `document.referrer` 기반 유입 검색어(Search Intent), 키워드 태그, 드래그 선택 문장 앵커(`selectedText`) 및 스크롤 위치 보존.
 
-### 3.2 원클릭 추가/제거 토글 UX
+### 6.2 원클릭 추가/제거 토글 UX
 - 별 버튼 클릭 시 팝업 모달 없이 `☆` ↔ `★` 아이콘 상태 변화만으로 북마크 추가 및 즉시 제거 토글 제공.
 
-### 3.3 지능형 주소창 엔진 (Smart Omnibox Engine)
+### 6.3 지능형 주소창 엔진 (Smart Omnibox Engine)
 - **소스**: [`ui/app.js`](file:///c:/projects/lite_browser/ui/app.js), [`ui/index.html`](file:///c:/projects/lite_browser/ui/index.html), [`ui/style.css`](file:///c:/projects/lite_browser/ui/style.css)
 - **다차원 검색 & `#` 태그 숏컷**: URL, 제목, 스니펫, 유입 검색어, 태그까지 통합 탐색 및 `#` 키워드 드롭다운 필터링.
 - **동적 HWND 높이 계산 & 3행 인라인 카드**: 드롭다운 높이를 측정하여 네이티브 UI HWND를 동적 확장(`expandUI`)하고, 양옆 영역은 `transparent` 처리하여 웹 화면을 보호.
@@ -145,12 +231,12 @@ LiteBrowser 실행 시 Windows OS의 사용자 기본 로캘(UI Language)을 자
   - 드롭다운이 열리고 방향키로 항목이 선택된 상태(`isDropdownOpen && omniSelectedIndex >= 0`) 시 `handleKey` 입력을 리턴 처리하여 구글 검색 오버라이드를 차단하고 선택된 북마크/방문기록 URL로 정합 이동.
 - **백스페이스 입력 시 주소창 포커스 유지**: 주소창 텍스트를 백스페이스 키로 모두 지워 `query`가 빈 문자열(`""`)이 될 때 `closeOmniboxDropdown()` 내부의 자동 `addressBar.blur()`를 분리 제거하여, 텍스트가 모두 지워져도 주소창 키 포커스가 이탈하지 않고 연달아 입력할 수 있도록 보정.
 
-### 3.4 방문 기록 (History) 영속성 & C 백엔드 IPC 보정
-- **소스**: [`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_handler.c), [`ui/app.js`](file:///c:/projects/lite_browser/ui/app.js)
+### 6.4 방문 기록 (History) 영속성 & C 백엔드 IPC 보정
+- **소스**: [`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c), [`ui/app.js`](file:///c:/projects/lite_browser/ui/app.js)
 - **C 백엔드 `ExecuteJsOnBrowser` 전송 타겟 보정**: `load-history` 및 `load-bookmarks-v2` 액션 수신 시 읽어온 JSON 데이터를 활성 콘텐츠 탭이 아닌 주소창 UI 브라우저(`win_ctx->ui_browser`)로 우선 전달하도록 보정하여 앱 재기동 시에도 로컬 `history.json` 파일 데이터가 100% 정상 복원 복구됨.
 - **시동 IPC 딜레이 부여**: `requestLoadBookmarks()` 시동 시 `load-history` 요청에 150ms 딜레이를 부여하여 내비게이션 간섭 방지.
 
-### 3.5 북마크 전용 대시보드 (`lite://favorites`)
+### 6.5 북마크 전용 대시보드 (`lite://favorites`)
 - **소스**: [`ui/manager.html`](file:///c:/projects/lite_browser/ui/manager.html), [`ui/manager.js`](file:///c:/projects/lite_browser/ui/manager.js), [`ui/manager.css`](file:///c:/projects/lite_browser/ui/manager.css)
 - **기능**: 브라우저 디폴트 스타트업 URL, Ctrl+Shift+O 단축키 연결. 사이드바 태그 리스트, Temporal Slider 타임라인 필터, Card/List 뷰 스위처 제공.
 - **탭 제목 일원화**: 새 탭 및 `lite://favorites` 접속 시 탭 제목을 `북마크 관리자`로 일원화 표기.
@@ -160,72 +246,72 @@ LiteBrowser 실행 시 Windows OS의 사용자 기본 로캘(UI Language)을 자
   - 카드형 뷰: 하단 영역에 저장 시점과 방문 횟수 병행 표시 (`14일 전 · 👁️ 5회 방문`).
   - 리스트형 뷰: 테이블 날짜 셀에 방문 횟수 표기 (`14일 전 · 👁️ 5회`) 및 레이아웃 너비 확장 (`min-width: 145px`).
 
-### 3.6 동적 설치 경로 해결 (`ResolveUIFilePath`)
-- **소스**: [`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_handler.c)
+### 6.6 동적 설치 경로 해결 (`ResolveUIFilePath`)
+- **소스**: [`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c)
 - `GetModuleFileNameA` 기반으로 실행 파일 상위 폴더 트리를 순회하여 `ui/manager.html` 등 에셋을 탐색하므로 어떠한 설치 경로에서도 하드코딩 에러 없이 100% 동작.
 
 ---
 
-## 4. 아이콘 디자인 & 윈도우 리소스 자동 주입 파이프라인 (Icon & Resource Pipeline)
+## 7. 아이콘 디자인 & 윈도우 리소스 자동 주입 파이프라인 (Icon & Resource Pipeline)
 
-### 4.1 디자인 의도
+### 7.1 디자인 의도
  Notepads UX 컨셉의 초경량 브라우저 제품 철학을 담아 **깃털(Feather)**과 **슬림 브라우저 창(Slim Window)**이 결합된 현대적 플랫 아이콘 적용.
 
-### 4.2 Windows 표준 멀티 프레임 ICO 규격
+### 7.2 Windows 표준 멀티 프레임 ICO 규격
 - **16x16, 24x24, 32x32, 48x48**: 32-bit Alpha Raw BMP (DIB)
 - **256x256**: PNG 압축 인코딩
-- **파일**: [`cefsimple.ico`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/win/cefsimple.ico)
+- **파일**: [`cefsimple.ico`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/win/cefsimple.ico)
 
-### 4.3 Win32 Resource API 기반 자동 주입 엔진 (`inject_icon.py`)
-- **소스**: [`cef_binary_149.0.6/tests/cefsimple_capi/win/inject_icon.py`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/win/inject_icon.py)
+### 7.3 Win32 Resource API 기반 자동 주입 엔진 (`inject_icon.py`)
+- **소스**: [`cef_binary_151.3.24/tests/cefsimple_capi/win/inject_icon.py`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/win/inject_icon.py)
 - `BeginUpdateResourceW`, `UpdateResourceW`, `EndUpdateResourceW` 함수를 Python `ctypes`로 바인딩하여, CEF 빌드 시 샌드박스 래퍼 바이너리 복사(`bootstrap.exe` -> `cefsimple_capi.exe`)로 인해 커스텀 아이콘 리소스가 누락되는 이슈를 원천 차단.
-- CMake [`CMakeLists.txt`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/CMakeLists.txt)의 `POST_BUILD` 커스텀 명령으로 자동 통합되어 빌드 시 5개 해상도의 아이콘 리소스가 자동 주입됨.
+- CMake [`CMakeLists.txt`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/CMakeLists.txt)의 `POST_BUILD` 커스텀 명령으로 자동 통합되어 빌드 시 5개 해상도의 아이콘 리소스가 자동 주입됨.
 
 ---
 
-## 5. Release 빌드 & NSIS 패키징 가이드 (Packaging & Distribution)
+## 8. Release 빌드 & NSIS 패키징 가이드 (Packaging & Distribution)
 
-### 5.1 패키징 개요
+### 8.1 패키징 개요
 - **최종 인스톨러**: [`LiteBrowserInstaller.exe`](file:///c:/projects/lite_browser/LiteBrowserInstaller.exe) (~173MB)
 - **특징**: 64-bit 설치 지원(`$PROGRAMFILES64\LiteBrowser`), 시작 메뉴 및 바탕화면 바로가기 자동 생성, 제어판 프로그램 추가/제거 연동, UI 에셋(`ui\*.*`) 와일드카드 자동 동기화.
 
-### 5.2 NSIS 인스톨러 스크립트
+### 8.2 NSIS 인스톨러 스크립트
 - **소스**: [`installer.nsi`](file:///c:/projects/lite_browser/installer.nsi)
 
-### 5.3 원클릭 빌드 & 패키징 실행 명령
+### 8.3 원클릭 빌드 & 패키징 실행 명령
 ```powershell
 # 1. CMake Debug 빌드 (개발 및 테스트용)
-cmake --build c:\projects\lite_browser\cef_binary_149.0.6\build --config Debug --target cefsimple_capi
+cmake --build c:\projects\lite_browser\cef_binary_151.3.24\build --config Debug --target cefsimple_capi
 
 # 2. CMake Release 빌드 및 NSIS 인스톨러 패키징 (배포용)
-cmake --build c:\projects\lite_browser\cef_binary_149.0.6\build --config Release --target cefsimple_capi
+cmake --build c:\projects\lite_browser\cef_binary_151.3.24\build --config Release --target cefsimple_capi
 & "C:\Program Files (x86)\NSIS\makensis.exe" c:\projects\lite_browser\installer.nsi
 ```
 
 ---
 
-## 6. 주요 소스 파일 맵 (File Directory Map)
+## 9. 주요 소스 파일 맵 (File Directory Map)
 
-- [`simple_app.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_app.c): Win32 메인 프로시저, `WM_GETMINMAXINFO` 보정, DPI 스케일링, 분할 레이아웃/리사이저, `WM_MOUSEACTIVATE` 포커스 감지
-- [`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_handler.c): `RemoveTabAt` 탭 삭제, `CreateNewTab` 상대 위치 삽입, `ResolveUIFilePath` 동적 경로 탐색, 듀얼 탭 IPC, Focus Handler (`cef_focus_handler_t`), `update_ui_tabs` 콤보 제목 연동
-- [`simple_life_span_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_life_span_handler.c): 팝업 가로채기 리디렉션, 비동기 소멸 UAF 가드, 듀얼 브라우저 등록 및 클린업
-- [`simple_display_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_display_handler.c): 주소 변경, 타이틀 변경 이벤트 동기화 (우측 분할 브라우저 감지 연동)
-- [`browser_context.h`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/browser_context.h): 동적 윈도우/탭 컨텍스트 구조체 정의 (`is_split`, `right_browser`, `right_hwnd`, `right_title`, `right_url`, `active_split`, `split_ratio`)
+- [`simple_app.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c): Win32 메인 프로시저, `WM_GETMINMAXINFO` 보정, DPI 스케일링, 분할 레이아웃/리사이저, `WM_MOUSEACTIVATE` 포커스 감지
+- [`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c): `RemoveTabAt` 탭 삭제, `CreateNewTab` 상대 위치 삽입, `ResolveUIFilePath` 동적 경로 탐색, 듀얼 탭 IPC, Focus Handler (`cef_focus_handler_t`), `update_ui_tabs` 콤보 제목 연동
+- [`simple_life_span_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_life_span_handler.c): 팝업 가로채기 리디렉션, 비동기 소멸 UAF 가드, 듀얼 브라우저 등록 및 클린업
+- [`simple_display_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_display_handler.c): 주소 변경, 타이틀 변경 이벤트 동기화 (우측 분할 브라우저 감지 연동)
+- [`browser_context.h`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/browser_context.h): 동적 윈도우/탭 컨텍스트 구조체 정의 (`is_split`, `right_browser`, `right_hwnd`, `right_title`, `right_url`, `active_split`, `split_ratio`)
 - [`ui/app.js`](file:///c:/projects/lite_browser/ui/app.js): 주소창 포커스/blur, Omnibox 통합 그룹화 검색 엔진, 듀얼 탭 토글 `toggleDualSplit`, `.tab-split-badge` 분할 뱃지 연동
 - [`ui/index.html`](file:///c:/projects/lite_browser/ui/index.html) & [`ui/style.css`](file:///c:/projects/lite_browser/ui/style.css): 상단 주소창/탭바 네이티브 UI 레이아웃, 주소창 우측 듀얼 버튼 위치, 듀얼 분할 뱃지 스타일
 - [`ui/manager.html`](file:///c:/projects/lite_browser/ui/manager.html) & [`ui/manager.js`](file:///c:/projects/lite_browser/ui/manager.js): `lite://favorites` 대시보드
 - [`installer.nsi`](file:///c:/projects/lite_browser/installer.nsi): NSIS 설치 파일 빌드 스크립트
-- [`simple_download_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_download_handler.c) & [`simple_download_handler.h`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_download_handler.h): CEF 다운로드 진행률 추적 핸들러, 파일 중복 자동 순서 번호 부여, 영속 JSON 관리, IPC 액션
+- [`simple_download_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_download_handler.c) & [`simple_download_handler.h`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_download_handler.h): CEF 다운로드 진행률 추적 핸들러, 파일 중복 자동 순서 번호 부여, 영속 JSON 관리, IPC 액션
 - [`ui/downloads.html`](file:///c:/projects/lite_browser/ui/downloads.html), [`ui/downloads.js`](file:///c:/projects/lite_browser/ui/downloads.js), [`ui/downloads.css`](file:///c:/projects/lite_browser/ui/downloads.css): `lite://downloads` 다운로드 대시보드 UI
 
 ---
 
-## 7. 다운로드 관리자 대시보드 시스템 (`lite://downloads`)
+## 10. 다운로드 관리자 대시보드 시스템 (`lite://downloads`)
 
-### 7.1 개요
+### 10.1 개요
 Edge 브라우저의 `edge://downloads/` 디자인과 UX를 참고하여 다운로드 진행률 실시간 추적, 자동 다운로드 디렉토리 고정 및 중복 번호 부여, 영속 이력 관리, Unicode(한글/특수문자) 완벽 지원, 파일 실존 검사, 툴바 실시간 프로그레스 링/완료 인디케이터 및 파일 관리 기능을 탑재했습니다.
 
-### 7.2 주요 구현 내역
+### 10.2 주요 구현 내역
 1. **사용자 기본 다운로드 폴더 고정 & 자동 다운로드**:
    - `SHGetSpecialFolderPathW`를 사용해 `%USERPROFILE%\Downloads`로 저장 경로를 고정하고 `show_dialog = 0` 처리하여 Save As 대화상자 없이 즉시 자동 저장됩니다.
 2. **동일 파일명 자동 순서 번호 부여 (중복 방지)**:
@@ -255,12 +341,12 @@ Edge 브라우저의 `edge://downloads/` 디자인과 UX를 참고하여 다운�
 
 ---
 
-## 8. 듀얼 탭 (창 분할) 시스템 (Dual Tab & Split Screen Subsystem)
+## 11. 듀얼 탭 (창 분할) 시스템 (Dual Tab & Split Screen Subsystem)
 
-### 8.1 개요
+### 11.1 개요
 네이버웨일 브라우저의 듀얼 탭 UX를 기반으로, 한 탭 내에서 두 개의 페이지를 좌/우 가로 분할 탐색 및 제어할 수 있는 기능을 구현했습니다.
 
-### 8.2 주요 구현 내역
+### 11.2 주요 구현 내역
 1. **주소 표시창 우측 분할 버튼 위치 조정**:
    - 툴바 주소 표시창(`address-container`) 바로 오른편에 듀얼 분할 버튼(`dual-split-btn`)을 배치하여 1클릭 분할 토글 UX를 제공합니다.
 2. **독립된 탭별 분할 상태 관리 (Per-Tab State Isolation)**:
@@ -281,44 +367,44 @@ Edge 브라우저의 `edge://downloads/` 디자인과 UX를 참고하여 다운�
 
 ---
 
-## 9. 빌드 및 테스트 가이드 (Development & Build Guide)
+## 12. 빌드 및 테스트 가이드 (Development & Build Guide)
 
 ```powershell
 # Debug 모드 빌드 (개발 및 기능 테스트)
-cmake --build c:\projects\lite_browser\cef_binary_149.0.6\build --config Debug --target cefsimple_capi
+cmake --build c:\projects\lite_browser\cef_binary_151.3.24\build --config Debug --target cefsimple_capi
 ```
 
 ---
 
-## 10. 마크다운 에디터 기능 제거 (Markdown Editor Feature Removal)
+## 13. 마크다운 에디터 기능 제거 (Markdown Editor Feature Removal)
 
-### 10.1 개요
-초기 아키텍처에 구현되어 있던 **마크다운 에디터(Markdown Editor)** 기능이 실사용성이 떨어지고 불필요한 스타트업 리소스(숨겨진 자식 브라우저 동시 기동)를 소비함에 따라, 툴바 UI, 팝업 메뉴, C 백엔드 구조체/IPC 및 스타트업 초기화 로직 전반에서 제거하였습니다.
+### 13.1 개요
+초기 아키텍처에는 LLM 서비스(Gemini, ChatGPT, Claude 등)의 입력창에 Markdown 프롬프트 콘텐츠를 버튼 하나로 자동 주입하기 위해, 순수 Win32 C CAPI 및 TOAST UI Editor 라이브러리를 결합한 가로 분할(50/50 Split) 화면 및 파일 관리 제어판 기능이 구현되어 있었습니다. 그러나 실사용성이 떨어지고 기동 시 백그라운드에서 비가시 에디터 브라우저를 동시 기동하는 불필요한 스타트업 리소스를 소비함에 따라, 툴바 UI, 팝업 메뉴, C 백엔드 구조체/IPC 및 스타트업 초기화 로직 전반에서 완전 제거하였습니다.
 
-### 10.2 주요 작업 내용
+### 13.2 주요 작업 내용
 1. **HTML/JS UI 제거**:
    - [`ui/index.html`](file:///c:/projects/lite_browser/ui/index.html): 네비게이션 툴바 내 마크다운 에디터 토글 버튼 (`#editor-toggle-btn`) 삭제.
    - [`ui/app.js`](file:///c:/projects/lite_browser/ui/app.js): `toggleEditor()` 액션 함수 삭제.
    - [`ui/editor.html`](file:///c:/projects/lite_browser/ui/editor.html): 사용되지 않는 에디터 HTML 페이지 삭제.
 2. **C 백엔드 아키텍처 정리**:
-   - [`browser_context.h`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/browser_context.h): `browser_window_t` 내 `editor_browser`, `editor_hwnd`, `show_editor` 멤버 삭제.
-   - [`simple_handler.h`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_handler.h): `browser_type_t` 열거형 내 `BROWSER_TYPE_EDITOR` 항목 삭제.
-   - [`simple_app.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_app.c): `ResolveEditorPath` 제거, 앱 기동 시 에디터 자식 브라우저 생성 로직(Step 3) 제거, `WM_SIZE` 레이아웃 분할 계산 제거, 윈도우 소멸 시 에디터 브라우저 닫기 처리 제거.
-   - [`simple_life_span_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_life_span_handler.c): `on_after_created` 및 `on_before_close` 수명 주기 핸들러 내 `editor_browser` 참조/해제 코드 제거.
-   - [`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_handler.c): `show-menu` 메뉴 내 "마크다운 에디터 토글" (cmd 1007) 항목 삭제, `toggle-editor` 및 모든 `editor-*` IPC 통신 액션 루틴 제거.
+   - [`browser_context.h`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/browser_context.h): `browser_window_t` 내 `editor_browser`, `editor_hwnd`, `show_editor` 멤버 삭제.
+   - [`simple_handler.h`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.h): `browser_type_t` 열거형 내 `BROWSER_TYPE_EDITOR` 항목 삭제.
+   - [`simple_app.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c): `ResolveEditorPath` 제거, 앱 기동 시 에디터 자식 브라우저 생성 로직(Step 3) 제거, `WM_SIZE` 레이아웃 분할 계산 제거, 윈도우 소멸 시 에디터 브라우저 닫기 처리 제거.
+   - [`simple_life_span_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_life_span_handler.c): `on_after_created` 및 `on_before_close` 수명 주기 핸들러 내 `editor_browser` 참조/해제 코드 제거.
+   - [`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c): `show-menu` 메뉴 내 "마크다운 에디터 토글" (cmd 1007) 항목 삭제, `toggle-editor` 및 모든 `editor-*` IPC 통신 액션 루틴 제거.
 3. **검증**:
-   - Debug 빌드 (`cmake --build c:\projects\lite_browser\cef_binary_149.0.6\build --config Debug --target cefsimple_capi`) 결과 정상 종료 (Exit code 0).
+   - Debug 빌드 (`cmake --build c:\projects\lite_browser\cef_binary_151.3.24\build --config Debug --target cefsimple_capi`) 결과 정상 종료 (Exit code 0).
 
 ---
 
-## 11. 실행 파일명 변경 (Executable Output Renaming: `cefsimple_capi.exe` -> `lite_browser.exe`)
+## 14. 실행 파일명 변경 (Executable Output Renaming: `cefsimple_capi.exe` -> `lite_browser.exe`)
 
-### 11.1 개요
+### 14.1 개요
 기존 CEF sample 바이너리 이름인 `cefsimple_capi.exe`에서 브라우저 고유 명칭인 **`lite_browser.exe`**로 실행 파일 및 DLL 출력 명칭을 변경하였습니다.
 
-### 11.2 주요 작업 내용
+### 14.2 주요 작업 내용
 1. **CMake 설정 수정**:
-   - [`cef_binary_149.0.6/tests/cefsimple_capi/CMakeLists.txt`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/CMakeLists.txt): `set_target_properties(${CEF_TARGET} PROPERTIES OUTPUT_NAME "lite_browser")`를 추가하여 Debug 및 Release 모드 모두 `lite_browser.exe` 및 `lite_browser.dll`로 출력되도록 수정.
+   - [`cef_binary_151.3.24/tests/cefsimple_capi/CMakeLists.txt`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/CMakeLists.txt): `set_target_properties(${CEF_TARGET} PROPERTIES OUTPUT_NAME "lite_browser")`를 추가하여 Debug 및 Release 모드 모두 `lite_browser.exe` 및 `lite_browser.dll`로 출력되도록 수정.
    - 부트스트랩 바이너리 복사(`COPY_SINGLE_FILE`) 및 아이콘 커스텀 주입(`inject_icon.py`) 대상을 `lite_browser.exe`로 업데이트.
 2. **NSIS 인스톨러 스크립트 수정**:
 - [`installer.nsi`](file:///c:/projects/lite_browser/installer.nsi): 설치 대상 바이너리를 `lite_browser.exe` / `lite_browser.dll`로 변경, 시작 메뉴 및 바탕화면 바로가기 target을 `lite_browser.exe`로 수정, 언인스톨 삭제 항목 갱신.
@@ -331,12 +417,12 @@ cmake --build c:\projects\lite_browser\cef_binary_149.0.6\build --config Debug -
 
 ---
 
-## 12. AI 에이전트 브라우저 서브시스템 (AI Agent Browser Subsystem)
+## 15. AI 에이전트 브라우저 서브시스템 (AI Agent Browser Subsystem)
 
-### 12.1 개요
+### 15.1 개요
 사용자 맞춤형 실시간 상호작용 AI 에이전트, 메인 윈도우 우측 독립 네이티브 도킹 사이드패널, Rust 기반 MCP Server, 멀티 AI Provider 추상화(Gemini 3.7 Flash 기본 탑재), Task Runtime 상태 머신(자율 복구 및 수동 개입), Windows DPAPI 암호화 로컬 보안 볼트(Vault), 그리고 벡터 DB / 시맨틱 기억 엔진 및 프라이버시 데이터 컨트롤을 구축했습니다.
 
-### 12.2 주요 구현 내역
+### 15.2 주요 구현 내역
 1. **독립 네이티브 자식 브라우저(HWND) 도킹 사이드패널 (`simple_app.c`, `simple_life_span_handler.c`, `ui/sidepanel.*`)**:
    - **완전한 구조적 분리 (Architecture Decoupling)**: 듀얼 탭 분할 기능(`tabs[i].is_split`)에 종속되어 있던 구조에서 탈피하여, 메인 윈도우 레벨의 독립된 네이티브 자식 브라우저(`win_ctx->sidepanel_browser`, `BROWSER_TYPE_SIDEPANEL`)로 상시 도킹.
    - **탭 전환 시 대화 지속성 (Session Persistence)**: 상단 탭을 전환하거나 새 탭을 열어도 우측 AI 사이드패널이 닫히거나 초기화되지 않고, 진행 중인 대화 내역 및 실행 상태가 끊김 없이 유지됨.
@@ -380,7 +466,7 @@ cmake --build c:\projects\lite_browser\cef_binary_149.0.6\build --config Debug -
 8. **초경량 자체 완결형 네이티브 제어 아키텍처 (Simplicity First)**:
    - 외부 런타임 의존성(Rust/Node/Python) 없이 C 백엔드(`simple_handler.c`)와 자바스크립트 런타임(`ui/task_runtime.js`) 간의 직접 IPC로 브라우저 조작/추출을 100% 자체 완결 처리.
 
-### 12.3 주요 소스 파일 맵
+### 15.3 주요 소스 파일 맵
 - [`ui/content_extractor.js`](file:///c:/projects/lite_browser/ui/content_extractor.js): 5단계 본문 파싱 & 마크다운 추출기 모듈
 - [`ui/sidepanel.html`](file:///c:/projects/lite_browser/ui/sidepanel.html): AI 사이드패널 UI 마크업
 - [`ui/sidepanel.css`](file:///c:/projects/lite_browser/ui/sidepanel.css): 사이드패널 다크/라이트 테마 및 타임라인 스타일
@@ -388,26 +474,26 @@ cmake --build c:\projects\lite_browser\cef_binary_149.0.6\build --config Debug -
 - [`ui/ai_providers.js`](file:///c:/projects/lite_browser/ui/ai_providers.js): Gemini 3.7 Flash, OpenAI, Claude, Ollama 다형성 Provider
 - [`ui/task_runtime.js`](file:///c:/projects/lite_browser/ui/task_runtime.js): 상태 머신 및 DOM 액션 실행 엔진
 - [`ui/agent_memory.js`](file:///c:/projects/lite_browser/ui/agent_memory.js): IndexedDB 벡터 메모리 & 데이터 컨트롤
-- [`simple_vault.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_vault.c) & [`simple_vault.h`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_vault.h): Windows DPAPI 로컬 보안 볼트
+- [`simple_vault.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_vault.c) & [`simple_vault.h`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_vault.h): Windows DPAPI 로컬 보안 볼트
 
-### 12.4 빌드 및 패키징 검증
+### 15.4 빌드 및 패키징 검증
 - Debug 빌드: `Debug/lite_browser.exe` 컴파일 및 링크 성공 (Exit code 0).
 - Release 빌드: `Release/lite_browser.exe` 컴파일 및 링크 성공 (Exit code 0).
 - NSIS 인스톨러: [`LiteBrowserInstaller.exe`](file:///c:/projects/lite_browser/LiteBrowserInstaller.exe) 패키징 완료 (Exit code 0).
 
 ---
 
-## 13. 결제/인증 팝업창 및 링크 새 탭 분기 제어 (Popup Window vs New Tab Routing)
+## 16. 결제/인증 팝업창 및 링크 새 탭 분기 제어 (Popup Window vs New Tab Routing)
 
-### 13.1 개요
+### 16.1 개요
 네이버페이, 토스, PG 결제창, 소셜 로그인(OAuth) 등 웹페이지 스크립트가 명시적인 팝업 창(`window.open` 규격/치수 지정)을 요청할 때와 사용자가 일반 링크를 새 탭으로 열 때를 정확히 분기하여, 결제/인증 팝업은 부모 창(`window.opener`)과의 상호작용이 유지되는 독립 네이티브 팝업 창으로 띄우고 일반 링크는 LiteBrowser의 새 탭으로 열리도록 라우팅 로직을 고도화했습니다.
 
-### 13.2 주요 구현 내역
-1. **명시적 팝업 윈도우 판별 엔진 ([`simple_life_span_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_life_span_handler.c))**:
+### 16.2 주요 구현 내역
+1. **명시적 팝업 윈도우 판별 엔진 ([`simple_life_span_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_life_span_handler.c))**:
    - `life_span_handler_on_before_popup` 콜백에서 `target_disposition` (`CEF_WOD_NEW_POPUP`, `CEF_WOD_NEW_PICTURE_IN_PICTURE`) 및 `popupFeatures` (`isPopup`, `widthSet`, `heightSet`)를 종합 평가하여 실제 팝업 창 요청인지 검사.
    - **팝업 창인 경우**: 전용 클라이언트 핸들러(`BROWSER_TYPE_POPUP`)를 할당하고 `return 0`(false)을 반환하여 CEF가 표준 OS 윈도우 프레임 및 원래 요청된 가로/세로 크기를 가진 독립 팝업 윈도우를 생성하도록 허용 (`window.opener` 통신 및 `window.close()` 정상 동작 보장).
    - **일반 링크/새 탭인 경우**: `target_url`을 추출하여 LiteBrowser 메인 창의 새 탭(`CreateNewTab(win_ctx, target_url_str)`)으로 개설하고 `return 1`을 반환하여 불필요한 크로미움 기본 새 창 생성을 차단.
-2. **독립 팝업 브라우저 생명주기 분리 ([`simple_handler.h`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_handler.h), [`simple_display_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_display_handler.c), [`simple_load_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_load_handler.c))**:
+2. **독립 팝업 브라우저 생명주기 분리 ([`simple_handler.h`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.h), [`simple_display_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_display_handler.c), [`simple_load_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_load_handler.c))**:
    - `browser_type_t` 열거형에 `BROWSER_TYPE_POPUP`을 신설.
    - `on_after_created` 및 `on_before_close`에서 팝업 브라우저가 생성/종료될 때 메인 윈도우의 탭 배열(`win_ctx->tabs`) 슬롯을 덮어쓰거나 오염시키지 않도록 격리.
    - 팝업 브라우저의 타이틀/URL 변경이나 로딩 상태 변경 시 메인 윈도우의 탭 바 및 주소 표시창이 불필요하게 갱신되거나 활성 탭이 숨겨지는 부작용을 방지.
@@ -420,7 +506,7 @@ cmake --build c:\projects\lite_browser\cef_binary_149.0.6\build --config Debug -
    - `WM_SIZE`로 팝업 창 리사이즈에 반응하고, `on_title_change`에서 `SetWindowTextW`를 통해 한글 깨짐 없이 `[웹페이지 제목] - Lite Browser` 형식으로 타이틀바 자동 동기화 및 브라우저 아이콘 주입.
    - **팝업 비동기 종료 격리 및 안전 파괴 (`WM_USER_CLOSE_POPUP`)**: 팝업 창이 닫힐 때 `on_before_close` 콜백 내부에서 `DestroyWindow`를 동기 호출하지 않고 비동기 메시지(`WM_USER_CLOSE_POPUP`)로 분리 전송하여, CEF의 내부 윈도우 객체 정리 루틴과 Win32 윈도우 파괴 순서 충돌(`this->window_ == nullptr` 액세스 위반)을 완벽 차단. 또한 `life_span_handler_do_close`에서 `return 1`을 반환하여 메인 윈도우로의 `WM_CLOSE` 전파를 원천 방지.
 
-### 13.3 팝업창 종료 시 강제 종료/크래시 원인 분석 및 해결 요약
+### 16.3 팝업창 종료 시 강제 종료/크래시 원인 분석 및 해결 요약
 
 | 문제 지점 | 기존 원인 | 해결 코드 및 아키텍처 개선 |
 | :--- | :--- | :--- |
@@ -430,12 +516,12 @@ cmake --build c:\projects\lite_browser\cef_binary_149.0.6\build --config Debug -
 
 ---
 
-## 14. 구독(Subscription) 기반 AI 에이전트 연결 및 DPAPI 토큰 볼트 시스템 (Subscription-based AI Agent Connection)
+## 17. 구독(Subscription) 기반 AI 에이전트 연결 및 DPAPI 토큰 볼트 시스템 (Subscription-based AI Agent Connection)
 
-### 14.1 개요
+### 17.1 개요
 OpenAI ChatGPT Plus/Team/Pro, Claude Pro, Google Gemini Advanced(Workspace) 등 기존 AI 유료 구독 계정을 보유한 사용자가 토큰당 별도 API 비용을 지불하지 않고도 브라우저 AI 에이전트를 자유롭게 활용할 수 있도록 지원하는 **구독 기반 인증 및 Windows DPAPI 보안 토큰 볼트 시스템**을 구축했습니다.
 
-### 14.2 주요 구현 아키텍처
+### 17.2 주요 구현 아키텍처
 
 ```mermaid
 flowchart TD
@@ -468,14 +554,14 @@ flowchart TD
     BearerAuth -.->|필요시 백업| FallbackAuth
 ```
 
-### 14.3 핵심 구현 내역
+### 17.3 핵심 구현 내역
 
-1. **Windows DPAPI 암호화 로컬 보안 볼트 ([`simple_auth.h`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_auth.h), [`simple_auth.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_auth.c))**:
+1. **Windows DPAPI 암호화 로컬 보안 볼트 ([`simple_auth.h`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_auth.h), [`simple_auth.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_auth.c))**:
    - Windows OS 수준 암호화 API인 `CryptProtectData` 및 `CryptUnprotectData`를 적용하여 `%USERPROFILE%\.lite-browser\ai_auth.dat`에 Provider별 세션 토큰을 안전하게 암호화 보관.
    - 평문 토큰은 프론트엔드나 디스크에 영구 노출되지 않으며, AI 호출 시점에만 C 백엔드에서 메모리로 복호화되어 베어러 헤더로 주입됨.
    - `auth_init`, `auth_save_session`, `auth_delete_session`, `auth_is_connected`, `auth_get_status_json`, `auth_get_token` 등 스레드 안전(CriticalSection) C API 제공.
 
-2. **웹 로그인 세션 자동 감지 & 실시간 동기화 ([`simple_load_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_load_handler.c), [`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_handler.c))**:
+2. **웹 로그인 세션 자동 감지 & 실시간 동기화 ([`simple_load_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_load_handler.c), [`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c))**:
    - `gemini.google.com`, `chatgpt.com`, `claude.ai` 로그인 완료 시, C 로드 핸들러(`load_handler_on_loading_state_change`)가 계정 이메일과 활성 세션을 감지하여 볼트에 자동 등록.
    - 세션 변경 시 메인 창의 독립 사이드패널 브라우저(`win_ctx->sidepanel_browser`)에 실시간 이벤트(`window.onAuthUpdated`)를 브로드캐스트하여 설정 화면이 즉시 `✅ 연결됨 (user@email.com)`으로 동기화됨.
 
@@ -488,27 +574,27 @@ flowchart TD
    - `GeminiProvider`, `OpenAIProvider`, `AnthropicProvider`에 `authType: 'subscription'` 모드를 확장.
    - 구독 모드에서 OAuth 토큰(`ya29...`) 존재 시 베어러 토큰으로 우선 통신하며, API Key가 함께 입력되어 있는 경우 안정적인 통신을 위해 자동으로 폴백 연동되어 401 오류를 원천 방지.
 
-### 14.4 주요 소스 파일 맵
-- [`cef_binary_149.0.6/tests/cefsimple_capi/simple_auth.h`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_auth.h): DPAPI 인증 볼트 헤더 인터페이스
-- [`cef_binary_149.0.6/tests/cefsimple_capi/simple_auth.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_auth.c): DPAPI 암호화/복호화 및 파일 IO 구현
-- [`cef_binary_149.0.6/tests/cefsimple_capi/simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_handler.c): `auth-*` IPC 라우팅 및 사이드패널 브로드캐스트
-- [`cef_binary_149.0.6/tests/cefsimple_capi/simple_load_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_load_handler.c): 웹 로그인 세션 자동 감지기
+### 17.4 주요 소스 파일 맵
+- [`cef_binary_151.3.24/tests/cefsimple_capi/simple_auth.h`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_auth.h): DPAPI 인증 볼트 헤더 인터페이스
+- [`cef_binary_151.3.24/tests/cefsimple_capi/simple_auth.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_auth.c): DPAPI 암호화/복호화 및 파일 IO 구현
+- [`cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c): `auth-*` IPC 라우팅 및 사이드패널 브로드캐스트
+- [`cef_binary_151.3.24/tests/cefsimple_capi/simple_load_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_load_handler.c): 웹 로그인 세션 자동 감지기
 - [`ui/ai_providers.js`](file:///c:/projects/lite_browser/ui/ai_providers.js): `authType === 'subscription'` Bearer 어댑터 및 폴백
 - [`ui/sidepanel.html`](file:///c:/projects/lite_browser/ui/sidepanel.html): 구독/API Key 하이브리드 UI
 - [`ui/sidepanel.css`](file:///c:/projects/lite_browser/ui/sidepanel.css): 활성 탭 하이라이트 및 카드 스타일
 - [`ui/sidepanel.js`](file:///c:/projects/lite_browser/ui/sidepanel.js): 인증 모드 오케스트레이션 및 상태 동기화
 
-### 14.5 빌드 검증
+### 17.5 빌드 검증
 - Debug 빌드: `Debug/lite_browser.exe` 및 `Debug/lite_browser.dll` 컴파일 완료 (Exit code 0).
 
 ---
 
-## 15. 크롬/엣지 스타일 탭 비율 균등 축소 및 가려짐 방지 시스템 (Chrome/Edge Style Proportional Tab Auto-Shrinking)
+## 18. 크롬/엣지 스타일 탭 비율 균등 축소 및 가려짐 방지 시스템 (Chrome/Edge Style Proportional Tab Auto-Shrinking)
 
-### 15.1 개요
+### 18.1 개요
 사용자가 탭을 지속적으로 생성하여 탭의 개수가 많아질 때 탭이 화면 밖으로 넘쳐 가려지는 문제를 해결하기 위해, 별도의 가로 스크롤바나 복잡한 드롭다운 없이 **모든 탭의 가로 크기를 균등한 비율로 자동 축소(`flex: 1 1 0px`, `min-width: 32px`, `max-width: 200px`)**하여 모든 탭이 한 화면에 온전히 노출되도록 개선했습니다.
 
-### 15.2 핵심 구현 내역
+### 18.2 핵심 구현 내역
 1. **균등 비율 자동 축소 플렉스 레이아웃 ([`ui/style.css`](file:///c:/projects/lite_browser/ui/style.css))**:
    - `.tabs-container`에 `min-width: 0; overflow: hidden;`을 부여하고, `.tab`에 `flex: 1 1 0px` 및 `min-width: 32px`를 적용하여 탭이 1개일 때부터 40개 이상일 때까지 화면 너비에 맞춰 모든 탭이 동일한 폭으로 매끄럽게 축소/확장되도록 구현.
    - 탭 제목(`tab-title`)에 `text-overflow: ellipsis`를 적용하여 좁아진 폭에 맞춰 텍스트가 자연스럽게 말줄임 처리됨.
@@ -518,18 +604,18 @@ flowchart TD
 3. **전체 제목 툴팁 호버 지원 ([`ui/app.js`](file:///c:/projects/lite_browser/ui/app.js))**:
    - 탭이 아무리 좁아져 제목이 말줄임표로 줄어들더라도, 마우스 커서를 올리면 `tabEl.title` 툴팁을 통해 전체 페이지 제목을 즉시 확인할 수 있도록 설정.
 
-### 15.3 빌드 및 검증
+### 18.3 빌드 및 검증
 - Debug 빌드 완료: `Debug/lite_browser.exe` (Exit code 0).
 
 ---
 
-## 16. 크롬/엣지 스타일 탭 파비콘(Favicon) & 회전 로딩 스피너 엔진 (Tab Favicon & Loading Spinner Engine)
+## 19. 크롬/엣지 스타일 탭 파비콘(Favicon) & 회전 로딩 스피너 엔진 (Tab Favicon & Loading Spinner Engine)
 
-### 16.1 개요
+### 19.1 개요
 엣지/크롬 브라우저와 동일하게 네이버(`www.naver.com`) 접속 시 녹색 N 파비콘과 같이 **웹사이트 고유 파비콘 아이콘과 페이지 제목이 함께 노출**되며, 페이지 로딩 중에는 파비콘 자리에 **회전 로딩 스피너(Loading Spinner)**가 실시간으로 표시되도록 구현했습니다.
 
-### 16.2 핵심 구현 내역
-1. **CEF Display Handler 파비콘 변경 콜백 연동 ([`simple_display_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_display_handler.c), [`browser_context.h`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/browser_context.h))**:
+### 19.2 핵심 구현 내역
+1. **CEF Display Handler 파비콘 변경 콜백 연동 ([`simple_display_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_display_handler.c), [`browser_context.h`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/browser_context.h))**:
    - `display_handler_on_favicon_urlchange` 콜백을 등록하여 웹페이지가 전송하는 `icon_urls` 목록 중 첫 번째 파비콘 URL을 추출하고 해당 탭의 `favicon_url`에 자동 저장.
 2. **다단계 지능형 파비콘 폴백 및 내부 페이지 전용 아이콘 ([`ui/app.js`](file:///c:/projects/lite_browser/ui/app.js))**:
    - **내부 페이지 전용 아이콘**: 북마크 관리자(`lite://favorites` ➔ 황금색 별), 다운로드 관리자(`lite://downloads` ➔ 파란색 다운로드 화살표), AI 사이드패널(`lite://sidepanel` ➔ 보라색 스파클) 전용 고해상도 SVG 아이콘 노출.
@@ -537,23 +623,23 @@ flowchart TD
      1. CEF가 추출한 웹페이지 원본 `favicon_url`
      2. Google Favicon 캐시 서비스 (`https://www.google.com/s2/favicons?domain=...&sz=32`)
      3. 미지원/오류 시 기본 회색 지구본 SVG 아이콘 (`onerror` 자동 전환)
-3. **페이지 로딩 중 실시간 회전 스피너 ([`simple_load_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_load_handler.c), [`ui/style.css`](file:///c:/projects/lite_browser/ui/style.css))**:
+3. **페이지 로딩 중 실시간 회전 스피너 ([`simple_load_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_load_handler.c), [`ui/style.css`](file:///c:/projects/lite_browser/ui/style.css))**:
    - `load_handler_on_loading_state_change`에서 `isLoading` 상태 변경 시 탭 목록을 즉시 갱신(`update_ui_tabs`).
    - 로딩 중(`tab.is_loading == 1`)일 때는 파비콘 대신 파란색 원형 회전 스피너(`.tab-spinner`)를 렌더링하고, 로딩 완료 시 파비콘으로 매끄럽게 전환.
 4. **극소형 탭 중앙 정렬**:
    - 탭이 수십 개로 늘어나 45px 이하로 좁아지더라도 파비콘/스피너가 탭 정중앙에 배치되어 어떤 웹사이트인지 시각적으로 즉시 식별 가능.
 
-### 16.3 빌드 및 검증
+### 19.3 빌드 및 검증
 - Debug 빌드 완료: `Debug/lite_browser.exe` (Exit code 0).
 
 ---
 
-## 17. 로컬 Ollama AI Provider 도구 호출(Tool Calling) 및 CoT 스트리밍 시스템 (Local Ollama Tool Calling & CoT Streaming)
+## 20. 로컬 Ollama AI Provider 도구 호출(Tool Calling) 및 CoT 스트리밍 시스템 (Local Ollama Tool Calling & CoT Streaming)
 
-### 17.1 개요
+### 20.1 개요
 Google Gemini, OpenAI, Claude와 같은 클라우드 모델뿐만 아니라, **Ollama를 통해 로컬에서 구동되는 오픈소스 LLM(Gemma4, Llama 3.2, Qwen 등)도 LiteBrowser의 브라우저 제어 도구를 100% 자율적으로 호출**하여 현재 페이지 URL 확인, 본문 요약, 클릭, 텍스트 입력을 수행할 수 있도록 엔드포인트 연동을 고도화했습니다.
 
-### 17.2 핵심 구현 내역
+### 20.2 핵심 구현 내역
 1. **Ollama 표준 `tools` 스키마 연동 및 스트리밍 파싱 ([`ui/ai_providers.js`](file:///c:/projects/lite_browser/ui/ai_providers.js))**:
    - `OllamaProvider.chatStream`에 `tools` 배열을 Ollama `/api/chat` 표준 JSON 스키마로 변환하여 전송.
    - 스트림 수신 시 `message.tool_calls`를 실시간 파싱하여 `task_runtime.js`의 브라우저 제어 루틴으로 즉시 디스패치.
@@ -562,105 +648,105 @@ Google Gemini, OpenAI, Claude와 같은 클라우드 모델뿐만 아니라, **O
 3. **추론(Thinking CoT) 태그 파싱**:
    - DeepSeek-R1, Gemma 등 모델의 `<think>...</think>` 사고 과정을 실시간으로 분리하여 사이드패널 아코디언 UI에 스트리밍 렌더링.
 
-### 17.3 빌드 및 검증
+### 20.3 빌드 및 검증
 - Debug 빌드 완료: `Debug/lite_browser.exe` (Exit code 0).
 
 ---
 
-## 18. 윈도우 최소화/복원 시 AI 사이드패널 너비 보존 시스템 (Sidepanel Width Preservation on Minimize/Restore)
+## 21. 윈도우 최소화/복원 시 AI 사이드패널 너비 보존 시스템 (Sidepanel Width Preservation on Minimize/Restore)
 
-### 18.1 개요
+### 21.1 개요
 브라우저 윈도우를 최소화(Minimize)했다가 다시 최대화/복원할 때, 사이드패널의 가로 너비가 비정상적으로 좁아져 내부 내용이 가려지던 문제를 해결했습니다.
 
-### 18.2 핵심 구현 내역
-1. **`SIZE_MINIMIZED` 가드 조건 추가 ([`simple_app.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_app.c))**:
+### 21.2 핵심 구현 내역
+1. **`SIZE_MINIMIZED` 가드 조건 추가 ([`simple_app.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c))**:
    - Windows의 `WM_SIZE` 메시지 중 `wParam == SIZE_MINIMIZED` 또는 `width <= 0`인 시점에는 레이아웃 재계산과 너비 덮어쓰기를 즉시 중단(`return 0`).
 2. **사용자 지정 너비(`sidepanel_width`) 불변성 보장**:
    - `WM_SIZE` 중 단순 화면 렌더링 시에는 사용자가 설정하거나 드래그 조절한 `win_ctx->sidepanel_width`를 손상시키지 않고 안전하게 보존하도록 수정.
 
-### 18.3 빌드 및 검증
+### 21.3 빌드 및 검증
 - Debug 빌드 완료: `Debug/lite_browser.exe` (Exit code 0).
 
 ---
 
-## 19. 실시간 브라우저 동적 갱신 규칙 및 유튜브/커뮤니티 댓글 추출 엔진 (Real-time Agent Refresh & Comments Extractor)
+## 22. 실시간 브라우저 동적 갱신 규칙 및 유튜브/커뮤니티 댓글 추출 엔진 (Real-time Agent Refresh & Comments Extractor)
 
-### 19.1 개요
+### 22.1 개요
 사용자가 대화 도중 웹사이트를 이동하거나 탭을 변경할 때 과거 정적 대화 기록에 갇히지 않고 항상 **실시간 최신 브라우저 화면을 새로 확인**하도록 에이전트 행동 프레임워크를 고도화하고, **유튜브 시청자 댓글 및 웹 커뮤니티의 상세 댓글 전문을 누락 없이 마크다운으로 추출**하여 LLM에 전달하는 파이프라인을 구축했습니다.
 
-### 19.2 핵심 구현 내역
+### 22.2 핵심 구현 내역
 1. **동적 브라우징 실시간 갱신 규칙 및 중복 호출 가드 ([`ui/sidepanel.js`](file:///c:/projects/lite_browser/ui/sidepanel.js))**:
    - `baseDirective`를 통해 *"브라우저는 동적 환경이므로 이전 대화에 의존하지 말고 새 질문마다 반드시 최신 `browser_get_page_content`를 호출하라"*는 수칙 주입.
    - 단일 턴 내에서 `executedToolsInTurn` 가드를 도입하여, 도구 실행 후 중복 호출을 차단하고 즉시 최종 텍스트 답변을 작성하도록 유도.
 2. **조회 vs 조작 분리 원칙 (Unprompted Action Guard)**:
    - 사용자가 "URL 알려줘", "요약해줘" 등 단순 조회성 질문을 했을 때 검색창이나 버튼이 화면에 보여도 자의적으로 `browser_type_text`/`browser_click_element`를 수행하지 않도록 엄격한 가드 적용.
-3. **유튜브 및 웹페이지 댓글 추출기 탑재 ([`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_handler.c), [`ui/content_extractor.js`](file:///c:/projects/lite_browser/ui/content_extractor.js))**:
+3. **유튜브 및 웹페이지 댓글 추출기 탑재 ([`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c), [`ui/content_extractor.js`](file:///c:/projects/lite_browser/ui/content_extractor.js))**:
    - 노이즈 필터 목록에서 `.comment`, `.comments`, `#comments`를 완전히 제거하여 댓글 유실 방지.
    - 유튜브 영상 페이지(`youtube.com/watch`) 접속 시 영상 제목, 채널명, 설명과 함께 **로딩된 시청자 댓글 목록 (작성자, 댓글 전문, 좋아요 수)**을 구조화된 마크다운(`### 💬 시청자 댓글 목록`)으로 추출하여 LLM에 주입.
 
-### 19.3 빌드 및 검증
+### 22.3 빌드 및 검증
 - Debug 빌드 완료: `Debug/lite_browser.exe` (Exit code 0).
 
 ---
 
-## 20. AI 웹 세션 감지 무한 로딩 루프 및 브라우저 프리징 해결 (AI Session Detection Loop Prevention)
+## 23. AI 웹 세션 감지 무한 로딩 루프 및 브라우저 프리징 해결 (AI Session Detection Loop Prevention)
 
-### 20.1 개요
+### 23.1 개요
 Google Gemini(`gemini.google.com`), Claude(`claude.ai`), ChatGPT(`chatgpt.com`) 등 웹 기반 AI 서비스에 접속할 때 페이지가 무한으로 로딩을 시도하고 브라우저 동작이 심각하게 느려지며 프리징되는 현상을 분석하고, 1회성 가드를 적용하여 문제를 완벽히 해결했습니다.
 
-### 20.2 문제 원인 분석 (Root Cause)
+### 23.2 문제 원인 분석 (Root Cause)
 1. **AI 자동 세션 감지 스크립트의 무한 재진입**:
-   - [`simple_load_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_load_handler.c)의 `load_handler_on_loading_state_change` 콜백에서 로딩 완료(`!isLoading`) 시점마다 AI 사이드패널 연동용 세션 감지 스크립트(`detect_js`)를 주입했습니다.
+   - [`simple_load_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_load_handler.c)의 `load_handler_on_loading_state_change` 콜백에서 로딩 완료(`!isLoading`) 시점마다 AI 사이드패널 연동용 세션 감지 스크립트(`detect_js`)를 주입했습니다.
    - 스크립트가 세션 정보를 백엔드로 전달하기 위해 `window.location.href = 'http://ui-action/auth-save-session?provider=...'`를 실행하여 탑레벨 내비게이션을 시도함.
 2. **내비게이션 취소와 무한 루프**:
    - C 백엔드의 `on_before_browse`에서 `http://ui-action/` 요청을 가로채고 페이지 이동을 취소(`return 1`)함.
    - 내비게이션 취소로 인해 페이지 로딩 상태가 다시 변경(`isLoading=0`)되면서, `detect_js`가 **다시 주입 및 실행**되는 무한 루프(Infinite Loop) 발생.
    - 매 초 수십~수백 번의 스크립트 실행, 파일 I/O(`auth_save_session`), UI 탭 및 주소창 동기화 IPC가 폭주하여 CPU 점유율 100% 및 브라우저 프리징 유발.
 
-### 20.3 핵심 구현 내역
-1. **1회성 실행 가드(`window.__lite_auth_attempted`) 적용 ([`simple_load_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_load_handler.c))**:
+### 23.3 핵심 구현 내역
+1. **1회성 실행 가드(`window.__lite_auth_attempted`) 적용 ([`simple_load_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_load_handler.c))**:
    - Gemini, ChatGPT, Claude 감지 스크립트 최상단에 `if (window.__lite_auth_attempted) return; window.__lite_auth_attempted = true;` 가드를 추가.
    - 첫 번째 감지 이후 동일 페이지/SPA 내비게이션에서는 스크립트가 즉시 반환되도록 하여 **무한 로딩 및 중복 내비게이션 루프를 100% 원천 차단**.
    - 사용자가 다른 페이지로 이동하여 창 컨텍스트가 새로고침되면 가드가 자연스럽게 리셋되어 신규 세션도 정상 감지 지원.
 
-### 20.4 빌드 및 검증
+### 23.4 빌드 및 검증
 - **빌드 결과**: Debug 빌드 정상 완료 (`Debug/lite_browser.exe`, Exit code 0).
 - **동작 검증**: `https://claude.ai/` 및 `https://gemini.google.com/app?pli=1` 접속 시 무한 로딩 및 랙 없이 즉각적이고 안정적으로 로딩 완료 확인.
 
 ---
 
-## 21. 웹 콘텐츠 자동 포커스 및 Ctrl+F 찾기 단축키 포워딩 엔진 (Web Content Auto Focus & Ctrl+F Forwarding Engine)
+## 24. 웹 콘텐츠 자동 포커스 및 Ctrl+F 찾기 단축키 포워딩 엔진 (Web Content Auto Focus & Ctrl+F Forwarding Engine)
 
-### 21.1 개요
+### 24.1 개요
 페이지 로딩 후 `Ctrl+F` 키를 눌렀을 때 마우스로 본문 영역을 직접 클릭하기 전까지 찾기 창이 뜨지 않던 문제를 분석하고, **페이지 로드 완료, 탭 전환, 윈도우 활성화 시 웹 콘텐츠 영역으로 포커스를 자동 전달**하며, 상단 UI 영역에 포커스가 머물러 있는 상태에서도 **`Ctrl+F` 단축키를 감지하여 웹 콘텐츠 영역으로 즉시 전달/합성 실행**하는 시스템을 구현했습니다.
 
-### 21.2 문제 원인 분석 (Root Cause)
+### 24.2 문제 원인 분석 (Root Cause)
 1. **상단 UI 브라우저로의 포커스 잔류**:
    - LiteBrowser는 상단 툴바/탭바(`ui_browser`)와 본문 영역(`content_browser`)이 별도의 자식 HWND 브라우저로 분리되어 있습니다.
    - 창 활성화 또는 페이지 로딩 완료 시 포커스를 웹 본문 HWND로 명시적으로 넘겨주지 않아, 키보드 입력 및 단축키 포커스가 상단 UI 영역에 머물러 있었습니다.
 2. **UI 브라우저 내 단축키 미처리**:
    - 상단 UI 브라우저에서 `Ctrl+F` 키가 눌려도 이를 본문 브라우저로 전달하는 브릿지 라우팅이 없어 무반응 상태가 되었습니다.
 
-### 21.3 핵심 구현 내역
-1. **페이지 로드 완료 시 자동 포커스 ([`simple_load_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_load_handler.c))**:
+### 24.3 핵심 구현 내역
+1. **페이지 로드 완료 시 자동 포커스 ([`simple_load_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_load_handler.c))**:
    - `load_handler_on_loading_state_change`에서 `isLoading == 0` 시점에 활성 탭의 HWND 및 CEF 호스트로 `SetFocus(hwnd)` 및 `host->set_focus(host, 1)`를 호출하여 웹페이지 영역으로 포커스를 자동 이동.
-2. **탭 전환 및 창 활성화 포커스 연동 ([`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_handler.c), [`simple_app.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_app.c))**:
+2. **탭 전환 및 창 활성화 포커스 연동 ([`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c), [`simple_app.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c))**:
    - `switch-tab` 및 메인 윈도우 프로시저의 `WM_SETFOCUS`, `WM_ACTIVATE` 메시지 수신 시 현재 활성 탭의 `hwnd`로 포커스를 자동 설정.
-3. **UI 영역 `Ctrl+F` 감지 및 C 백엔드 키 이벤트 합성 포워딩 ([`ui/app.js`](file:///c:/projects/lite_browser/ui/app.js), [`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_149.0.6/tests/cefsimple_capi/simple_handler.c))**:
+3. **UI 영역 `Ctrl+F` 감지 및 C 백엔드 키 이벤트 합성 포워딩 ([`ui/app.js`](file:///c:/projects/lite_browser/ui/app.js), [`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c))**:
    - UI 브라우저의 키다운 리스너에서 주소창 입력 중이 아닐 때 `Ctrl+F`가 눌리면 `http://ui-action/trigger-find`를 호출.
    - C 백엔드에서 활성 탭 본문 영역으로 포커스를 즉시 전환한 후 `host->send_key_event`로 `Ctrl+F` 키 이벤트를 합성 전송하여 Chromium 내장 찾기 창이 즉각 실행되도록 처리.
 
-### 21.4 빌드 및 검증
+### 24.4 빌드 및 검증
 - **빌드 결과**: Debug 빌드 완료 (`Debug/lite_browser.exe`, Exit code 0).
 
 ---
 
-## 22. Chromium 151 / CEF 151.3.24 최신 릴리스 업그레이드 및 인스톨러 패키징 (CEF 151.3.24 Upgrade)
+## 25. Chromium 151 / CEF 151.3.24 최신 릴리스 업그레이드 및 인스톨러 패키징 (CEF 151.3.24 Upgrade)
 
-### 22.1 개요
+### 25.1 개요
 기존 `cef_binary_149.0.6` 기반으로 개발 및 패키징되던 LiteBrowser를 최신 Chromium 151 기반의 **CEF 151.3.24 (`151.3.24+g2384915+chromium-151.0.7922.174`)** 버전으로 전면 업그레이드하고, Debug/Release 빌드 및 NSIS 인스톨러 패키징을 완료했습니다.
 
-### 22.2 핵심 작업 내역
+### 25.2 핵심 작업 내역
 1. **신규 바이너리 배포판 디렉토리 구축 (`cef_binary_151.3.24`)**:
    - `c:\projects\cef-latest\cef_binary`를 `c:\projects\lite_browser\cef_binary_151.3.24`로 복제 구성하여 기존 149 버전과의 격리 및 롤백 안전성 확보.
 2. **커스텀 C 백엔드 소스 및 리소스 일괄 이관**:
@@ -676,19 +762,19 @@ Google Gemini(`gemini.google.com`), Claude(`claude.ai`), ChatGPT(`chatgpt.com`) 
    - `installer.nsi`의 파일 참조 경로를 `cef_binary_151.3.24` Release 빌드로 갱신.
    - `makensis installer.nsi` 실행하여 최종 설치 프로그램 `LiteBrowserInstaller.exe` (182 MB) 생성 완료.
 
-### 22.3 빌드 및 검증
+### 25.3 빌드 및 검증
 - **Debug 바이너리**: [`cef_binary_151.3.24/build/tests/cefsimple_capi/Debug/lite_browser.exe`](file:///c:/projects/lite_browser/cef_binary_151.3.24/build/tests/cefsimple_capi/Debug/lite_browser.exe) (Exit code 0)
 - **Release 바이너리**: [`cef_binary_151.3.24/build/tests/cefsimple_capi/Release/lite_browser.exe`](file:///c:/projects/lite_browser/cef_binary_151.3.24/build/tests/cefsimple_capi/Release/lite_browser.exe) (Exit code 0)
 - **인스톨러 패키지**: [`c:\projects\lite_browser\LiteBrowserInstaller.exe`](file:///c:/projects/lite_browser/LiteBrowserInstaller.exe) (Exit code 0)
 
 ---
 
-## 23. CEF 151.1+ Installer (하이브리드 번들 모드 + explicit 롤백) 도입 (CEF Installer Integration)
+## 26. CEF 151.1+ Installer (하이브리드 번들 모드 + explicit 롤백) 도입 (CEF Installer Integration)
 
-### 23.1 개요
+### 26.1 개요
 CEF 151.1+ 릴리스부터 지원되는 **CEF Installer Library** 아키텍처를 LiteBrowser에 본격 도입했습니다. 인스톨러 배포 시 기본 런타임 번들링(`bundled_cef_path`)을 유지하여 100% 오프라인 기동을 보장하는 동시에, 사용자 PC의 공유 CEF 설치 디렉토리(`%LocalAppData%\CEF\`) 및 CDN 자동 업데이트, 그리고 연속 크래시 시 이전 호환 버전으로 안전하게 롤백되는 **`launch_health: explicit`** 메커니즘을 적용했습니다.
 
-### 23.2 핵심 적용 내역
+### 26.2 핵심 적용 내역
 1. **`CEF_INSTALLER_CONFIG` 리소스 구성 파일 작성 ([`cef_installer_config.json`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/win/cef_installer_config.json))**:
    - `appid`: `"F83A2E79-4B51-41C2-8B1C-9D72A6E9E4F0"`
    - `vmin`: `"151.1"`
@@ -704,12 +790,12 @@ CEF 151.1+ 릴리스부터 지원되는 **CEF Installer Library** 아키텍처�
 
 ---
 
-## 24. CEF 런타임 CDN 자동 업데이트 (`/cef-update` & `RunInstaller` 비동기 API) 구현 (Runtime Auto-Update Pipeline)
+## 27. CEF 런타임 CDN 자동 업데이트 (`/cef-update` & `RunInstaller` 비동기 API) 구현 (Runtime Auto-Update Pipeline)
 
-### 24.1 개요
+### 27.1 개요
 사용자 PC(`%LocalAppData%\CEF\`)에서 앱 재빌드/재설치 없이도 최신 CEF 런타임 보안 패치 및 엔진을 CDN으로부터 직접 자동 수신 및 갱신할 수 있도록 **커맨드라인 옵션(`/cef-update`)** 및 **백엔드 `RunInstaller` 비동기 API 모듈과 UI 토스트 알림**을 구축했습니다.
 
-### 24.2 핵심 구현 내역
+### 27.2 핵심 구현 내역
 1. **`enable_explicit_modes: true` 활성화 ([`cef_installer_config.json`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/win/cef_installer_config.json))**:
    - 부트스트랩 Executable의 명시적 커맨드라인 모드를 활성화하여 `lite_browser.exe /cef-update`, `lite_browser.exe /cef-update /cef-background`, `lite_browser.exe /cef-uninstall` 명령 직접 실행 지원.
 2. **C 백엔드 비동기 인스톨러 모듈 구축 ([`simple_installer.h`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_installer.h), [`simple_installer.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_installer.c))**:
@@ -721,19 +807,19 @@ CEF 151.1+ 릴리스부터 지원되는 **CEF Installer Library** 아키텍처�
 4. **글로벌 UI 토스트 알림 컴포넌트 ([`ui/style.css`](file:///c:/projects/lite_browser/ui/style.css), [`ui/app.js`](file:///c:/projects/lite_browser/ui/app.js))**:
    - `window.showToast(message, type)` 구현: 업데이트 시작 시 `"CEF 런타임 최신 버전 확인 및 CDN 수신 중..."`, 완료 시 `"최신 CEF 런타임 수신 완료 (다음 실행 시 적용)"` 또는 `"이미 최신 CEF 런타임을 사용 중입니다."` 실시간 안내.
 
-### 24.3 빌드 및 검증
+### 27.3 빌드 및 검증
 - **Debug 빌드**: `Debug/lite_browser.exe` 컴파일 성공 (Exit code 0).
 - **Release 빌드**: `Release/lite_browser.exe` 컴파일 성공 (Exit code 0).
 - **인스톨러 패키지**: [`LiteBrowserInstaller.exe`](file:///c:/projects/lite_browser/LiteBrowserInstaller.exe) 생성 완료 (Exit code 0).
 
 ---
 
-## 25. CEF 151+ 기동 속도 및 초기 렌더링 성능 최적화 (Startup & Rendering Latency Optimization)
+## 28. CEF 151+ 기동 속도 및 초기 렌더링 성능 최적화 (Startup & Rendering Latency Optimization)
 
-### 25.1 개요
+### 28.1 개요
 CEF 149에서 CEF 151.3.24로 업그레이드한 이후 앱 실행부터 북마크 화면 로딩 완료까지 발생하던 빈 배경 노출 지연 현상을 정밀 분석하고, **시작 URL 직결(Double Navigation 제거)**, **`bundled_cef_path` 즉시 탐색 경로 최적화**, **사이드패널 지연 생성(Lazy Initialization)** 등 3중 최적화를 적용하여 초기 기동 속도를 대폭 단축했습니다.
 
-### 25.2 핵심 최적화 내역
+### 28.2 핵심 최적화 내역
 1. **시작 URL 직결 로딩 (`ResolveManagerPath` 추가) ([`simple_app.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c))**:
    - 기존에는 1번 탭 시작 시 미등록 스킴(`lite://favorites`)으로 진입 후 `on_before_browse`에서 내비게이션을 취소(`return 1`)하고 2차 `load_url`을 호출하던 **이중 내비게이션(Double Navigation)** 병목이 있었습니다.
    - `ResolveManagerPath` 헬퍼를 통해 기동 시 로컬 파일 URL(`file:///.../ui/manager.html`)을 1차 시작 URL로 직접 주입하여 불필요한 Speculative Navigation 파기 및 재생성 지연을 100% 제거했습니다.
@@ -743,18 +829,18 @@ CEF 149에서 CEF 151.3.24로 업그레이드한 이후 앱 실행부터 북마�
    - 기동 시 숨겨진 상태인 사이드패널 브라우저를 즉시 생성하지 않고, 사용자가 사이드패널 토글 버튼(`toggle-ai-sidepanel`)을 처음 누를 때 `CreateSidepanelBrowser(win_ctx)`를 통해 1회성으로 생성하도록 변경했습니다.
    - 기동 시 3개 자식 브라우저(UI + 북마크 + 사이드패널)가 동시에 렌더러/GPU 리소스를 점유하던 병목을 완화하여 **초기 렌더링 부하를 33% 이상 절감**했습니다.
 
-### 25.3 빌드 및 검증
+### 28.3 빌드 및 검증
 - **Debug 빌드**: `cmake --build c:\projects\lite_browser\cef_binary_151.3.24\build --config Debug --target cefsimple_capi` (Exit code 0).
 - **Release 빌드**: `cmake --build c:\projects\lite_browser\cef_binary_151.3.24\build --config Release --target cefsimple_capi` (Exit code 0).
 
 ---
 
-## 26. 0px 완전 밀착 심리스(Seamless) 브라우저 레이아웃 및 갭 제거 (0px Gap Seamless Full-Width Layout)
+## 29. 0px 완전 밀착 심리스(Seamless) 브라우저 레이아웃 및 갭 제거 (0px Gap Seamless Full-Width Layout)
 
-### 26.1 개요
+### 29.1 개요
 메인 윈도우와 내부 자식 브라우저(상단 툴바, 웹 본문 탭, 듀얼 분할 화면, AI 사이드패널) 사이에 존재하던 OS 외곽 프레임과 1~3px 여백(Inset Gap)을 제거하고, **모든 자식 브라우저 윈도우가 메인 윈도우 및 인접 브라우저와 0px로 완벽히 밀착(Full-Width Seamless Fitting)**되도록 레이아웃 엔진을 개선했습니다.
 
-### 26.2 핵심 개선 내역
+### 29.2 핵심 개선 내역
 1. **Windows 비클라이언트 영역(OS 프레임) 0px 제거 (`WM_NCCALCSIZE`, `WM_NCHITTEST`) ([`simple_app.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c))**:
    - `WM_NCCALCSIZE`에서 `return 0`을 처리하여 `WS_THICKFRAME` 스타일에 의해 창 외곽에 기본으로 생성되던 8px 두께의 흰색 Non-Client 프레임을 완전히 제거.
    - `WM_NCHITTEST`를 통해 창 외곽 8px 모서리에서 네이티브 리사이즈 조절 커서(↔, ↕, ⤢)가 정상 작동하도록 바인딩.
@@ -768,19 +854,19 @@ CEF 149에서 CEF 151.3.24로 업그레이드한 이후 앱 실행부터 북마�
 4. **AI 사이드패널 0px 밀착 ([`simple_app.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c))**:
    - 본문 영역과 사이드패널 사이의 4px 리사이즈 바를 제외한 상/하/우측 여백을 0px로 밀착 배치.
 
-### 26.3 빌드 및 검증
+### 29.3 빌드 및 검증
 - **CEF 151.3.24 Debug 빌드**: 성공 (Exit code 0).
 
 ---
 
-## 27. 자식 윈도우 서브클래싱 기반 리사이즈 커서 복원 및 분할 화면 직각 사각형 선택 보더 구현
+## 30. 자식 윈도우 서브클래싱 기반 리사이즈 커서 복원 및 분할 화면 직각 사각형 선택 보더 구현
 
-### 27.1 개요
+### 30.1 개요
 0px 보더리스 레이아웃 도입 후 발생한 2가지 사이드 이펙트를 완벽히 해결했습니다:
 1. 자식 브라우저 윈도우가 메인 윈도우를 덮어 외곽 마우스 히트테스트를 가로채던 문제를 **자식 윈도우 서브클래싱(`HTTRANSPARENT`)** 기법으로 해결하여 0px 밀착 상태에서도 네이티브 리사이즈 커서(`↔`, `↕`, `⤢`) 및 창 크기 조절이 정상 작동하도록 복원했습니다.
 2. 듀얼 분할(Split) 모드에서 어떤 화면이 활성화되었는지 한눈에 식별할 수 있도록 **Edge 분할 화면 스타일의 직각 사각형 2px 블루 선택 보더(`RGB(0, 102, 204)`)**와 비활성 연회색 보더(`RGB(220, 220, 225)`)를 정밀 복원했습니다. (단일 탭 모드는 0px 완전 밀착 유지)
 
-### 27.2 핵심 개선 내역
+### 30.2 핵심 개선 내역
 1. **자식 윈도우 서브클래싱 (`ChildBorderSubclassProc` / `SubclassAllChildWindows`) ([`browser_context.h`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/browser_context.h), [`simple_app.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c), [`simple_life_span_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_life_span_handler.c))**:
    - `commctrl.h`의 `SetWindowSubclass`를 활용하여 상단 툴바, 웹 본문 탭, 분할 화면, AI 사이드패널 등 모든 자식 브라우저 윈도우에 서브클래스 프로시저를 등록.
    - 창 가장자리 6px 영역에서 `WM_NCHITTEST` 수신 시 `HTTRANSPARENT`를 반환하여 메인 윈도우로 히트테스트를 투과 전달.
@@ -790,17 +876,17 @@ CEF 149에서 CEF 151.3.24로 업그레이드한 이후 앱 실행부터 북마�
    - `WM_PAINT`에서 활성화된 화면에 2px 블루 직각 사각형 보더(`RGB(0, 102, 204)`), 비활성 화면에 2px 연회색 보더(`RGB(220, 220, 225)`)를 드로잉하여 시인성을 극대화.
    - 단일 탭 화면은 0px 완전 밀착 풀위드 렌더링 유지.
 
-### 27.3 빌드 및 검증
+### 30.3 빌드 및 검증
 - **CEF 151.3.24 Debug 빌드**: 성공 (Exit code 0).
 
 ---
 
-## 28. 앱 아이콘 투명화, 타일 영역 극대화 및 탐색기 소형 뷰(16x16/24x24) 리소스 최적화
+## 31. 앱 아이콘 투명화, 타일 영역 극대화 및 탐색기 소형 뷰(16x16/24x24) 리소스 최적화
 
-### 28.1 배경 및 개요
+### 31.1 배경 및 개요
 기존 앱 아이콘에 남아있던 불투명한 흰색 사각 여백(사방 42px)을 제거하고, 100% 알파 투명화(Transparent) 배경을 적용하며, 민트색 둥근 사각형(Squircle) 타일과 깃털/브라우저 그래픽이 캔버스 전체에 꽉 차도록 리마스터링했습니다. 아울러 파일 탐색기의 '작은 아이콘', '목록', '자세히' 보기 모드(16×16, 24×24)에서 구형 CEF 기본 창 아이콘이 표출되던 문제를 바이너리 PE 구조 분석을 통해 원인을 규명하고 리소스 주입 엔진을 업그레이드하여 완벽하게 해결했습니다.
 
-### 28.2 핵심 구현 및 최적화 내역
+### 31.2 핵심 구현 및 최적화 내역
 1. **외곽 흰색 여백 제거 및 배경 100% 알파 투명화 ([`cefsimple.ico`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/win/cefsimple.ico), [`small.ico`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/win/small.ico))**:
    - 256px 캔버스 중 172px만 차지하여 사방에 42px씩 남아있던 흰색 여백을 완전히 제거하고 100% 알파 투명화 처리.
    - 4~6%의 최소 안전 여백(236px 타일)을 적용하여 둥근 모서리가 잘리지 않으면서도 캔버스에 꽉 찬 시각적 실루엣을 구현.
@@ -815,7 +901,7 @@ CEF 149에서 CEF 151.3.24로 업그레이드한 이후 앱 실행부터 북마�
    - **삼중 표준 그룹 동시 주입**: `120 (IDI_CEFSIMPLE)`, `121 (IDI_SMALL)`, `32512 (IDI_APPLICATION)` 3개 그룹 모두에 신규 5개 프레임 아이콘을 동시 매핑하여 탐색기가 어떤 그룹을 요청하든 100% 동일한 신규 아이콘이 나오도록 보장.
    - **탐색기 셸 캐시 즉시 갱신**: 주입 직후 `SHChangeNotify(SHCNE_ASSOCCHANGED, ...)`를 호출하여 Windows 셸이 새 아이콘 캐시를 즉각 갱신하도록 트리거.
 
-### 28.3 검증 결과
+### 31.3 검증 결과
 1. **바이너리 PE 리소스 디렉터리 트리 검증**:
    - `lite_browser.exe` PE 분석 결과 구형 `RT_ICON 6, 7, 8`이 완전히 제거되고 `RT_ICON 1..5` 및 `RT_GROUP_ICON 120, 121, 32512`가 정상 연결됨을 확인.
 2. **Windows Shell API (`PrivateExtractIconsW`) 추출 검증**:
@@ -825,12 +911,12 @@ CEF 149에서 CEF 151.3.24로 업그레이드한 이후 앱 실행부터 북마�
 
 ---
 
-## 29. 인스톨러 PE 메타데이터 보강 및 Authenticode 코드 서명(Code Signing) 파이프라인 구축 (SmartScreen & Antivirus Trust Hardening)
+## 32. 인스톨러 PE 메타데이터 보강 및 Authenticode 코드 서명(Code Signing) 파이프라인 구축 (SmartScreen & Antivirus Trust Hardening)
 
-### 29.1 배경 및 개요
+### 32.1 배경 및 개요
 Microsoft Edge 브라우저(SmartScreen)의 *"일반적으로 다운로드되지 않습니다"* 경고 및 시만텍 엔드포인트 프로텍션(SEP Insight / SONAR)의 실행 차단 문제를 근본적으로 해결하기 위해, 인스톨러 바이너리에 **정식 PE 버전 및 제작사 메타데이터**를 내장하고 **Authenticode 디지털 코드 서명(SHA-256 + DigiCert RFC 3161 타임스탬프)** 파이프라인을 구축했습니다.
 
-### 29.2 핵심 구현 내역
+### 32.2 핵심 구현 내역
 1. **인스톨러 PE 메타데이터 주입 ([`installer.nsi`](file:///c:/projects/lite_browser/installer.nsi))**:
    - `VIProductVersion "1.0.0.0"`, `VIFileVersion "1.0.0.0"`
    - `VIAddVersionKey`:
@@ -848,7 +934,7 @@ Microsoft Edge 브라우저(SmartScreen)의 *"일반적으로 다운로드되지
 4. **SmartScreen & 시만텍 평판 등록 프로세스 수립**:
    - Microsoft 보안 인텔리전스(WDSI) 및 시만텍 SymSubmit을 통한 공식 오탐(False Positive) 해제 가이드 마련.
 
-### 29.3 검증 결과
+### 32.3 검증 결과
 - **인스톨러 컴파일**: `makensis c:\projects\lite_browser\installer.nsi` 성공 (`Exit code 0`).
 - **전자서명 적용**: `powershell scripts\sign_installer.ps1` 실행 완료 (`Exit code 0`).
 - **서명 검증 ([`LiteBrowserInstaller.exe`](file:///c:/projects/lite_browser/LiteBrowserInstaller.exe))**:
@@ -857,12 +943,12 @@ Microsoft Edge 브라우저(SmartScreen)의 *"일반적으로 다운로드되지
 
 ---
 
-## 30. Windows 기본 브라우저 연동 및 `lite://settings` 모던 설정 대시보드 구축 (Default Browser & Settings Page)
+## 33. Windows 기본 브라우저 연동 및 `lite://settings` 모던 설정 대시보드 구축 (Default Browser & Settings Page)
 
-### 30.1 배경 및 개요
+### 33.1 배경 및 개요
 사용자가 Lite Browser 설치 후 브라우저 내에서 간편하게 Windows의 기본 브라우저(Default Browser)로 등록 및 전환하고 현재 상태를 확인할 수 있도록, **`lite://settings` 전용 설정 탭 페이지**, **3점 메뉴 연동**, **Windows Registry Capabilities/ProgID 등록 엔진**, 그리고 **인스톨러 시스템 레지스트리 자동 등록**을 구축했습니다.
 
-### 30.2 핵심 구현 내역
+### 33.2 핵심 구현 내역
 1. **Windows 기본 브라우저 백엔드 모듈 신설 ([`default_browser.h`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/default_browser.h), [`default_browser.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/default_browser.c))**:
    - **기본 브라우저 상태 판별 (`default_browser_is_default`)**: `HKCU\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice` 레지스트리의 `ProgId`를 조회하여 현재 기본 브라우저가 `LiteBrowserHTML`인지 실시간 판별.
    - **기능 및 ProgID 자동 등록 (`default_browser_register_capabilities`)**:
@@ -892,7 +978,7 @@ Microsoft Edge 브라우저(SmartScreen)의 *"일반적으로 다운로드되지
    - 설치(`Install`) 시 Windows 시스템 전역(`HKLM\Software\Clients\StartMenuInternet\LiteBrowser` 및 `Capabilities`, `RegisteredApplications`)에 자동 등록.
    - 제거(`Uninstall`) 시 관련 레지스트리 키 완전 삭제 처리.
 
-### 30.3 검증 결과
+### 33.3 검증 결과
 - **CEF 151.3.24 Debug 빌드**: `cmake --build ... --config Debug --target cefsimple_capi` 성공 (`Exit code 0`).
 - **CEF 151.3.24 Release 빌드**: `cmake --build ... --config Release --target cefsimple_capi` 성공 (`Exit code 0`).
 - **코드 서명 및 무결성 아키텍처**: CEF Bootstrap의 `IsUnsignedOrValid()` 검증 규칙에 따라 내부 실행 파일(`lite_browser.exe`, `lite_browser.dll`)은 무서명(Unsigned) 상태를 유지하여 자체 서명으로 인한 `__debugbreak()`(0x800B0109) 크래시를 방지하고, 최종 배포 인스톨러(`LiteBrowserInstaller.exe`)에 Authenticode SHA-256 서명 및 DigiCert RFC 3161 공인 타임스탬프를 적용.
@@ -901,12 +987,12 @@ Microsoft Edge 브라우저(SmartScreen)의 *"일반적으로 다운로드되지
 
 ---
 
-## 31. 성능 및 메모리 최적화 모드(실행 속도 우선 vs 메모리 절감 우선) 및 빌드 타임 ThinLTO 플래그 도입 (Performance & Memory Optimization Pipeline)
+## 34. 성능 및 메모리 최적화 모드(실행 속도 우선 vs 메모리 절감 우선) 및 빌드 타임 ThinLTO 플래그 도입 (Performance & Memory Optimization Pipeline)
 
-### 31.1 개요
+### 34.1 개요
 사용자 환경 및 PC 사양에 맞춰 Lite Browser의 동작 모드를 선택할 수 있도록, **`lite://settings` 설정 화면에 "실행 속도 우선"과 "메모리 절감 우선" 2가지 최적화 옵션**을 신설하고, Chromium 엔진 기동 시 적합한 커맨드라인 스위치 주입, 설정 영속화, 원클릭 클린 재시작, 그리고 CMake 빌드 타임 ThinLTO(LTCG)/최대 속도 최적화를 구현했습니다.
 
-### 31.2 핵심 구현 내역
+### 34.2 핵심 구현 내역
 1. **런타임 최적화 백엔드 엔진 신설 ([`simple_optimization.h`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_optimization.h), [`simple_optimization.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_optimization.c))**:
    - **실행 속도 우선 (Speed Priority - 기본값)**:
      - `--enable-gpu`: GPU 하드웨어 가속 강제 활성화.
@@ -934,21 +1020,21 @@ Microsoft Edge 브라우저(SmartScreen)의 *"일반적으로 다운로드되지
      - 링크: `/LTCG` (링크 타임 코드 생성 - ThinLTO 링크 단계 대응), `/OPT:REF`, `/OPT:ICF`.
    - 제너레이터 표현식(`$<$<CONFIG:Release>:...>`)을 적용하여 개발용 Debug 모드는 기존의 빠른 증분 컴파일 및 디버깅 환경 유지.
 
-### 31.3 검증 결과
+### 34.3 검증 결과
 - **Debug 빌드**: `cmake --build build --config Debug --target cefsimple_capi` 성공 (`Exit code 0`).
 - **Release 빌드**: `cmake --build build --config Release --target cefsimple_capi` 성공 (`Exit code 0`, LTCG 최적화 적용).
 
 ---
 
-## 32. 윈도우 탐색기 다중 해상도(16~256px) 투명 앱 아이콘 및 셸 리소스 자동 주입 파이프라인 고도화 (Transparent Multi-Resolution Icon Pipeline)
+## 35. 윈도우 탐색기 다중 해상도(16~256px) 투명 앱 아이콘 및 셸 리소스 자동 주입 파이프라인 고도화 (Transparent Multi-Resolution Icon Pipeline)
 
-### 32.1 배경 및 문제 분석
+### 35.1 배경 및 문제 분석
 1. **흰색 불투명 배경 및 테두리 문제**:
    - 기존 앱 아이콘에 흰색 테두리와 불투명 흰색 배경이 포함되어 있어, Windows 다크 모드 작업 표시줄, 바탕화면, 탐색기 등에서 배경색과 어우러지지 못하고 시각적 이질감을 발생시킴.
 2. **탐색기 보기 모드별 저해상도 아이콘 누락**:
    - Windows 파일 탐색기에서 보기 모드를 "작은 아이콘", "목록", "자세히" 등으로 변경할 때 16x16, 24x24 해상도의 셸 아이콘 리소스가 누락되어 구형 CEF 기본 아이콘으로 fallback되거나 깨져 보이는 현상 발생.
 
-### 32.2 핵심 구현 내역
+### 35.2 핵심 구현 내역
 1. **투명 배경 RGBA 및 꽉 찬 그래픽 에셋 생성**:
    - 불투명 흰색 배경을 완전 투명화(Alpha = 0) 처리하고, 불필요한 패딩 여백을 제거하여 메인 브라우저 심볼이 아이콘 캔버스 전체에 꽉 차도록 최적화된 256x256 원본 에셋 제작.
 2. **다중 해상도(16, 24, 32, 48, 256px) 통합 ICO 번들링**:
@@ -963,18 +1049,18 @@ Microsoft Edge 브라우저(SmartScreen)의 *"일반적으로 다운로드되지
    - 레거시 잔여 아이콘 리소스(RT_ICON 6, 7, 8)를 안전하게 삭제하여 리소스 중복 충돌 방지.
    - 주입 완료 후 Win32 `SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, NULL, NULL)`를 호출하여 재부팅이나 로그오프 없이도 Windows 셸 아이콘 캐시를 즉각 갱신.
 
-### 32.3 검증 결과
+### 35.3 검증 결과
 - 파일 탐색기에서 "아주 큰 아이콘", "큰 아이콘", "보통 아이콘", "작은 아이콘", "목록", "자세히" 모든 보기 모드에서 흰색 테두리 없이 투명 배경의 선명한 신규 아이콘이 완벽하게 렌더링됨을 확인.
 
 ---
 
-## 33. 차세대 벤토 그리드(Bento Grid) 테마 시스템, 다크/라이트 모드 실시간 토글 및 Win32 네이티브 동기화 (Bento Grid Theme & Win32 Dark Mode Sync)
+## 36. 차세대 벤토 그리드(Bento Grid) 테마 시스템, 다크/라이트 모드 실시간 토글 및 Win32 네이티브 동기화 (Bento Grid Theme & Win32 Dark Mode Sync)
 
-### 33.1 배경 및 목적
+### 36.1 배경 및 목적
 - 기존 웹 UI(`ui/`)의 단일 테마 한계와 다크 모드 미지원 문제를 극복하고, 가독성과 정보 밀도를 극대화한 모던 카드 기반 **벤토 그리드(Bento Grid)** 디자인을 전면 적용.
 - 설정 화면에서 사용자가 원하는 테마(라이트/다크/시스템 모드)를 자유롭게 선택할 수 있는 실시간 토글 환경을 구축하고, 네이티브 C CAPI 윈도우 배경 및 DWM 타이틀바까지 흰색 깜빡임(White Flash) 없이 완벽히 동기화.
 
-### 33.2 핵심 구현 내역
+### 36.2 핵심 구현 내역
 1. **글로벌 디자인 토큰 체계 구축 ([`ui/style.css`](file:///c:/projects/lite_browser/ui/style.css))**:
    - `:root`(라이트 모드)와 `[data-theme="dark"]`(다크 모드) 선택자 기반으로 체계적인 CSS 변수 시스템 정의:
      - 배경: `--bg-app`(전체 캔버스), `--bg-card`(벤토 카드 컨테이너), `--bg-card-subtle`(서브 영역), `--bg-card-hover`(호버 피드백)
@@ -1021,7 +1107,7 @@ Microsoft Edge 브라우저(SmartScreen)의 *"일반적으로 다운로드되지
 7. **Workspace Skill 및 영구 규칙(Rule) 보존**:
    - 향후 다른 테마나 아이콘으로 변경 시 동일한 절차를 밟을 수 있도록 [`.agents/skills/theme-and-icon-customization/SKILL.md`](file:///c:/projects/lite_browser/.agents/skills/theme-and-icon-customization/SKILL.md) 런북 스킬을 신설하고, [`AGENTS.md`](file:///c:/projects/lite_browser/AGENTS.md)에 핵심 불변 규칙(인라인 SVG 필수, 윈도우 생성 브러시 분기, 리스트 단일행 말줄임표)을 영구 등록.
 
-### 33.3 검증 결과
+### 36.3 검증 결과
 - **CEF 151.3.24 Debug 빌드**: `cmake --build ... --config Debug --target cefsimple_capi` 성공 (`Exit code 0`).
 - **테마 실시간 토글 검증**: 설정 페이지에서 라이트 모드 ↔ 다크 모드 전환 시 메인 창, 주소창, 옴니박스, 사이드패널, 북마크/다운로드 관리자 화면이 흰색 번쩍임 없이 실시간 동기화됨을 확인.
 - **텍스트 레이아웃 정돈 검증**: 북마크 및 다운로드 관리자에서 긴 텍스트 입력 시 레이아웃 깨짐 없이 단정한 단일행 말줄임표로 정렬 표출됨을 확인.
