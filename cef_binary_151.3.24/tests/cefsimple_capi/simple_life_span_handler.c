@@ -264,6 +264,24 @@ int CEF_CALLBACK life_span_handler_on_before_popup(
   simple_life_span_handler_t* handler = (simple_life_span_handler_t*)self;
   browser_window_t *win_ctx = handler->parent->window_ctx;
 
+  // Intercept password manager URL requests so they always open as tabs in Lite Browser instead of popups/separate windows
+  if (win_ctx && target_url && target_url->str && target_url->length > 0) {
+    cef_string_utf8_t url_utf8 = {};
+    cef_string_to_utf8(target_url->str, target_url->length, &url_utf8);
+    if (url_utf8.str) {
+      if (strstr(url_utf8.str, "password-manager") != NULL ||
+          strncmp(url_utf8.str, "lite://passwords", 16) == 0 ||
+          strncmp(url_utf8.str, "chrome://passwords", 18) == 0 ||
+          strncmp(url_utf8.str, "edge://passwords", 16) == 0) {
+        LogMsg("life_span_handler_on_before_popup: intercepted password manager -> CreateNewTab\n");
+        cef_string_utf8_clear(&url_utf8);
+        CreateNewTab(win_ctx, "chrome://password-manager/passwords");
+        return 1;
+      }
+      cef_string_utf8_clear(&url_utf8);
+    }
+  }
+
   int is_popup = 0;
   if (target_disposition == CEF_WOD_NEW_POPUP ||
       target_disposition == CEF_WOD_NEW_PICTURE_IN_PICTURE) {

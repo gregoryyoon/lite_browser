@@ -1101,6 +1101,18 @@ int CEF_CALLBACK request_handler_on_before_browse(
         cef_string_utf8_clear(&url_utf8);
         cef_string_userfree_free(url_userfree);
         return 1;
+      } else if (strncmp(url_utf8.str, "lite://passwords", 16) == 0 ||
+                 strncmp(url_utf8.str, "edge://passwords", 16) == 0 ||
+                 strncmp(url_utf8.str, "chrome://passwords", 18) == 0 ||
+                 strcmp(url_utf8.str, "chrome://password-manager") == 0 ||
+                 strcmp(url_utf8.str, "chrome://password-manager/") == 0) {
+        cef_string_t pm_url = {};
+        cef_string_from_ascii("chrome://password-manager/passwords", 34, &pm_url);
+        frame->load_url(frame, &pm_url);
+        cef_string_clear(&pm_url);
+        cef_string_utf8_clear(&url_utf8);
+        cef_string_userfree_free(url_userfree);
+        return 1;
       }
     }
 
@@ -1961,6 +1973,7 @@ int CEF_CALLBACK request_handler_on_before_browse(
             AppendMenuW(hMenu, MF_STRING, 1001, L"새 탭");
             AppendMenuW(hMenu, MF_STRING, 1002, L"새 창");
             AppendMenuW(hMenu, MF_STRING, 1008, L"다운로드 관리자 (Ctrl+J)");
+            AppendMenuW(hMenu, MF_STRING, 1011, L"비밀번호 관리자");
             AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
             AppendMenuW(hMenu, MF_STRING, 1003, L"인쇄...");
             AppendMenuW(hMenu, MF_STRING, 1004, L"개발자 도구 (Inspect)");
@@ -1979,6 +1992,8 @@ int CEF_CALLBACK request_handler_on_before_browse(
               create_browser_window("lite://favorites");
             } else if (cmd == 1008) {
               CreateNewTab(win_ctx, "lite://downloads");
+            } else if (cmd == 1011) {
+              CreateNewTab(win_ctx, "chrome://password-manager/passwords");
             } else if (cmd == 1009) {
               simple_installer_check_update_async(win_ctx);
             } else if (cmd == 1010) {
@@ -2779,7 +2794,14 @@ int CEF_CALLBACK request_handler_on_open_urlfrom_tab(
     }
 
     if (win_ctx->tab_count < MAX_TABS) {
-      CreateNewTab(win_ctx, target_url_str);
+      if (strstr(target_url_str, "password-manager") != NULL ||
+          strncmp(target_url_str, "lite://passwords", 16) == 0 ||
+          strncmp(target_url_str, "chrome://passwords", 18) == 0 ||
+          strncmp(target_url_str, "edge://passwords", 16) == 0) {
+        CreateNewTab(win_ctx, "chrome://password-manager/passwords");
+      } else {
+        CreateNewTab(win_ctx, target_url_str);
+      }
     }
   }
 

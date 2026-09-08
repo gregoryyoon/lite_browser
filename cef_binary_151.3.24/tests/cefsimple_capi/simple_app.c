@@ -1158,6 +1158,12 @@ browser_window_t* create_browser_window(const char* startup_url) {
                       strcmp(startup_url, "edge://favorites") == 0 ||
                       strcmp(startup_url, "chrome://favorites") == 0)) {
     ResolveManagerPath(&content_url);
+  } else if (startup_url && (strcmp(startup_url, "lite://passwords") == 0 ||
+                             strcmp(startup_url, "chrome://passwords") == 0 ||
+                             strcmp(startup_url, "edge://passwords") == 0 ||
+                             strcmp(startup_url, "chrome://password-manager") == 0 ||
+                             strcmp(startup_url, "chrome://password-manager/") == 0)) {
+    cef_string_from_ascii("chrome://password-manager/passwords", 34, &content_url);
   } else {
     cef_string_from_ascii(startup_url, strlen(startup_url), &content_url);
   }

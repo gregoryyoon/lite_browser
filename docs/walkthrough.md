@@ -1154,3 +1154,40 @@ Microsoft Edge 브라우저(SmartScreen)의 *"일반적으로 다운로드되지
 - **실제 동작 검증**:
   - 외부 애플리케이션(Outlook, Slack 등)에서 웹 링크 클릭 시 정상적으로 해당 URL로 바로 접속됨을 사용자 실기 테스트를 통해 검증 완료.
 
+---
+
+## 38. 비밀번호 관리자(`chrome://password-manager/passwords`) 탭 기반 페이지 통합 및 독립 팝업 창 차단 (Password Manager Tab Integration & Popup Interception)
+
+### 38.1 배경 및 문제 분석
+1. **순정 Chrome 스타일 독립 창 팝업 문제**:
+   - 웹사이트 로그인 후 비밀번호 저장 버블이나 자동완성 링크에서 "비밀번호 관리"를 실행하거나, `chrome://password-manager/passwords`로 이동할 때 Lite Browser의 미니멀 탭 시스템이 아닌 Chromium 기본 툴바/옴니박스를 포함한 Chrome 스타일의 새 윈도우 창이 별도로 뜨는 현상 발생.
+2. **원인 분석**:
+   - CEF는 부모 HWND(`parent_window`)가 지정되지 않고 `runtime_style == CEF_RUNTIME_STYLE_DEFAULT`인 독립 팝업 요청 시 자동으로 Chrome Runtime Style(순정 Chrome UI)로 창을 생성함.
+   - Lite Browser의 `request_handler_on_before_browse`에서 `favorites`, `downloads`, `settings`는 커스텀 내부 페이지로 가로채기(Interception) 처리가 되어 있었으나, `password-manager` 관련 URL은 가로채기 목록에 없어 Chromium 코어로 바이패스되었음.
+
+### 38.2 핵심 구현 내역
+1. **3점 메뉴 '비밀번호 관리자' 항목 신설 ([`cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c))**:
+   - 3점 메뉴 상단부 '다운로드 관리자 (Ctrl+J)' 바로 아래에 `비밀번호 관리자` (ID: `1011`) 메뉴 항목 추가.
+   - 클릭 시 `CreateNewTab(win_ctx, "chrome://password-manager/passwords")`를 호출하여 현재 활성 탭 바로 우측에 새 탭으로 즉시 오픈.
+
+2. **C API URL 인터셉션 및 정규화 ([`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c))**:
+   - **`request_handler_on_before_browse`**:
+     - `lite://passwords`, `chrome://passwords`, `edge://passwords`, `chrome://password-manager` (슬래시 유무 포함) 입력 시 `chrome://password-manager/passwords`로 자동 정규화하여 현재 탭 프레임에 로딩(`load_url`).
+   - **`request_handler_on_open_urlfrom_tab`**:
+     - 탭 열기 요청 시 비밀번호 관리자 관련 URL을 감지하여 `CreateNewTab(win_ctx, "chrome://password-manager/passwords")`로 안전하게 새 탭 삽입.
+
+3. **팝업 가로채기 방어 ([`cef_binary_151.3.24/tests/cefsimple_capi/simple_life_span_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_life_span_handler.c))**:
+   - **`life_span_handler_on_before_popup`**:
+     - Chromium 내부 자격 증명 버블이나 웹페이지 링크에서 팝업 생성을 시도할 때, `target_url`에 `password-manager` 또는 `passwords`가 포함되어 있으면 팝업 창 생성을 차단(`return 1`)하고 `CreateNewTab`으로 전달하여 독립 창 생성을 원천 방지.
+
+4. **스타트업 URL 매핑 보강 ([`cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c))**:
+   - 브라우저 기동 인자로 `lite://passwords` 등이 전달될 경우에도 `chrome://password-manager/passwords`로 즉시 정규화 해석되도록 스타트업 매핑 보강.
+
+### 38.3 빌드 및 검증 결과
+- **Debug 빌드**: `cmake --build build --config Debug --target cefsimple_capi` 성공 (`Exit code 0`).
+- **바이너리 생성**: `cef_binary_151.3.24\build\tests\cefsimple_capi\Debug\lite_browser.exe` 정상 컴파일 및 5개 규격 아이콘 리소스 자동 주입 완료.
+- **동작 검증**:
+  - 3점 메뉴에서 '비밀번호 관리자' 클릭 시 별도 창 없이 내부 자식 탭(`WS_CHILD`)으로 즉시 생성.
+  - 주소창에 `lite://passwords`, `chrome://passwords` 입력 시 `chrome://password-manager/passwords`로 현재 탭에서 매끄럽게 정규화 이동.
+
+
