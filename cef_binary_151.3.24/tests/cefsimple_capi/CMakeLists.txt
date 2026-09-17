@@ -33,6 +33,8 @@ set(CEFSIMPLE_CAPI_SRCS
   simple_views.h
   simple_optimization.c
   simple_optimization.h
+  simple_dialog_helper.c
+  simple_dialog_helper.h
   )
 set(CEFSIMPLE_CAPI_SRCS_LINUX
   cefsimple_linux.c

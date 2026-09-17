@@ -49,6 +49,7 @@ int GetUIHeightForWindow(HWND hwnd) {
 #include "tests/cefsimple_capi/simple_utils.h"
 #include "tests/cefsimple_capi/simple_views.h"
 #include "tests/cefsimple_capi/simple_optimization.h"
+#include "tests/cefsimple_capi/simple_dialog_helper.h"
 
 static void LogMsg(const char *format, ...) {
   FILE *f = fopen("C:\\projects\\lite_browser\\debug_c.txt", "a");
@@ -878,9 +879,13 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
     }
 
     SubclassAllChildWindows(hwnd);
+    simple_dialog_helper_reposition_open_dialogs(hwnd);
 
     return 0;
   }
+  case WM_MOVE:
+    simple_dialog_helper_reposition_open_dialogs(hwnd);
+    break;
   case WM_CLOSE:
     LogMsg("WM_CLOSE: hwnd = %p, win_ctx = %p\n", hwnd, win_ctx);
     DestroyWindow(hwnd);

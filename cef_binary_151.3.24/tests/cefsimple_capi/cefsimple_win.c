@@ -9,6 +9,7 @@
 #include "include/cef_sandbox_win.h"
 #include "tests/cefsimple_capi/simple_app.h"
 #include "tests/cefsimple_capi/simple_utils.h"
+#include "tests/cefsimple_capi/simple_dialog_helper.h"
 
 static int RunMain(HINSTANCE hInstance,
                    LPTSTR lpCmdLine,
@@ -110,7 +111,9 @@ static int RunMain(HINSTANCE hInstance,
 
   // Run the CEF message loop. This will block until cef_quit_message_loop() is
   // called.
+  simple_dialog_helper_init();
   cef_run_message_loop();
+  simple_dialog_helper_cleanup();
 
   // Shut down CEF.
   cef_shutdown();

@@ -1,6 +1,6 @@
 # Lite Browser 전체 기능 & 시스템 구현 보고서 (Walkthrough)
 
-본 문서는 **Lite Browser** 프로젝트의 빌드 및 실행 환경, CEF C API 아키텍처, 순수 Win32 + 이중 자식 브라우저 구조 및 전체 기능별 구현 내역(기본 언어 설정, 다중 탭 및 윈도우 관리, 차세대 북마크 & 지능형 주소창, 커스텀 아이콘 리소스 자동화 파이프라인, 다운로드 관리자, 듀얼 탭/창 분할 시스템, AI 에이전트 브라우저, 0px 심리스 레이아웃, 벤토 그리드 테마 등)을 통합하여 관리하는 전체 통합 기술 가이드입니다.
+본 문서는 **Lite Browser** 프로젝트의 빌드 및 실행 환경, CEF C API 아키텍처, 순수 Win32 + 이중 자식 브라우저 구조 및 전체 기능별 구현 내역(기본 언어 설정, 다중 탭 및 윈도우 관리, 차세대 북마크 & 지능형 주소창, 커스텀 아이콘 리소스 자동화 파이프라인, 다운로드 관리자, 듀얼 탭/창 분할 시스템, AI 에이전트 브라우저, 0px 심리스 레이아웃, 벤토 그리드 테마, 엣지 스타일 CEF 모달 다이얼로그 상단 중앙 정렬 등)을 통합하여 관리하는 전체 통합 기술 가이드입니다.
 
 ---
 
@@ -1236,6 +1236,47 @@ Microsoft Edge 브라우저(SmartScreen)의 *"일반적으로 다운로드되지
 ### 40.3 빌드 및 검증 결과
 - **Debug 빌드**: `cmake --build c:\projects\lite_browser\cef_binary_151.3.24\build --config Debug --target cefsimple_capi` 성공 (`Exit code 0`).
 - **바이너리 생성**: `cef_binary_151.3.24\build\tests\cefsimple_capi\Debug\lite_browser.exe` 정상 생성.
+
+---
+
+## 41. CEF Core 모달 다이얼로그 상단 중앙(Top-Center) 배치 시스템 (CEF Core Modal Dialog Top-Center Positioning)
+
+### 41.1 개요
+CEF core에서 브라우저 내부적으로 표시하는 모달 다이얼로그(사이트 새로고침/이탈 확인 `beforeunload`, JavaScript `alert`/`confirm`/`prompt`, HTTP 기본 인증 등)가 기본적으로 웹 콘텐츠 좌측 상단(`X ≈ 10~15px`)에 치우쳐 표시되던 현상을 해결했습니다. 마이크로 모듈 기반의 Win32 CBT 훅 및 서브클래싱 파이프라인을 구축하여, 엣지(Edge) 브라우저 스타일과 동일하게 **콘텐츠 영역 가로 중앙 상단(Top-Center, 상단 툴바 하단 0px 밀착)**으로 완벽하게 자동 재배치하도록 구현했습니다.
+
+### 41.2 핵심 아키텍처 및 구현 내역
+1. **마이크로 모듈 분리 (`simple_dialog_helper.h`, `simple_dialog_helper.c`)**:
+   - 단일 책임 원칙(SRP)에 따라 다이얼로그 가로채기 및 위치 계산 로직을 독립된 모듈로 모듈화했습니다.
+   - `simple_dialog_helper_init()` / `simple_dialog_helper_cleanup()`을 통해 수명 주기를 제어합니다.
+2. **Win32 `WH_CBT` 훅 기반 무지연 가로채기 (`CBTProc`)**:
+   - `SetWindowsHookEx(WH_CBT, CBTProc, NULL, GetCurrentThreadId())`를 설치하여 UI 스레드에서 생성되는 모든 윈도우를 실시간 모니터링합니다.
+   - `HCBT_CREATEWND` 및 `HCBT_ACTIVATE` 시점에 Chromium Views 팝업 위젯(`Chrome_WidgetWin_1` / `0`)을 감지하고, LiteBrowser의 `main_hwnd` 소유 팝업인 경우 즉시 `ModalDialogSubclassProc`를 등록합니다.
+3. **`WM_WINDOWPOSCHANGING` 좌표 보정 (Zero-Flicker Positioning)**:
+   - 다이얼로그 창이 화면에 렌더링되기 직전 전달되는 `WM_WINDOWPOSCHANGING` 메시지에서 `pos->cx`, `pos->cy`를 분석합니다.
+   - 대상 브라우저 창의 화면 좌표(`GetWindowRect`)를 획득하여 가로 중앙(`target_x = content_rect.left + (content_width - dialog_w) / 2`) 및 툴바 하단 0px 밀착(`target_y = content_rect.top`)으로 좌표를 실시간 보정하고 `SWP_NOMOVE` 플래그를 해제합니다.
+   - 윈도우가 처음 그려지는 순간부터 중앙 상단에 위치하므로 시각적 점프나 깜빡임(Flicker)이 일절 발생하지 않습니다.
+4. **듀얼 탭/스플릿 뷰(Dual Split View) 컨텍스트 완벽 지원**:
+   - 다이얼로그가 생성된 소유 창(Owner/Parent HWND)의 계층 구조를 추적하여, 해당 다이얼로그가 왼쪽 브라우저(`active_tab->hwnd`)에서 발생했는지 오른쪽 브라우저(`active_tab->right_hwnd`)에서 발생했는지를 정밀하게 판별합니다.
+   - 왼쪽 창에서 발생한 다이얼로그는 왼쪽 분할 영역의 가로 중앙 상단에, 오른쪽 창에서 발생한 다이얼로그는 오른쪽 분할 영역의 가로 중앙 상단에 각각 독립적으로 정렬됩니다.
+5. **창 이동 및 리사이즈 연동 (`WM_SIZE`, `WM_MOVE`)**:
+   - 메인 윈도우의 `WM_SIZE` 및 `WM_MOVE` 처리 시 `simple_dialog_helper_reposition_open_dialogs`를 호출하여, 모달 창이 열려 있는 상태에서 브라우저 창을 이동하거나 크기를 변경하더라도 항상 중앙 상단 위치를 안정적으로 유지합니다.
+6. **멀티 모니터 경계 보호 (Monitor Clamping)**:
+   - `MonitorFromRect` 및 `GetMonitorInfo`를 통해 현재 모니터 작업 영역(`rcWork`) 경계를 검사하여 창이 화면 밖으로 벗어나지 않도록 안전하게 클램핑합니다.
+
+### 41.3 관련 소스 코드
+- [`cef_binary_151.3.24/tests/cefsimple_capi/simple_dialog_helper.h`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_dialog_helper.h)
+- [`cef_binary_151.3.24/tests/cefsimple_capi/simple_dialog_helper.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_dialog_helper.c)
+- [`cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c)
+- [`cef_binary_151.3.24/tests/cefsimple_capi/cefsimple_win.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/cefsimple_win.c)
+- [`cef_binary_151.3.24/tests/cefsimple_capi/CMakeLists.txt`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/CMakeLists.txt)
+
+### 41.4 빌드 및 검증 결과
+- **디버그 빌드**: `cmake --build c:\projects\lite_browser\cef_binary_151.3.24\build --config Debug --target cefsimple_capi` 성공 (`Exit code 0`).
+- **바이너리 생성**: `cef_binary_151.3.24\build\tests\cefsimple_capi\Debug\lite_browser.exe` 및 `lite_browser.dll` 정상 갱신.
+- **실행 검증**:
+  - 단일 탭 모드에서 폼 입력 후 새로고침 시 엣지 브라우저와 동일하게 툴바 바로 아래 가로 중앙에 "사이트를 새로고침하시겠습니까?" 모달 다이얼로그 노출 확인.
+  - 듀얼 탭 스플릿 모드에서 왼쪽/오른쪽 창 각각의 분할 영역 중앙 상단 정렬 확인.
+
 
 
 
