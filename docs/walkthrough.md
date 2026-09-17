@@ -1215,4 +1215,27 @@ Microsoft Edge 브라우저(SmartScreen)의 *"일반적으로 다운로드되지
   - `download_bubble.partial_view_enabled` 및 `download.prompt_for_download` 설정 성공(`result=1`) 확인.
   - 브라우저 정상 기동 및 다운로드 완료 시 순정 부동 팝업이 100% 영구 차단되고 LiteBrowser 전용 툴바 프로그레스 링 & 완료 체크마크(`✓`)만 깔끔하게 동작함을 확인.
 
+---
+
+## 40. 탭 높이 10% 확대 및 툴바 다운로드 버튼 18px 규격화 (Tab Height & Download Icon Scaling)
+
+### 40.1 개요
+탭의 상/하 클릭 영역 안정성과 시각적 가독성을 개선하기 위해 탭 높이를 현재 대비 10% 확대(`30px` → `33px`)하고, 상단 탭바 및 윈도우 제어 버튼을 비례 조정했습니다. 아울러 툴바의 다운로드 관리자 대시보드 버튼 아이콘을 다른 모든 툴바 버튼과 동일한 18px 표준 규격으로 일치시켰습니다.
+
+### 40.2 핵심 구현 내역
+1. **탭 및 탭바 높이 확장 ([`ui/style.css`](file:///c:/projects/lite_browser/ui/style.css), [`cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c))**:
+   - 탭 (`.tab`): `30px` → `33px` (10% 확대, 폰트 12px 및 파비콘 16px 유지로 넉넉한 상/하 패딩 확보)
+   - 탭바 (`.tabs-bar`): `36px` → `40px` (상단 드래그 여백 및 창 제어 버튼 비율 최적화)
+   - 새 탭 추가 버튼 (`.tab-btn.add-tab`): `26px` → `28px`
+   - 우측 윈도우 제어 버튼 (`.win-control-btn`): `32px` → `36px`
+   - C 백엔드 툴바 높이 (`GetUIHeightForWindow`): `72px` → `76px` 및 사이드패널 스케일링 참조치(`76.0f`) 보정.
+2. **다운로드 버튼 아이콘 18px 표준 규격화 ([`ui/index.html`](file:///c:/projects/lite_browser/ui/index.html))**:
+   - 기존 원형 진행률 링(지름 30px) 안쪽의 넓은 여백을 활용하여 내부 화살표/트레이(`dl-icon-normal`) 및 완료 체크마크(`dl-icon-complete`) 좌표를 12px 축소 규격에서 **18px 규격**으로 확대.
+   - 인접한 북마크, AI 사이드패널, 분할화면 등 다른 모든 툴바 버튼들과 1:1 완벽한 시각적 균형(Visual Weight) 형성.
+
+### 40.3 빌드 및 검증 결과
+- **Debug 빌드**: `cmake --build c:\projects\lite_browser\cef_binary_151.3.24\build --config Debug --target cefsimple_capi` 성공 (`Exit code 0`).
+- **바이너리 생성**: `cef_binary_151.3.24\build\tests\cefsimple_capi\Debug\lite_browser.exe` 정상 생성.
+
+
 

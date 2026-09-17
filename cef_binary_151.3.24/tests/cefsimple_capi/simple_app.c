@@ -36,7 +36,7 @@ static void GetConfigFilePath(char* out_path, size_t max_len) {
 int GetUIHeightForWindow(HWND hwnd) {
   UINT dpi = GetDpiForWindow(hwnd);
   double scale = (double)dpi / 96.0;
-  return (int)(72.0 * scale);
+  return (int)(76.0 * scale);
 }
 #endif
 
@@ -731,8 +731,8 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
 
     if (win_ctx->show_sidepanel) {
       sp_splitter_w = 4;
-      int default_sp_w = (int)(380 * (ui_height / 72.0f));
-      int min_sp_w = (int)(320 * (ui_height / 72.0f));
+      int default_sp_w = (int)(380 * (ui_height / 76.0f));
+      int min_sp_w = (int)(320 * (ui_height / 76.0f));
       if (min_sp_w < 280) min_sp_w = 280;
 
       sp_w = (win_ctx->sidepanel_width > 0) ? win_ctx->sidepanel_width : default_sp_w;
@@ -990,7 +990,7 @@ void CreateSidepanelBrowser(browser_window_t* win_ctx) {
   int content_y = ui_height + 1;
   int content_h = height - content_y - 1;
 
-  int default_sp_w = (win_ctx->sidepanel_width > 0) ? win_ctx->sidepanel_width : (int)(380 * (ui_height / 72.0f));
+  int default_sp_w = (win_ctx->sidepanel_width > 0) ? win_ctx->sidepanel_width : (int)(380 * (ui_height / 76.0f));
 
   cef_browser_settings_t browser_settings = {};
   browser_settings.size = sizeof(cef_browser_settings_t);
@@ -1189,7 +1189,7 @@ browser_window_t* create_browser_window(const char* startup_url) {
   cef_string_clear(&content_url);
 
   // 3. Initialize Sidepanel state (Initially hidden & lazy loaded on demand)
-  int default_sp_w = (int)(380 * (ui_height / 72.0f));
+  int default_sp_w = (int)(380 * (ui_height / 76.0f));
   win_ctx->sidepanel_browser = NULL;
   win_ctx->sidepanel_hwnd = NULL;
   win_ctx->show_sidepanel = 0;
@@ -1304,7 +1304,7 @@ browser_window_t* create_browser_window_for_detached(cef_browser_t* detached_bro
   }
 
   // 3. Initialize Sidepanel state (Initially hidden & lazy loaded on demand)
-  int default_sp_w = (int)(380 * (ui_height / 72.0f));
+  int default_sp_w = (int)(380 * (ui_height / 76.0f));
   win_ctx->sidepanel_browser = NULL;
   win_ctx->sidepanel_hwnd = NULL;
   win_ctx->show_sidepanel = 0;
