@@ -893,6 +893,7 @@ let omniSelectedIndex = -1;
 let omniResults = [];
 let omniHistoryResults = [];
 let omniRawQuery = '';
+let isKeyboardNavigating = false;
 
 document.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('keydown', (e) => {
@@ -908,6 +909,12 @@ document.addEventListener('DOMContentLoaded', () => {
     } else if (e.ctrlKey && e.shiftKey && (e.key === 'a' || e.key === 'A')) {
       e.preventDefault();
       toggleAiSidepanel();
+    }
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (e.movementX !== 0 || e.movementY !== 0) {
+      isKeyboardNavigating = false;
     }
   });
 
@@ -1101,7 +1108,11 @@ function updateOmniSelection(newIndex) {
   if (!dropdown) return;
   const allItems = dropdown.querySelectorAll('.omni-item, .omni-google-item, .omni-history-item');
   allItems.forEach((el, idx) => {
-    el.classList.toggle('selected', idx === omniSelectedIndex);
+    const isSel = (idx === omniSelectedIndex);
+    el.classList.toggle('selected', isSel);
+    if (isSel) {
+      el.scrollIntoView({ block: 'nearest' });
+    }
   });
 }
 
@@ -1117,7 +1128,11 @@ function renderOmniboxDropdown() {
     const itemIndex = globalIndex++;
     const item = document.createElement('div');
     item.className = 'omni-item' + (itemIndex === omniSelectedIndex ? ' selected' : '');
-    item.addEventListener('mouseenter', () => updateOmniSelection(itemIndex));
+    item.addEventListener('mouseenter', () => {
+      if (!isKeyboardNavigating) {
+        updateOmniSelection(itemIndex);
+      }
+    });
     item.addEventListener('mousedown', (e) => e.preventDefault());
     item.addEventListener('click', (e) => {
       e.preventDefault();
@@ -1161,7 +1176,11 @@ function renderOmniboxDropdown() {
     const googleItemIndex = globalIndex++;
     const googleItem = document.createElement('div');
     googleItem.className = 'omni-google-item' + (omniSelectedIndex === googleItemIndex ? ' selected' : '');
-    googleItem.addEventListener('mouseenter', () => updateOmniSelection(googleItemIndex));
+    googleItem.addEventListener('mouseenter', () => {
+      if (!isKeyboardNavigating) {
+        updateOmniSelection(googleItemIndex);
+      }
+    });
     googleItem.addEventListener('mousedown', (e) => e.preventDefault());
     const searchUrl = 'https://www.google.com/search?q=' + encodeURIComponent(omniRawQuery);
     googleItem.addEventListener('click', (e) => {
@@ -1188,7 +1207,11 @@ function renderOmniboxDropdown() {
     const histItemIndex = globalIndex++;
     const histItem = document.createElement('div');
     histItem.className = 'omni-history-item' + (histItemIndex === omniSelectedIndex ? ' selected' : '');
-    histItem.addEventListener('mouseenter', () => updateOmniSelection(histItemIndex));
+    histItem.addEventListener('mouseenter', () => {
+      if (!isKeyboardNavigating) {
+        updateOmniSelection(histItemIndex);
+      }
+    });
     histItem.addEventListener('mousedown', (e) => e.preventDefault());
     histItem.addEventListener('click', (e) => {
       e.preventDefault();
@@ -1233,12 +1256,14 @@ function handleOmniboxKeydown(e) {
 
   if (e.key === 'ArrowDown') {
     e.preventDefault();
+    isKeyboardNavigating = true;
     omniSelectedIndex = (omniSelectedIndex + 1) % totalCount;
-    renderOmniboxDropdown();
+    updateOmniSelection(omniSelectedIndex);
   } else if (e.key === 'ArrowUp') {
     e.preventDefault();
+    isKeyboardNavigating = true;
     omniSelectedIndex = (omniSelectedIndex - 1 + totalCount) % totalCount;
-    renderOmniboxDropdown();
+    updateOmniSelection(omniSelectedIndex);
   } else if (e.key === 'Enter' && omniSelectedIndex >= 0) {
     e.preventDefault();
     const googleIndex = bookmarkCount;
@@ -1263,6 +1288,7 @@ function closeOmniboxDropdown() {
   const dropdown = document.getElementById('omnibox-dropdown');
   if (dropdown) dropdown.classList.add('hide');
   omniSelectedIndex = -1;
+  isKeyboardNavigating = false;
   closeAllPopups();
 }
 
