@@ -464,6 +464,19 @@ int CEF_CALLBACK life_span_handler_on_before_popup(
         return 1;
       }
 
+      if (win_ctx) {
+        if (win_ctx->ui_browser) {
+          cef_browser_host_t* ui_host = win_ctx->ui_browser->get_host(win_ctx->ui_browser);
+          if (ui_host) {
+            ui_host->set_focus(ui_host, 1);
+            ui_host->base.release(&ui_host->base);
+          }
+        }
+        if (win_ctx->ui_hwnd && IsWindow(win_ctx->ui_hwnd)) {
+          SetFocus(win_ctx->ui_hwnd);
+        }
+      }
+
       CreateNewTab(win_ctx, target_url_str);
       return 1;
     }

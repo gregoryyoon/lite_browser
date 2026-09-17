@@ -2567,6 +2567,20 @@ int CEF_CALLBACK request_handler_on_before_browse(
           if (found_idx != -1 && found_idx != win_ctx->active_tab_index) {
             for (int k = 0; k < win_ctx->tab_count; k++) {
               if (k != found_idx) {
+                if (win_ctx->tabs[k].browser) {
+                  cef_browser_host_t* prev_h = win_ctx->tabs[k].browser->get_host(win_ctx->tabs[k].browser);
+                  if (prev_h) {
+                    prev_h->set_focus(prev_h, 0);
+                    prev_h->base.release(&prev_h->base);
+                  }
+                }
+                if (win_ctx->tabs[k].right_browser) {
+                  cef_browser_host_t* prev_rh = win_ctx->tabs[k].right_browser->get_host(win_ctx->tabs[k].right_browser);
+                  if (prev_rh) {
+                    prev_rh->set_focus(prev_rh, 0);
+                    prev_rh->base.release(&prev_rh->base);
+                  }
+                }
                 if (win_ctx->tabs[k].hwnd) ShowWindow(win_ctx->tabs[k].hwnd, SW_HIDE);
                 if (win_ctx->tabs[k].right_hwnd) ShowWindow(win_ctx->tabs[k].right_hwnd, SW_HIDE);
               }
@@ -2575,8 +2589,8 @@ int CEF_CALLBACK request_handler_on_before_browse(
             win_ctx->active_tab_index = found_idx;
             win_ctx->tabs[found_idx].is_loaded = 1;
             if (win_ctx->tabs[found_idx].hwnd) {
-              ShowWindow(win_ctx->tabs[found_idx].hwnd, SW_SHOW);
-              SetFocus(win_ctx->tabs[found_idx].hwnd);
+              SetWindowPos(win_ctx->tabs[found_idx].hwnd, HWND_TOP, 0, 0, 0, 0,
+                           SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
               
               RECT rect;
               GetClientRect(win_ctx->main_hwnd, &rect);
@@ -2595,13 +2609,8 @@ int CEF_CALLBACK request_handler_on_before_browse(
         } else if (strcmp(action, "trigger-find") == 0) {
           if (win_ctx && win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
             tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
-            HWND target_hwnd = (active_tab->is_split && active_tab->active_split == 1 && active_tab->right_hwnd)
-                                   ? active_tab->right_hwnd : active_tab->hwnd;
             cef_browser_t* target_b = (active_tab->is_split && active_tab->active_split == 1 && active_tab->right_browser)
                                    ? active_tab->right_browser : active_tab->browser;
-            if (target_hwnd && IsWindowVisible(target_hwnd)) {
-              SetFocus(target_hwnd);
-            }
             if (target_b) {
               cef_browser_host_t* host = target_b->get_host(target_b);
               if (host) {
@@ -2794,6 +2803,17 @@ int CEF_CALLBACK request_handler_on_open_urlfrom_tab(
     }
 
     if (win_ctx->tab_count < MAX_TABS) {
+      if (win_ctx->ui_browser) {
+        cef_browser_host_t* ui_host = win_ctx->ui_browser->get_host(win_ctx->ui_browser);
+        if (ui_host) {
+          ui_host->set_focus(ui_host, 1);
+          ui_host->base.release(&ui_host->base);
+        }
+      }
+      if (win_ctx->ui_hwnd && IsWindow(win_ctx->ui_hwnd)) {
+        SetFocus(win_ctx->ui_hwnd);
+      }
+
       if (strstr(target_url_str, "password-manager") != NULL ||
           strncmp(target_url_str, "lite://passwords", 16) == 0 ||
           strncmp(target_url_str, "chrome://passwords", 18) == 0 ||

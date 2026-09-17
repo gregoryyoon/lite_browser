@@ -303,6 +303,13 @@ static LRESULT CALLBACK ChildBorderSubclassProc(
 
 static BOOL CALLBACK EnumAndSubclassChildren(HWND child, LPARAM lParam) {
   HWND main_hwnd = (HWND)lParam;
+  char class_name[64];
+  if (GetClassNameA(child, class_name, sizeof(class_name))) {
+    if (strncmp(class_name, "Chrome_RenderWidgetHostHWND", 27) == 0 ||
+        strncmp(class_name, "Chrome_WidgetWin_", 17) == 0) {
+      return TRUE;
+    }
+  }
   SetWindowSubclass(child, ChildBorderSubclassProc, 1001, (DWORD_PTR)main_hwnd);
   return TRUE;
 }
@@ -691,15 +698,13 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
   case WM_SETFOCUS:
   case WM_ACTIVATE:
   {
+    if (message == WM_ACTIVATE && LOWORD(wParam) == WA_INACTIVE) {
+      return 0;
+    }
     if (win_ctx && win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
       tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
-      HWND target_hwnd = (active_tab->is_split && active_tab->active_split == 1 && active_tab->right_hwnd)
-                             ? active_tab->right_hwnd : active_tab->hwnd;
       cef_browser_t* target_b = (active_tab->is_split && active_tab->active_split == 1 && active_tab->right_browser)
                              ? active_tab->right_browser : active_tab->browser;
-      if (target_hwnd && IsWindowVisible(target_hwnd)) {
-        SetFocus(target_hwnd);
-      }
       if (target_b) {
         cef_browser_host_t* host = target_b->get_host(target_b);
         if (host) {
