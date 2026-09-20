@@ -27,9 +27,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const geminiKeyInput = document.getElementById('gemini-key');
   const geminiModelSelect = document.getElementById('gemini-model');
   const openaiKeyInput = document.getElementById('openai-key');
-  const openaiModelInput = document.getElementById('openai-model');
+  const openaiModelSelect = document.getElementById('openai-model');
   const anthropicKeyInput = document.getElementById('anthropic-key');
-  const anthropicModelInput = document.getElementById('anthropic-model');
+  const anthropicModelSelect = document.getElementById('anthropic-model');
   const ollamaUrlInput = document.getElementById('ollama-url');
   const ollamaModelInput = document.getElementById('ollama-model');
 
@@ -159,11 +159,14 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     geminiKeyInput.value = s.geminiKey || '';
-    geminiModelSelect.value = s.geminiModel || 'gemini-3.7-flash';
+    geminiModelSelect.value = s.geminiModel || 'gemini-3.8-flash';
+    if (!geminiModelSelect.value) geminiModelSelect.value = 'gemini-3.8-flash';
     openaiKeyInput.value = s.openaiKey || '';
-    openaiModelInput.value = s.openaiModel || 'gpt-4o';
+    openaiModelSelect.value = s.openaiModel || 'gpt-5.6-terra';
+    if (!openaiModelSelect.value) openaiModelSelect.value = 'gpt-5.6-terra';
     anthropicKeyInput.value = s.anthropicKey || '';
-    anthropicModelInput.value = s.anthropicModel || 'claude-3-7-sonnet-20250219';
+    anthropicModelSelect.value = s.anthropicModel || 'claude-opus-4-7';
+    if (!anthropicModelSelect.value) anthropicModelSelect.value = 'claude-opus-4-7';
     ollamaUrlInput.value = s.ollamaUrl || 'http://localhost:11434';
     ollamaModelInput.value = s.ollamaModel || 'llama3.2';
 
@@ -207,9 +210,9 @@ document.addEventListener('DOMContentLoaded', () => {
       geminiKey: geminiKeyInput.value.trim(),
       geminiModel: geminiModelSelect.value,
       openaiKey: openaiKeyInput.value.trim(),
-      openaiModel: openaiModelInput.value.trim(),
+      openaiModel: openaiModelSelect.value,
       anthropicKey: anthropicKeyInput.value.trim(),
-      anthropicModel: anthropicModelInput.value.trim(),
+      anthropicModel: anthropicModelSelect.value,
       ollamaUrl: ollamaUrlInput.value.trim(),
       ollamaModel: ollamaModelInput.value.trim()
     };

@@ -88,7 +88,7 @@ async function fetchWithBackoff(url, fetchOptions, providerName = 'AI', onStatus
 class GeminiProvider extends AIProviderInterface {
   constructor(config = {}) {
     super(config);
-    this.model = config.model || 'gemini-3.7-flash';
+    this.model = config.model || 'gemini-3.8-flash';
   }
 
   async chatStream({ messages, tools, systemPrompt, onChunk, onThinking, onToolCall, onStatus, onComplete, onError, signal }) {
@@ -287,7 +287,7 @@ class GeminiProvider extends AIProviderInterface {
 class OpenAIProvider extends AIProviderInterface {
   constructor(config = {}) {
     super(config);
-    this.model = config.model || 'gpt-4o';
+    this.model = config.model || 'gpt-5.6-terra';
     this.baseUrl = config.baseUrl || 'https://api.openai.com/v1';
   }
 
@@ -423,7 +423,7 @@ class OpenAIProvider extends AIProviderInterface {
 class AnthropicProvider extends AIProviderInterface {
   constructor(config = {}) {
     super(config);
-    this.model = config.model || 'claude-3-7-sonnet-20250219';
+    this.model = config.model || 'claude-opus-4-7';
   }
 
   async chatStream({ messages, tools, systemPrompt, onChunk, onThinking, onToolCall, onStatus, onComplete, onError, signal }) {
@@ -754,11 +754,11 @@ class AIProviderFactory {
       openaiAuthMode: 'subscription',
       anthropicAuthMode: 'subscription',
       geminiKey: '',
-      geminiModel: 'gemini-3.7-flash',
+      geminiModel: 'gemini-3.8-flash',
       openaiKey: '',
-      openaiModel: 'gpt-4o',
+      openaiModel: 'gpt-5.6-terra',
       anthropicKey: '',
-      anthropicModel: 'claude-3-7-sonnet-20250219',
+      anthropicModel: 'claude-opus-4-7',
       ollamaUrl: 'http://localhost:11434',
       ollamaModel: 'llama3.2',
       systemPrompt: '당신은 사용자의 웹 브라우징을 능동적으로 돕는 지능형 AI 브라우저 에이전트입니다. 사용자가 현재 페이지, URL, 웹페이지 본문, 요약, 검색 등을 질문하거나 요청하면 절대 브라우저를 볼 수 없다고 거절하지 말고, 즉시 제공된 브라우저 도구(browser_get_page_content 등)를 호출하여 정보를 확인한 뒤 완벽하게 답변하세요.'
@@ -808,7 +808,7 @@ class AIProviderFactory {
           apiKey: settings.geminiKey,
           authType: settings.authType || settings.geminiAuthMode || 'apikey',
           subscriptionToken: settings.subscriptionToken || '',
-          model: settings.geminiModel || 'gemini-3.7-flash'
+          model: settings.geminiModel || 'gemini-3.8-flash'
         });
     }
   }
