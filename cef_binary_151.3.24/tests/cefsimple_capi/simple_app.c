@@ -303,13 +303,6 @@ static LRESULT CALLBACK ChildBorderSubclassProc(
 
 static BOOL CALLBACK EnumAndSubclassChildren(HWND child, LPARAM lParam) {
   HWND main_hwnd = (HWND)lParam;
-  char class_name[64];
-  if (GetClassNameA(child, class_name, sizeof(class_name))) {
-    if (strncmp(class_name, "Chrome_RenderWidgetHostHWND", 27) == 0 ||
-        strncmp(class_name, "Chrome_WidgetWin_", 17) == 0) {
-      return TRUE;
-    }
-  }
   SetWindowSubclass(child, ChildBorderSubclassProc, 1001, (DWORD_PTR)main_hwnd);
   return TRUE;
 }

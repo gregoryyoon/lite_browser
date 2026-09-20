@@ -1279,35 +1279,31 @@ CEF core에서 브라우저 내부적으로 표시하는 모달 다이얼로그(
 
 ---
 
-## 42. Windows 11 IME 플로팅 조합창 방지 및 TSF 포커스 핸드오버 시스템 (Windows 11 IME Floating Box Fix & TSF Focus Handover Pipeline)
+## 42. Windows 11 IME 플로팅 조합창 방지 및 윈도우 테두리 리사이징 복원 (Windows 11 IME Floating Box Fix Across All Tab Creation Paths & Border Resizing Restoration)
 
 ### 42.1 개요
-Windows 11 환경에서 웹페이지 내 텍스트 필드(예: 네이버 카페 검색창 등)에 한글 입력 시 허공에 사각형 플로팅 조합창(`::: [야] [한자]`)이 노출되던 문제를 해결했습니다. 특히 주소창에 직접 URL을 입력할 때는 발생하지 않고, 외부 웹페이지에서 링크를 클릭하여 새 탭이 생성되었을 때만 이전 탭의 TSF(Text Services Framework) 입력 세션이 정상 해제되지 못한 채 고착되던 현상을 정밀 분석하여, Chromium 네이티브 위젯 포커스 체계 일원화 및 상단 UI 포커스 핸드오버 파이프라인을 구축했습니다.
+Windows 11 환경에서 웹페이지 내 텍스트 필드(예: 네이버 카페 검색창 등)에 한글 입력 시 허공에 사각형 플로팅 조합창(`::: [야] [한자]`)이 노출되던 문제를 근본적으로 해결했습니다. 특히 주소창에 직접 URL을 입력할 때는 발생하지 않고, 웹페이지 링크 클릭, `Ctrl + 좌클릭`, 마우스 우클릭 '새 탭에서 링크 열기' 등 외부 액션으로 새 탭이 생성될 때 이전 탭의 TSF(Text Services Framework) 세션이 정리되지 못하고 좀비(Stale) 상태로 고착되던 현상을 정밀 분석하여, 공통 탭 생성 파이프라인의 UI 포커스 핸드오버 및 자식 창 서브클래싱을 최적화했습니다.
 
 ### 42.2 핵심 원인 분석 및 아키텍처
-1. **`CefBrowserWindow` 래퍼 포커스 가로챔 방지**:
-   - `CefBrowserWindow` 래퍼 창에 Win32 `SetFocus`를 직접 호출하면 `GetFocus()`가 실제 위젯(`Chrome_WidgetWin_0`) 대신 부모 래퍼를 반환하여 Chromium `InputMethodWinBase::IsWindowFocused`가 `false`로 떨어지고 TSF IME 처리가 무력화됨.
-   - 모든 `SetFocus(hwnd)` 호출을 제거하고 CEF 공식 권장 API인 `host->set_focus(host, 1)`로 일원화하여 Chromium 내부에서 정확한 위젯에 포커스를 직접 설정하도록 수정.
-2. **Chromium 네이티브 위젯 창 서브클래싱 격리**:
-   - `EnumAndSubclassChildren`에서 창 테두리 리사이징을 위한 서브클래싱 등록 시 `Chrome_RenderWidgetHostHWND` 및 `Chrome_WidgetWin_` 윈도우 클래스는 제외하여 Chromium 내부 메시지 펌프 및 TSF 이벤트 체인과의 간섭을 원천 차단.
-3. **비활성화(`WA_INACTIVE`) 포커스 루프 차단**:
-   - `WM_ACTIVATE` 처리 시 `LOWORD(wParam) == WA_INACTIVE`인 경우 브라우저에 포커스를 주지 않고 즉시 반환(`return 0;`)하도록 처리.
-4. **웹 링크 클릭 시 상단 UI 포커스 핸드오버 파이프라인 (`life_span_handler_on_before_popup`, `on_open_urlfrom_tab`)**:
-   - CEF `host->set_focus(0)`는 Chromium C++ 소스코드(`browser_platform_delegate_native_win.cc:271`) 상 아무 작업도 수행하지 않고 리턴되는 빈 함수임.
-   - 웹페이지 링크 클릭으로 새 탭이 생성될 때, 이전 탭이 쥐고 있던 Win32 포커스를 안전하게 회수하지 않은 채 백그라운드에서 `SW_HIDE`되면 포커스가 `NULL`로 소멸하며 Windows 11 Modern IME / TSF 세션이 좀비(Stale) 상태로 고착됨.
-   - 새 탭을 생성하기 직전 상단 Web UI 창(`win_ctx->ui_hwnd` / `ui_browser`)으로 포커스를 명시적으로 이동(`SetFocus(ui_hwnd)`, `ui_host->set_focus(1)`)하여, 이전 브라우저에 `WM_KILLFOCUS`를 정상 전달하고 TSF 세션을 깨끗하게 정리하도록 구현.
-5. **새 탭 활성화 시 Z-order 최상위 승격 및 즉시 포커스 연결**:
-   - 새 탭이 로딩되면서 화면에 나타날 때 `SetWindowPos(hwnd, HWND_TOP, ..., SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW)`로 Z-order 최상위 승격을 보장.
-   - `load_handler_on_loading_state_change`에서 새 탭 화면이 노출되는 즉시 `new_host->set_focus(new_host, 1)`를 호출하여 UI 창에서 새 탭 브라우저로 포커스를 매끄럽게 인계.
+1. **모든 새 탭 생성 경로 단일화 및 상단 UI 포커스 핸드오버 (`CreateNewTab`, `simple_handler.c`)**:
+   - 일반 링크 클릭(`on_before_popup`), `Ctrl + 마우스 좌클릭`, 우클릭 컨텍스트 메뉴(`cmd == 3001`), 단축키 등 모든 경로에서 공통 호출되는 `CreateNewTab`의 맨 첫 줄에 상단 Web UI 창 포커스 핸드오버(`ui_host->set_focus(1)`, `SetFocus(win_ctx->ui_hwnd)`)를 배치했습니다.
+   - 새 탭이 생성되기 직전 이전 활성 탭에 `WM_KILLFOCUS`를 명시적으로 유도하여 Windows 11 Modern IME / TSF 세션을 깔끔하게 종료시킴으로써, 어떤 방식으로 새 탭이 열리더라도 TSF 세션 고착이 재발하지 않도록 일원화했습니다.
+   - `request_handler_on_before_browse`에서 이미 열려 있는 기존 탭으로 포커스가 전환되는 경우에도 UI 포커스 핸드오버를 적용했습니다.
+2. **새 탭 생성 즉시 가시화 및 Z-order 승격 (`is_loaded = 1`, `simple_life_span_handler.c`)**:
+   - 새 탭 생성 시 `is_loaded = 1`로 초기화하여 `life_span_handler_on_after_created`에서 백그라운드 숨김(`SW_HIDE`) 없이 즉시 `SetWindowPos(hwnd, HWND_TOP, ..., SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW)`로 Z-order 최상위 승격을 보장했습니다.
+   - 새 탭 생성 직후 `new_host->set_focus(new_host, 1)`를 호출하여 포커스를 새 브라우저로 즉시 전달했습니다.
+3. **메인 윈도우 테두리 리사이징 커서 복원 (`simple_app.c`)**:
+   - 프레임리스 윈도우 환경에서는 마우스가 테두리 6px 영역에 위치할 때 자식 창 서브클래싱(`ChildBorderSubclassProc`)이 `HTTRANSPARENT`를 반환해야 부모 윈도우(`main_hwnd`)의 `WM_NCHITTEST`로 마우스 메시지가 정상 투과되어 크기 조절 커서(`HTBOTTOMRIGHT`, `HTRIGHT`, `HTBOTTOM`)가 동작합니다.
+   - `EnumAndSubclassChildren`에 들어갔던 `Chrome_RenderWidgetHostHWND` 및 `Chrome_WidgetWin_` 제외 필터를 완전히 제거하여, 모든 자식 윈도우에서 테두리 영역 마우스 이벤트가 부모 창으로 정상 투과되도록 복원했습니다.
 
 ### 42.3 관련 소스 코드
 - [`cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c)
 - [`cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c)
 - [`cef_binary_151.3.24/tests/cefsimple_capi/simple_life_span_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_life_span_handler.c)
-- [`cef_binary_151.3.24/tests/cefsimple_capi/simple_load_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_load_handler.c)
 
 ### 42.4 빌드 및 검증 결과
 - **디버그 빌드**: `cmake --build c:\projects\lite_browser\cef_binary_151.3.24\build --config Debug --target cefsimple_capi` 성공 (`Exit code 0`).
 - **바이너리 생성**: `cef_binary_151.3.24\build\tests\cefsimple_capi\Debug\lite_browser.exe` 및 `lite_browser.dll` 정상 갱신.
 - **실행 검증**:
-  - 네이버 메인에서 카페 링크 클릭으로 열린 새 탭에서 상단 주소창이나 외부 창을 클릭하지 않고 곧바로 카페 검색창 클릭 시, 플로팅 사각형 조합창 없이 검색창 내에 정상 인라인 한글 조합 동작 확인 완료.
+  - `Ctrl + 좌클릭`, 마우스 우클릭 '새 탭에서 링크 열기', 일반 링크 클릭 등 모든 방식으로 열린 새 탭에서 주소창 클릭 없이 즉시 입력 시 플로팅 IME 조합창 없이 정상 인라인 한글 입력 동작 확인.
+  - 메인 윈도우 우측 하단 모서리 및 사방 테두리에서 마우스 크기 조절 커서가 정상 표시되고 윈도우 리사이징이 원활하게 동작함을 최종 검증 완료.

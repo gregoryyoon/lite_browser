@@ -209,7 +209,13 @@ void CEF_CALLBACK life_span_handler_on_after_created(
               }
             }
             win_ctx->active_tab_index = i;
-            ShowWindow(hwnd, SW_SHOW);
+            SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+
+            cef_browser_host_t* new_host = browser->get_host(browser);
+            if (new_host) {
+              new_host->set_focus(new_host, 1);
+              new_host->base.release(&new_host->base);
+            }
           } else {
             ShowWindow(hwnd, SW_HIDE);
             LogMsg("Defer showing tab %d (HWND %p) until loaded\n", win_ctx->tabs[i].tab_id, hwnd);

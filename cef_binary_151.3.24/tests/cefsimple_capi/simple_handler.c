@@ -2565,6 +2565,17 @@ int CEF_CALLBACK request_handler_on_before_browse(
             }
           }
           if (found_idx != -1 && found_idx != win_ctx->active_tab_index) {
+            if (win_ctx->ui_browser) {
+              cef_browser_host_t* ui_host = win_ctx->ui_browser->get_host(win_ctx->ui_browser);
+              if (ui_host) {
+                ui_host->set_focus(ui_host, 1);
+                ui_host->base.release(&ui_host->base);
+              }
+            }
+            if (win_ctx->ui_hwnd && IsWindow(win_ctx->ui_hwnd)) {
+              SetFocus(win_ctx->ui_hwnd);
+            }
+
             for (int k = 0; k < win_ctx->tab_count; k++) {
               if (k != found_idx) {
                 if (win_ctx->tabs[k].browser) {
@@ -2965,6 +2976,16 @@ void CEF_CALLBACK context_menu_on_before_context_menu(
         if (link_url_str) {
           browser_window_t* win_ctx = ctx_handler->parent->window_ctx;
           if (win_ctx) {
+            if (win_ctx->ui_browser) {
+              cef_browser_host_t* ui_host = win_ctx->ui_browser->get_host(win_ctx->ui_browser);
+              if (ui_host) {
+                ui_host->set_focus(ui_host, 1);
+                ui_host->base.release(&ui_host->base);
+              }
+            }
+            if (win_ctx->ui_hwnd && IsWindow(win_ctx->ui_hwnd)) {
+              SetFocus(win_ctx->ui_hwnd);
+            }
             CreateNewTab(win_ctx, link_url_str);
           }
         }
@@ -3105,6 +3126,18 @@ void CreateNewTab(browser_window_t* win_ctx, const char* url) {
   if (!win_ctx) return;
   if (win_ctx->tab_count >= MAX_TABS) return;
 
+  // 모든 새 탭 생성 시, 이전 탭이 쥐고 있던 포커스를 상단 UI로 안전하게 이동시켜 TSF 입력 세션 고착 방지
+  if (win_ctx->ui_browser) {
+    cef_browser_host_t* ui_host = win_ctx->ui_browser->get_host(win_ctx->ui_browser);
+    if (ui_host) {
+      ui_host->set_focus(ui_host, 1);
+      ui_host->base.release(&ui_host->base);
+    }
+  }
+  if (win_ctx->ui_hwnd && IsWindow(win_ctx->ui_hwnd)) {
+    SetFocus(win_ctx->ui_hwnd);
+  }
+
   RECT rect;
   GetClientRect(win_ctx->main_hwnd, &rect);
   int width = rect.right;
@@ -3162,7 +3195,7 @@ void CreateNewTab(browser_window_t* win_ctx, const char* url) {
   } else {
     strcpy(win_ctx->tabs[insert_idx].url, "lite://favorites");
   }
-  win_ctx->tabs[insert_idx].is_loaded = 0;
+  win_ctx->tabs[insert_idx].is_loaded = 1;
   win_ctx->tabs[insert_idx].tab_handler = content_handler;
   win_ctx->active_tab_index = insert_idx;
   win_ctx->tab_count++;
