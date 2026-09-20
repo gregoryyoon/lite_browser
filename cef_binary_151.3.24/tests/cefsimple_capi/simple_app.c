@@ -313,6 +313,7 @@ void SubclassAllChildWindows(HWND main_hwnd) {
   }
 }
 
+
 LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
                                         LPARAM lParam)
 {
@@ -1453,21 +1454,26 @@ void CEF_CALLBACK browser_process_handler_on_context_initialized(
     cef_string_utf8_clear(&url_utf8);
   }
 
-  // Suppress Chromium download bubble partial view and prompt popups via global RequestContext Profile Preferences
+  // Configure Chromium download preferences:
+  // 1. Enable Download Bubble popup on completion for instant actions (Open/Show in folder)
+  // 2. Suppress "Save As" file prompt dialog to auto-save to default Downloads folder
   cef_request_context_t* req_ctx = cef_request_context_get_global_context();
   if (req_ctx) {
     cef_preference_manager_t* pref_mgr = &req_ctx->base;
-    const char* prefs[] = {
-      "download_bubble.partial_view_enabled",
-      "download.prompt_for_download",
-      NULL
+    struct {
+      const char* name;
+      int value;
+    } pref_configs[] = {
+      {"download_bubble.partial_view_enabled", 1},
+      {"download.prompt_for_download", 0},
+      {NULL, 0}
     };
-    for (int i = 0; prefs[i] != NULL; i++) {
+    for (int i = 0; pref_configs[i].name != NULL; i++) {
       cef_string_t name = {};
-      cef_string_from_ascii(prefs[i], strlen(prefs[i]), &name);
+      cef_string_from_ascii(pref_configs[i].name, strlen(pref_configs[i].name), &name);
       if (pref_mgr->can_set_preference(pref_mgr, &name)) {
         cef_value_t* val = cef_value_create();
-        val->set_bool(val, 0);
+        val->set_bool(val, pref_configs[i].value);
         cef_string_t err = {};
         pref_mgr->set_preference(pref_mgr, &name, val, &err);
         if (err.str) {

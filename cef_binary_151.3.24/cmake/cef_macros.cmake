@@ -310,7 +310,8 @@ macro(SET_LPAC_ACLS target)
   add_custom_command(
     TARGET ${target}
     POST_BUILD
-    COMMAND "icacls" "${CEF_TARGET_OUT_DIR}" "/grant" "*S-1-15-2-2:(OI)(CI)(RX)"
+    COMMAND "icacls" "$<SHELL_PATH:${CEF_TARGET_OUT_DIR}>" "/grant" "*S-1-15-2-2:(OI)(CI)(RX)"
+    VERBATIM
     COMMENT "Setting LPAC ACLs..."
     )
 endmacro()

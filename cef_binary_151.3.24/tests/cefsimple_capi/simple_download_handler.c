@@ -361,6 +361,15 @@ void BroadcastDownloadUpdate(void) {
   free(buf);
 }
 
+static ULONGLONG g_last_download_activity_tick = 0;
+
+int simple_download_is_bubble_expected(void) {
+  if (g_last_download_activity_tick == 0) return 0;
+  ULONGLONG now = GetTickCount64();
+  // Download bubble can appear during or up to 10 seconds after download activity/completion
+  return (now >= g_last_download_activity_tick && (now - g_last_download_activity_tick) <= 10000ULL);
+}
+
 static void UpdateDownloadRecord(uint32_t id, const char *full_path, const char *url,
                                  const char *file_name, const char *mime_type,
                                  int64_t total_bytes, int64_t received_bytes,
@@ -370,6 +379,8 @@ static void UpdateDownloadRecord(uint32_t id, const char *full_path, const char 
                                  cef_download_item_callback_t *callback) {
   EnsureCriticalSectionInitialized();
   EnterCriticalSection(&g_download_cs);
+
+  g_last_download_activity_tick = GetTickCount64();
 
   download_record_t *rec = NULL;
   for (int i = 0; i < g_download_record_count; i++) {
@@ -509,6 +520,8 @@ int CEF_CALLBACK download_handler_on_before_download(
 
   cef_string_t cef_path = {};
   cef_string_from_utf8(full_path, strlen(full_path), &cef_path);
+
+  g_last_download_activity_tick = GetTickCount64();
 
   // show_dialog = 0: Save directly to downloads directory without opening Save As dialog
   callback->cont(callback, &cef_path, 0);

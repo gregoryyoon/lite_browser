@@ -1,5 +1,6 @@
 #include "tests/cefsimple_capi/simple_dialog_helper.h"
 #include "tests/cefsimple_capi/browser_context.h"
+#include "tests/cefsimple_capi/simple_download_handler.h"
 
 #if defined(OS_WIN) || defined(_WIN32)
 #include <commctrl.h>
@@ -17,6 +18,39 @@ static LRESULT CALLBACK ModalDialogSubclassProc(
     HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
     UINT_PTR uIdSubclass, DWORD_PTR dwRefData);
 
+static int is_download_bubble_window(HWND dialog_hwnd, HWND root_owner, browser_window_t* win_ctx) {
+  HWND owner = GetWindow(dialog_hwnd, GW_OWNER);
+  // If immediate owner is the main top-level window or NULL, it is a frame-level popup (Download Bubble)
+  if (owner == root_owner || owner == NULL) {
+    return 1;
+  }
+
+  // Check if owner is a child of any tab
+  if (win_ctx) {
+    int is_tab_child = 0;
+    for (int i = 0; i < win_ctx->tab_count; i++) {
+      tab_info_t* tab = &win_ctx->tabs[i];
+      if (tab->hwnd && (owner == tab->hwnd || IsChild(tab->hwnd, owner))) {
+        is_tab_child = 1;
+        break;
+      }
+      if (tab->right_hwnd && (owner == tab->right_hwnd || IsChild(tab->right_hwnd, owner))) {
+        is_tab_child = 1;
+        break;
+      }
+    }
+    if (!is_tab_child) {
+      return 1;
+    }
+  }
+
+  if (simple_download_is_bubble_expected()) {
+    return 1;
+  }
+
+  return 0;
+}
+
 static int calculate_dialog_target_pos(HWND dialog_hwnd, int dialog_w, int dialog_h, int* out_x, int* out_y) {
   if (!dialog_hwnd || !IsWindow(dialog_hwnd)) return 0;
 
@@ -30,6 +64,38 @@ static int calculate_dialog_target_pos(HWND dialog_hwnd, int dialog_w, int dialo
   browser_window_t* win_ctx = (browser_window_t*)GetWindowLongPtr(root_owner, GWLP_USERDATA);
   if (!win_ctx || win_ctx->main_hwnd != root_owner) return 0;
 
+  // 1. Download Bubble positioning (Edge style: aligned to right edge, 2px below toolbar)
+  if (is_download_bubble_window(dialog_hwnd, root_owner, win_ctx)) {
+    RECT rc_client;
+    GetClientRect(root_owner, &rc_client);
+    POINT pt_tr = { rc_client.right, 0 };
+    ClientToScreen(root_owner, &pt_tr);
+    POINT pt_tl = { 0, 0 };
+    ClientToScreen(root_owner, &pt_tl);
+
+    UINT dpi = GetDpiForWindow(root_owner);
+    int ui_h = (int)(72.0 * ((double)dpi / 96.0));
+    int margin_x = (int)(2.0 * ((double)dpi / 96.0));
+    int margin_y = (int)(2.0 * ((double)dpi / 96.0));
+
+    int target_x = pt_tr.x - dialog_w - margin_x;
+    int target_y = pt_tl.y + ui_h + margin_y;
+
+    HMONITOR hMon = MonitorFromWindow(root_owner, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi = {sizeof(MONITORINFO)};
+    if (GetMonitorInfo(hMon, &mi)) {
+      if (target_x < mi.rcWork.left) target_x = mi.rcWork.left;
+      if (target_x + dialog_w > mi.rcWork.right) target_x = mi.rcWork.right - dialog_w;
+      if (target_y < mi.rcWork.top) target_y = mi.rcWork.top;
+      if (target_y + dialog_h > mi.rcWork.bottom) target_y = mi.rcWork.bottom - dialog_h;
+    }
+
+    *out_x = target_x;
+    *out_y = target_y;
+    return 1;
+  }
+
+  // 2. Web Modal Dialog positioning (alert, confirm, beforeunload, http auth - centered over tab content)
   HWND target_content_hwnd = NULL;
   if (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
     tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
