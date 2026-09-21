@@ -86,7 +86,8 @@ static int calculate_dialog_target_pos(HWND dialog_hwnd, int dialog_w, int dialo
 
     UINT dpi = GetDpiForWindow(root_owner);
     int ui_h = (int)(72.0 * ((double)dpi / 96.0));
-    int margin_x = (int)(2.0 * ((double)dpi / 96.0));
+    int margin_x = (int)(1.0 * ((double)dpi / 96.0));
+    if (margin_x < 1) margin_x = 1;
     int margin_y = (int)(2.0 * ((double)dpi / 96.0));
 
     int target_x = pt_tr.x - dialog_w - margin_x;
