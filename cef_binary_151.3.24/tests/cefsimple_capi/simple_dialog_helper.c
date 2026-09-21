@@ -18,36 +18,47 @@ static LRESULT CALLBACK ModalDialogSubclassProc(
     HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
     UINT_PTR uIdSubclass, DWORD_PTR dwRefData);
 
-static int is_download_bubble_window(HWND dialog_hwnd, HWND root_owner, browser_window_t* win_ctx) {
-  HWND owner = GetWindow(dialog_hwnd, GW_OWNER);
-  // If immediate owner is the main top-level window or NULL, it is a frame-level popup (Download Bubble)
-  if (owner == root_owner || owner == NULL) {
-    return 1;
+static int is_download_bubble_window(HWND dialog_hwnd, int dialog_w, HWND root_owner, browser_window_t* win_ctx) {
+  if (!dialog_hwnd || !IsWindow(dialog_hwnd)) return 0;
+
+  // 1. Check cached property tag for quick and consistent lookup
+  HANDLE prop = GetPropA(dialog_hwnd, "LiteBrowser_IsBubble");
+  if (prop != NULL) {
+    return (prop == (HANDLE)1) ? 1 : 0;
   }
 
-  // Check if owner is a child of any tab
-  if (win_ctx) {
-    int is_tab_child = 0;
-    for (int i = 0; i < win_ctx->tab_count; i++) {
-      tab_info_t* tab = &win_ctx->tabs[i];
-      if (tab->hwnd && (owner == tab->hwnd || IsChild(tab->hwnd, owner))) {
-        is_tab_child = 1;
-        break;
-      }
-      if (tab->right_hwnd && (owner == tab->right_hwnd || IsChild(tab->right_hwnd, owner))) {
-        is_tab_child = 1;
-        break;
-      }
-    }
-    if (!is_tab_child) {
+  DWORD ex_style = GetWindowLong(dialog_hwnd, GWL_EXSTYLE);
+
+  // 2. Web modal dialogs (alert, confirm, prompt, auth, beforeunload) ALWAYS have WS_EX_DLGMODALFRAME
+  if (ex_style & WS_EX_DLGMODALFRAME) {
+    SetPropA(dialog_hwnd, "LiteBrowser_IsBubble", (HANDLE)2);  // 2 = marked as web modal
+    return 0;
+  }
+
+  // 3. Download bubble in Chromium ALWAYS has WS_EX_TOOLWINDOW
+  if (ex_style & WS_EX_TOOLWINDOW) {
+    UINT dpi = root_owner ? GetDpiForWindow(root_owner) : 96;
+    int expected_bubble_w = (int)(418.0 * ((double)dpi / 96.0));
+    int is_w_match = (dialog_w > 0 && abs(dialog_w - expected_bubble_w) <= 8);
+    int bubble_exp = simple_download_is_bubble_expected();
+
+    if (bubble_exp || is_w_match) {
+      SetPropA(dialog_hwnd, "LiteBrowser_IsBubble", (HANDLE)1);
       return 1;
     }
   }
 
-  if (simple_download_is_bubble_expected()) {
-    return 1;
+  // 4. Fallback: Check window title keyword if present
+  WCHAR wtitle[128] = {0};
+  if (GetWindowTextW(dialog_hwnd, wtitle, sizeof(wtitle)/sizeof(wtitle[0])) > 0) {
+    if (wcsstr(wtitle, L"다운로드") || wcsstr(wtitle, L"Download")) {
+      SetPropA(dialog_hwnd, "LiteBrowser_IsBubble", (HANDLE)1);
+      return 1;
+    }
   }
 
+  // Default: Web Modal Dialog (centered) to eliminate false positives
+  SetPropA(dialog_hwnd, "LiteBrowser_IsBubble", (HANDLE)2);
   return 0;
 }
 
@@ -65,7 +76,7 @@ static int calculate_dialog_target_pos(HWND dialog_hwnd, int dialog_w, int dialo
   if (!win_ctx || win_ctx->main_hwnd != root_owner) return 0;
 
   // 1. Download Bubble positioning (Edge style: aligned to right edge, 2px below toolbar)
-  if (is_download_bubble_window(dialog_hwnd, root_owner, win_ctx)) {
+  if (is_download_bubble_window(dialog_hwnd, dialog_w, root_owner, win_ctx)) {
     RECT rc_client;
     GetClientRect(root_owner, &rc_client);
     POINT pt_tr = { rc_client.right, 0 };
@@ -187,9 +198,9 @@ static LRESULT CALLBACK ModalDialogSubclassProc(
           h = wr.bottom - wr.top;
         }
 
-        // Modal dialog size filter (covers BeforeUnload, Alert, Confirm, Prompt, Auth dialogs)
+        // Modal dialog and download bubble size filter (excludes ~28px link hover tooltips)
         if (w >= 240 && w <= 950 && h >= 80 && h <= 650) {
-          int tx, ty;
+          int tx = 0, ty = 0;
           if (calculate_dialog_target_pos(hWnd, w, h, &tx, &ty)) {
             pos->x = tx;
             pos->y = ty;
@@ -207,7 +218,7 @@ static LRESULT CALLBACK ModalDialogSubclassProc(
         int w = wr.right - wr.left;
         int h = wr.bottom - wr.top;
         if (w >= 240 && w <= 950 && h >= 80 && h <= 650) {
-          int tx, ty;
+          int tx = 0, ty = 0;
           if (calculate_dialog_target_pos(hWnd, w, h, &tx, &ty)) {
             SetWindowPos(hWnd, NULL, tx, ty, 0, 0,
                          SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
@@ -218,6 +229,7 @@ static LRESULT CALLBACK ModalDialogSubclassProc(
     }
 
     case WM_NCDESTROY:
+      RemovePropA(hWnd, "LiteBrowser_IsBubble");
       RemoveWindowSubclass(hWnd, ModalDialogSubclassProc, uIdSubclass);
       break;
   }
@@ -233,8 +245,14 @@ static LRESULT CALLBACK CBTProc(int nCode, WPARAM wParam, LPARAM lParam) {
       DWORD style = cw->lpcs->style;
       if ((style & WS_POPUP) && !(style & WS_CHILD)) {
         char cls[128] = {0};
-        if (GetClassNameA(hwnd, cls, sizeof(cls)) > 0 &&
-            strncmp(cls, "Chrome_WidgetWin_", 17) == 0) {
+        GetClassNameA(hwnd, cls, sizeof(cls));
+        int is_chrome = (strncmp(cls, "Chrome_WidgetWin_", 17) == 0);
+        if (!is_chrome && cw->lpcs->lpszClass && !IS_INTRESOURCE(cw->lpcs->lpszClass)) {
+          if (_wcsnicmp(cw->lpcs->lpszClass, L"Chrome_WidgetWin_", 17) == 0) {
+            is_chrome = 1;
+          }
+        }
+        if (is_chrome) {
           SetWindowSubclass(hwnd, ModalDialogSubclassProc, SUBCLASS_ID_MODAL_DIALOG, 0);
         }
       }
@@ -249,7 +267,7 @@ static LRESULT CALLBACK CBTProc(int nCode, WPARAM wParam, LPARAM lParam) {
       int w = wr.right - wr.left;
       int h = wr.bottom - wr.top;
       if (w >= 240 && w <= 950 && h >= 80 && h <= 650) {
-        int tx, ty;
+        int tx = 0, ty = 0;
         if (calculate_dialog_target_pos(hwnd, w, h, &tx, &ty)) {
           SetWindowPos(hwnd, NULL, tx, ty, 0, 0,
                        SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
