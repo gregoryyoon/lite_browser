@@ -14,17 +14,6 @@
 #include "tests/cefsimple_capi/simple_utils.h"
 #include <stdarg.h>
 
-static void LogMsg(const char* format, ...) {
-  FILE* f = fopen("C:\\projects\\lite_browser\\debug_c.txt", "a");
-  if (f) {
-    va_list args;
-    va_start(args, format);
-    vfprintf(f, format, args);
-    va_end(args);
-    fclose(f);
-  }
-}
-
 //
 // Display handler implementation.
 //

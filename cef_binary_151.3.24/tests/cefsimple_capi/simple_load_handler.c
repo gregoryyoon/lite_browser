@@ -13,17 +13,6 @@
 #include "tests/cefsimple_capi/simple_utils.h"
 #include <stdarg.h>
 
-static void LogMsg(const char* format, ...) {
-  FILE* f = fopen("C:\\projects\\lite_browser\\debug_c.txt", "a");
-  if (f) {
-    va_list args;
-    va_start(args, format);
-    vfprintf(f, format, args);
-    va_end(args);
-    fclose(f);
-  }
-}
-
 //
 // Load handler implementation.
 //
@@ -90,7 +79,6 @@ load_handler_on_loading_state_change(cef_load_handler_t* self,
                                      int canGoBack,
                                      int canGoForward) {
   simple_load_handler_t* handler = (simple_load_handler_t*)self;
-  LogMsg("load_handler_on_loading_state_change: isLoading=%d, canGoBack=%d, canGoForward=%d\n", isLoading, canGoBack, canGoForward);
 
   browser_window_t *win_ctx = handler->parent->window_ctx;
   if (win_ctx && handler->parent->type != BROWSER_TYPE_POPUP) {
@@ -107,29 +95,19 @@ load_handler_on_loading_state_change(cef_load_handler_t* self,
     if (found_idx != -1) {
       win_ctx->tabs[found_idx].is_loaded = 1;
       if (win_ctx->active_tab_index == found_idx && win_ctx->tabs[found_idx].hwnd) {
-        // Hide all other tabs and show this newly active tab immediately on load start/change
-        if (win_ctx->ui_hwnd && IsWindow(win_ctx->ui_hwnd)) {
-          SetFocus(win_ctx->ui_hwnd);
-        }
-
-        for (int k = 0; k < win_ctx->tab_count; k++) {
-          if (k != found_idx) {
-            if (win_ctx->tabs[k].hwnd) ShowWindow(win_ctx->tabs[k].hwnd, SW_HIDE);
-            if (win_ctx->tabs[k].right_hwnd) ShowWindow(win_ctx->tabs[k].right_hwnd, SW_HIDE);
+        if (!IsWindowVisible(win_ctx->tabs[found_idx].hwnd)) {
+          for (int k = 0; k < win_ctx->tab_count; k++) {
+            if (k != found_idx) {
+              if (win_ctx->tabs[k].hwnd) ShowWindow(win_ctx->tabs[k].hwnd, SW_HIDE);
+              if (win_ctx->tabs[k].right_hwnd) ShowWindow(win_ctx->tabs[k].right_hwnd, SW_HIDE);
+            }
           }
-        }
-        SetWindowPos(win_ctx->tabs[found_idx].hwnd, HWND_TOP, 0, 0, 0, 0,
-                     SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+          SetWindowPos(win_ctx->tabs[found_idx].hwnd, HWND_TOP, 0, 0, 0, 0,
+                       SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
 
-        RECT rect;
-        GetClientRect(win_ctx->main_hwnd, &rect);
-        PostMessage(win_ctx->main_hwnd, WM_SIZE, 0, MAKELPARAM(rect.right, rect.bottom));
-
-        cef_browser_host_t* new_host = win_ctx->tabs[found_idx].browser ? 
-            win_ctx->tabs[found_idx].browser->get_host(win_ctx->tabs[found_idx].browser) : NULL;
-        if (new_host) {
-          new_host->set_focus(new_host, 1);
-          new_host->base.release(&new_host->base);
+          RECT rect;
+          GetClientRect(win_ctx->main_hwnd, &rect);
+          PostMessage(win_ctx->main_hwnd, WM_SIZE, 0, MAKELPARAM(rect.right, rect.bottom));
         }
       }
     }
@@ -144,17 +122,6 @@ load_handler_on_loading_state_change(cef_load_handler_t* self,
     }
 
     if (!isLoading) {
-      if (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
-        tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
-        if (active_tab->browser && browser->get_identifier(browser) == active_tab->browser->get_identifier(active_tab->browser)) {
-          cef_browser_host_t* host = active_tab->browser->get_host(active_tab->browser);
-          if (host) {
-            host->set_focus(host, 1);
-            host->base.release(&host->base);
-          }
-        }
-      }
-
       cef_frame_t* main_f = browser->get_main_frame(browser);
       if (main_f) {
         cef_string_userfree_t url_uf = main_f->get_url(main_f);

@@ -1307,3 +1307,64 @@ Windows 11 환경에서 웹페이지 내 텍스트 필드(예: 네이버 카페 
 - **실행 검증**:
   - `Ctrl + 좌클릭`, 마우스 우클릭 '새 탭에서 링크 열기', 일반 링크 클릭 등 모든 방식으로 열린 새 탭에서 주소창 클릭 없이 즉시 입력 시 플로팅 IME 조합창 없이 정상 인라인 한글 입력 동작 확인.
   - 메인 윈도우 우측 하단 모서리 및 사방 테두리에서 마우스 크기 조절 커서가 정상 표시되고 윈도우 리사이징이 원활하게 동작함을 최종 검증 완료.
+
+---
+
+## 43. 링크 기반 새 탭의 TSF 포커스 전이 최적화 및 이중 방어 패치 (TSF Focus Refresh & Elimination of Premature Focus on Link-Opened New Tabs)
+
+### 43.1 개요
+Jira(`https://jira.chipsnmedia.com/browse/ILUMAT26-67`) 등 자바스크립트 기반 대형 웹 애플리케이션에서 페이지 내 링크를 `Ctrl + 좌클릭` 또는 우클릭 컨텍스트 메뉴로 열었을 때, 새로 생성된 탭의 본문 입력창(댓글, 검색창 등) 클릭 후 한글 타이핑 시 Windows 11 사각형 플로팅 IME 조합창(`::: [야] [한자]`)이 다시 노출되던 문제를 근본적으로 해결했습니다. 상단 주소창을 한 번 클릭했다가 본문을 다시 클릭하면 인라인 조합이 정상 동작하던 특이 현상을 고정밀 Win32 포커스 추적 로깅 시스템을 통해 분석하여 원인을 규명하고, 영구적인 이중 방어 패치를 적용했습니다.
+
+### 43.2 고정밀 로깅 분석을 통한 근본 원인 (Root Cause) 규명
+1. **새 탭 로딩 시점의 조기 포커스 선점 (Premature Focus Claim)**:
+   - 새 탭이 열리고 로딩이 완료되는 시점에 백그라운드 콜백(`on_loading_state_change`, `on_after_created`)에서 `host->set_focus(1)`를 호출하여, 새 탭의 최상위 위젯인 `Chrome_WidgetWin_1`이 Win32 포커스를 미리 선점하고 있었습니다.
+   - 하지만 이 시점에는 아직 사용자가 페이지 내 어떤 입력 필드도 클릭하지 않았고 DOM 렌더링이 진행 중이어서 Chromium과 Windows TSF(Text Services Framework) 간의 TextStore 세션이 바인딩되지 않은 상태였습니다.
+2. **Windows USER32의 포커스 전이 억제 (`WM_SETFOCUS` 누락)**:
+   - 로딩 완료 후 사용자가 마우스로 본문 텍스트 필드를 클릭(`WM_LBUTTONDOWN`)했을 때, 마우스 메시지를 받는 HWND는 렌더러 창인 `Chrome_RenderWidgetHostHWND`였습니다.
+   - 그러나 상위 부모 위젯인 `Chrome_WidgetWin_1`은 이미 `GetFocus()`를 점유하고 있었기 때문에, Windows USER32는 포커스 변경이 없다고 판단하여 **`WM_SETFOCUS` 메시지를 발생시키지 않았습니다**.
+   - 그 결과 Chromium의 `HWNDMessageHandler` 및 `InputMethodWinTSF`가 포커스 활성화 신호를 받지 못해 TSF가 비활성 상태로 방치되었고, Windows 11 IME는 현재 포커스된 입력 컴포넌트가 없다고 간주하여 화면 좌측 상단/허공에 기본 플로팅 조합창을 띄웠던 것입니다.
+3. **주소창 클릭 후 본문 재클릭 시 정상 회복되었던 이유**:
+   - 주소창을 클릭하면 포커스가 상단 UI 브라우저로 빠져나갔다가(`WM_KILLFOCUS` on Content $\rightarrow$ `WM_SETFOCUS` on UI), 본문을 다시 클릭할 때 **UI $\rightarrow$ 본문 창으로의 실제 Win32 포커스 전이(`WM_KILLFOCUS` on UI $\rightarrow$ `WM_SETFOCUS` on Content)**가 일어났습니다.
+   - 이 실제 포커스 전이에 의해 `HWNDMessageHandler::HandleNativeFocus`가 호출되면서 TSF가 완벽하게 깨어나 정상 인라인 조합으로 회복된 것이었습니다.
+
+### 43.3 이중 방어 패치 아키텍처 (Dual-Layer Defense)
+1. **1차 방어: 조기 포커스 선점 제거 (자연스러운 포커스 전이 유도)**:
+   - `simple_load_handler.c`의 `load_handler_on_loading_state_change`에서 로딩 완료 시 호출되던 `host->set_focus(1)`를 제거했습니다.
+   - `simple_life_span_handler.c`의 `life_span_handler_on_after_created`에서 호출되던 `new_host->set_focus(1)`를 제거했습니다.
+   - 새 탭이 로딩되는 동안 포커스는 상단 UI 창에 자연스럽게 머물게 되며, 사용자가 새 탭 화면을 클릭하는 순간 **UI $\rightarrow$ 새 탭 본문으로의 실제 `WM_SETFOCUS` 전이가 자연스럽게 발생**하여 TSF가 깨어납니다 (`+` 버튼으로 새 탭을 열어 주소창을 거쳤을 때와 100% 동일한 정상 시퀀스).
+2. **2차 방어: 서브클래스 마우스 클릭 시 TSF 즉시 리프레시 (완전무결 Fallback)**:
+   - `simple_app.c`의 `ChildBorderSubclassProc`에서 `Chrome_RenderWidgetHostHWND`에 `WM_LBUTTONDOWN`이 들어왔을 때, 만약 포커스가 이미 해당 위젯에 머물러 있어 OS 수준의 `WM_SETFOCUS`가 생략되는 상태라면:
+     ```c
+     if (strcmp(cls, "Chrome_RenderWidgetHostHWND") == 0) {
+       HWND curFocus = GetFocus();
+       HWND main_hwnd = (HWND)dwRefData;
+       browser_window_t* win_ctx = (IsWindow(main_hwnd)) ? (browser_window_t*)GetWindowLongPtr(main_hwnd, GWLP_USERDATA) : NULL;
+       if (win_ctx && curFocus && curFocus != win_ctx->ui_hwnd && curFocus != main_hwnd) {
+         HWND p = hWnd;
+         while (p && p != main_hwnd) {
+           if (p == curFocus) {
+             SetFocus(main_hwnd);
+             SetFocus(curFocus);
+             break;
+           }
+           p = GetParent(p);
+         }
+       }
+     }
+     ```
+     `SetFocus(main_hwnd)` $\rightarrow$ `SetFocus(curFocus)`를 0.1ms 내에 즉각 호출하여 `WM_KILLFOCUS` $\rightarrow$ `WM_SETFOCUS` 사이클을 발생시키고 TSF 세션을 강제로 깨웁니다.
+   - 사용자가 주소창을 클릭했다가 본문을 다시 클릭했던 효과가 마우스 클릭 단 1번에 투명하게 백그라운드에서 완료됩니다.
+
+### 43.4 관련 소스 코드
+- [`cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c)
+- [`cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c)
+- [`cef_binary_151.3.24/tests/cefsimple_capi/simple_life_span_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_life_span_handler.c)
+- [`cef_binary_151.3.24/tests/cefsimple_capi/simple_load_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_load_handler.c)
+
+### 43.5 빌드 및 검증 결과
+- **디버그 빌드**: `cmake --build c:\projects\lite_browser\cef_binary_151.3.24\build --config Debug --target cefsimple_capi` 성공 (`Exit code 0`).
+- **바이너리 생성**: `cef_binary_151.3.24\build\tests\cefsimple_capi\Debug\lite_browser.exe` 및 `lite_browser.dll` 정상 갱신.
+- **실행 검증**:
+  - `https://jira.chipsnmedia.com/browse/ILUMAT26-67`에서 링크를 `Ctrl + 좌클릭` 또는 우클릭 컨텍스트 메뉴로 새 탭을 열었을 때, 주소창 클릭 없이 댓글/검색 필드 클릭 즉시 Windows 11 사각형 플로팅 IME 조합창 없이 정상 인라인 한글 조합 동작 확인.
+  - 상단 탭 전환(`switch-tab`), 주소창 직접 입력, 단축키, 창 크기 조절 등 모든 기능이 정상 작동함을 최종 검증 완료.
+

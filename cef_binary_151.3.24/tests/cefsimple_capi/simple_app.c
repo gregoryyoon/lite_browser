@@ -51,17 +51,6 @@ int GetUIHeightForWindow(HWND hwnd) {
 #include "tests/cefsimple_capi/simple_optimization.h"
 #include "tests/cefsimple_capi/simple_dialog_helper.h"
 
-static void LogMsg(const char *format, ...) {
-  FILE *f = fopen("C:\\projects\\lite_browser\\debug_c.txt", "a");
-  if (f) {
-    va_list args;
-    va_start(args, format);
-    vfprintf(f, format, args);
-    va_end(args);
-    fclose(f);
-  }
-}
-
 // Resolves local path to ui/index.html
 static void ResolveUIPath(cef_string_t *out_url) {
 #if defined(OS_WIN)
@@ -285,6 +274,27 @@ int g_window_count = 0;
 static LRESULT CALLBACK ChildBorderSubclassProc(
     HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
     UINT_PTR uIdSubclass, DWORD_PTR dwRefData) {
+  if (uMsg == WM_LBUTTONDOWN) {
+    char cls[64] = {0};
+    GetClassNameA(hWnd, cls, sizeof(cls));
+    if (strcmp(cls, "Chrome_RenderWidgetHostHWND") == 0) {
+      HWND curFocus = GetFocus();
+      HWND main_hwnd = (HWND)dwRefData;
+      browser_window_t* win_ctx = (IsWindow(main_hwnd)) ? (browser_window_t*)GetWindowLongPtr(main_hwnd, GWLP_USERDATA) : NULL;
+      if (win_ctx && curFocus && curFocus != win_ctx->ui_hwnd && curFocus != main_hwnd) {
+        HWND p = hWnd;
+        while (p && p != main_hwnd) {
+          if (p == curFocus) {
+            SetFocus(main_hwnd);
+            SetFocus(curFocus);
+            break;
+          }
+          p = GetParent(p);
+        }
+      }
+    }
+  }
+
   if (uMsg == WM_NCHITTEST) {
     HWND main_hwnd = (HWND)dwRefData;
     if (IsWindow(main_hwnd) && !IsZoomed(main_hwnd)) {
@@ -708,6 +718,10 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
       }
     }
     return 0;
+  }
+  case WM_KILLFOCUS:
+  {
+    break;
   }
   case WM_SIZE:
   {

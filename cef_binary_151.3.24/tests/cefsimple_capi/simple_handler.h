@@ -172,4 +172,6 @@ int is_theme_dark(void);
 // extern cef_browser_t *g_content_browser;
 extern char g_startup_url[4096];
 
+void LogMsg(const char* format, ...);
+
 #endif // CEF_TESTS_CEFSIMPLE_CAPI_SIMPLE_HANDLER_H_

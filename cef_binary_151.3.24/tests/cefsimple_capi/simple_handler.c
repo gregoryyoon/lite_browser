@@ -299,15 +299,8 @@ static void scan_directory_recursive(const char* dir_path, char** json_ptr, size
 }
 #endif
 
-static void LogMsg(const char *format, ...) {
-  FILE *f = fopen("C:\\projects\\lite_browser\\debug_c.txt", "a");
-  if (f) {
-    va_list args;
-    va_start(args, format);
-    vfprintf(f, format, args);
-    va_end(args);
-    fclose(f);
-  }
+void LogMsg(const char *format, ...) {
+  (void)format;
 }
 
 static const char base64_table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -2814,17 +2807,6 @@ int CEF_CALLBACK request_handler_on_open_urlfrom_tab(
     }
 
     if (win_ctx->tab_count < MAX_TABS) {
-      if (win_ctx->ui_browser) {
-        cef_browser_host_t* ui_host = win_ctx->ui_browser->get_host(win_ctx->ui_browser);
-        if (ui_host) {
-          ui_host->set_focus(ui_host, 1);
-          ui_host->base.release(&ui_host->base);
-        }
-      }
-      if (win_ctx->ui_hwnd && IsWindow(win_ctx->ui_hwnd)) {
-        SetFocus(win_ctx->ui_hwnd);
-      }
-
       if (strstr(target_url_str, "password-manager") != NULL ||
           strncmp(target_url_str, "lite://passwords", 16) == 0 ||
           strncmp(target_url_str, "chrome://passwords", 18) == 0 ||
@@ -2976,16 +2958,6 @@ void CEF_CALLBACK context_menu_on_before_context_menu(
         if (link_url_str) {
           browser_window_t* win_ctx = ctx_handler->parent->window_ctx;
           if (win_ctx) {
-            if (win_ctx->ui_browser) {
-              cef_browser_host_t* ui_host = win_ctx->ui_browser->get_host(win_ctx->ui_browser);
-              if (ui_host) {
-                ui_host->set_focus(ui_host, 1);
-                ui_host->base.release(&ui_host->base);
-              }
-            }
-            if (win_ctx->ui_hwnd && IsWindow(win_ctx->ui_hwnd)) {
-              SetFocus(win_ctx->ui_hwnd);
-            }
             CreateNewTab(win_ctx, link_url_str);
           }
         }
@@ -3126,7 +3098,27 @@ void CreateNewTab(browser_window_t* win_ctx, const char* url) {
   if (!win_ctx) return;
   if (win_ctx->tab_count >= MAX_TABS) return;
 
-  // 모든 새 탭 생성 시, 이전 탭이 쥐고 있던 포커스를 상단 UI로 안전하게 이동시켜 TSF 입력 세션 고착 방지
+  // 1. 모든 기존 탭의 포커스 해제 및 창 숨김 처리 (switch-tab과 동일하게 TSF 세션 및 마우스 이벤트 고착 방지)
+  for (int k = 0; k < win_ctx->tab_count; k++) {
+    if (win_ctx->tabs[k].browser) {
+      cef_browser_host_t* prev_h = win_ctx->tabs[k].browser->get_host(win_ctx->tabs[k].browser);
+      if (prev_h) {
+        prev_h->set_focus(prev_h, 0);
+        prev_h->base.release(&prev_h->base);
+      }
+    }
+    if (win_ctx->tabs[k].right_browser) {
+      cef_browser_host_t* prev_rh = win_ctx->tabs[k].right_browser->get_host(win_ctx->tabs[k].right_browser);
+      if (prev_rh) {
+        prev_rh->set_focus(prev_rh, 0);
+        prev_rh->base.release(&prev_rh->base);
+      }
+    }
+    if (win_ctx->tabs[k].hwnd) ShowWindow(win_ctx->tabs[k].hwnd, SW_HIDE);
+    if (win_ctx->tabs[k].right_hwnd) ShowWindow(win_ctx->tabs[k].right_hwnd, SW_HIDE);
+  }
+
+  // 2. 상단 UI 창으로 포커스 인계
   if (win_ctx->ui_browser) {
     cef_browser_host_t* ui_host = win_ctx->ui_browser->get_host(win_ctx->ui_browser);
     if (ui_host) {
@@ -3273,6 +3265,7 @@ int CEF_CALLBACK focus_handler_on_set_focus(cef_focus_handler_t* self,
                                              cef_focus_source_t source) {
   simple_focus_handler_t* handler = (simple_focus_handler_t*)self;
   browser_window_t *win_ctx = (handler && handler->parent) ? handler->parent->window_ctx : NULL;
+
   if (win_ctx && win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
     tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
     if (active_tab->is_split && active_tab->right_browser) {
@@ -3298,6 +3291,7 @@ void CEF_CALLBACK focus_handler_on_got_focus(cef_focus_handler_t* self,
                                              cef_browser_t* browser) {
   simple_focus_handler_t* handler = (simple_focus_handler_t*)self;
   browser_window_t *win_ctx = (handler && handler->parent) ? handler->parent->window_ctx : NULL;
+
   if (win_ctx && win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
     tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
     if (active_tab->is_split && active_tab->right_browser) {

@@ -25,17 +25,6 @@ extern int GetUIHeightForWindow(HWND hwnd);
 #include "tests/cefsimple_capi/simple_utils.h"
 #include "tests/cefsimple_capi/browser_context.h"
 
-static void LogMsg(const char *format, ...) {
-  FILE *f = fopen("C:\\projects\\lite_browser\\debug_c.txt", "a");
-  if (f) {
-    va_list args;
-    va_start(args, format);
-    vfprintf(f, format, args);
-    va_end(args);
-    fclose(f);
-  }
-}
-
 //
 // Dedicated Popup Window Context and WndProc
 //
@@ -199,7 +188,6 @@ void CEF_CALLBACK life_span_handler_on_after_created(
           win_ctx->tabs[i].browser = browser;
           browser->base.add_ref(&browser->base);
           win_ctx->tabs[i].hwnd = hwnd;
-          LogMsg("Assigned browser %p to tab %d via handler matching\n", browser, win_ctx->tabs[i].tab_id);
 
           if (win_ctx->tabs[i].is_loaded) {
             for (int k = 0; k < win_ctx->tab_count; k++) {
@@ -213,7 +201,7 @@ void CEF_CALLBACK life_span_handler_on_after_created(
 
             cef_browser_host_t* new_host = browser->get_host(browser);
             if (new_host) {
-              new_host->set_focus(new_host, 1);
+              new_host->was_resized(new_host);
               new_host->base.release(&new_host->base);
             }
           } else {
@@ -468,19 +456,6 @@ int CEF_CALLBACK life_span_handler_on_before_popup(
           target_frame->base.release(&target_frame->base);
         }
         return 1;
-      }
-
-      if (win_ctx) {
-        if (win_ctx->ui_browser) {
-          cef_browser_host_t* ui_host = win_ctx->ui_browser->get_host(win_ctx->ui_browser);
-          if (ui_host) {
-            ui_host->set_focus(ui_host, 1);
-            ui_host->base.release(&ui_host->base);
-          }
-        }
-        if (win_ctx->ui_hwnd && IsWindow(win_ctx->ui_hwnd)) {
-          SetFocus(win_ctx->ui_hwnd);
-        }
       }
 
       CreateNewTab(win_ctx, target_url_str);
