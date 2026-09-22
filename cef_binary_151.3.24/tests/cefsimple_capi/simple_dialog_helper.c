@@ -31,7 +31,6 @@ static int is_download_bubble_window(HWND dialog_hwnd, int dialog_w, HWND root_o
 
   // 2. Web modal dialogs (alert, confirm, prompt, auth, beforeunload) ALWAYS have WS_EX_DLGMODALFRAME
   if (ex_style & WS_EX_DLGMODALFRAME) {
-    SetPropA(dialog_hwnd, "LiteBrowser_IsBubble", (HANDLE)2);  // 2 = marked as web modal
     return 0;
   }
 
@@ -57,8 +56,43 @@ static int is_download_bubble_window(HWND dialog_hwnd, int dialog_w, HWND root_o
     }
   }
 
-  // Default: Web Modal Dialog (centered) to eliminate false positives
-  SetPropA(dialog_hwnd, "LiteBrowser_IsBubble", (HANDLE)2);
+  return 0;
+}
+
+static int is_web_modal_dialog_window(HWND dialog_hwnd, int dialog_w, int dialog_h, HWND root_owner, browser_window_t* win_ctx) {
+  if (!dialog_hwnd || !IsWindow(dialog_hwnd)) return 0;
+
+  HANDLE prop = GetPropA(dialog_hwnd, "LiteBrowser_IsModal");
+  if (prop != NULL) {
+    return (prop == (HANDLE)1) ? 1 : 0;
+  }
+
+  DWORD ex_style = GetWindowLong(dialog_hwnd, GWL_EXSTYLE);
+  DWORD style = GetWindowLong(dialog_hwnd, GWL_STYLE);
+
+  // Exclude tool windows (tooltips, bubbles, etc.)
+  if (ex_style & WS_EX_TOOLWINDOW) {
+    SetPropA(dialog_hwnd, "LiteBrowser_IsModal", (HANDLE)2);
+    return 0;
+  }
+
+  // 1. Check for modal frame styles
+  // In Win32, WS_EX_DLGMODALFRAME = 0x00000001, DS_MODALFRAME = 0x00000080
+  int has_modal_frame = ((ex_style & WS_EX_DLGMODALFRAME) != 0) || ((style & 0x00000080) != 0);
+
+  // 2. Check for window title (web modal & permission dialogs have titles; autofill/dropdowns do not)
+  int title_len = GetWindowTextLengthW(dialog_hwnd);
+
+  // 3. Scale minimum width by DPI (standard Chromium modal width is 512px+)
+  UINT dpi = root_owner ? GetDpiForWindow(root_owner) : 96;
+  int min_modal_w = (int)(360.0 * ((double)dpi / 96.0));
+
+  if (has_modal_frame || (title_len > 0 && dialog_w >= min_modal_w)) {
+    SetPropA(dialog_hwnd, "LiteBrowser_IsModal", (HANDLE)1);
+    return 1;
+  }
+
+  SetPropA(dialog_hwnd, "LiteBrowser_IsModal", (HANDLE)2);
   return 0;
 }
 
@@ -107,57 +141,62 @@ static int calculate_dialog_target_pos(HWND dialog_hwnd, int dialog_w, int dialo
     return 1;
   }
 
-  // 2. Web Modal Dialog positioning (alert, confirm, beforeunload, http auth - centered over tab content)
-  HWND target_content_hwnd = NULL;
-  if (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
-    tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
-    if (active_tab->is_split && active_tab->right_hwnd && IsWindow(active_tab->right_hwnd)) {
-      HWND owner = GetWindow(dialog_hwnd, GW_OWNER);
-      int is_right = 0;
-      HWND cur = owner;
-      while (cur && cur != root_owner) {
-        if (cur == active_tab->right_hwnd) {
-          is_right = 1;
-          break;
+  // 2. Web Modal Dialog positioning (alert, confirm, beforeunload, http auth, permissions - centered over tab content)
+  if (is_web_modal_dialog_window(dialog_hwnd, dialog_w, dialog_h, root_owner, win_ctx)) {
+    HWND target_content_hwnd = NULL;
+    if (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+      tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
+      if (active_tab->is_split && active_tab->right_hwnd && IsWindow(active_tab->right_hwnd)) {
+        HWND owner = GetWindow(dialog_hwnd, GW_OWNER);
+        int is_right = 0;
+        HWND cur = owner;
+        while (cur && cur != root_owner) {
+          if (cur == active_tab->right_hwnd) {
+            is_right = 1;
+            break;
+          }
+          cur = GetParent(cur);
         }
-        cur = GetParent(cur);
+        if (!is_right && active_tab->active_split == 1) {
+          is_right = 1;
+        }
+        target_content_hwnd = is_right ? active_tab->right_hwnd : active_tab->hwnd;
+      } else {
+        target_content_hwnd = active_tab->hwnd;
       }
-      if (!is_right && active_tab->active_split == 1) {
-        is_right = 1;
-      }
-      target_content_hwnd = is_right ? active_tab->right_hwnd : active_tab->hwnd;
-    } else {
-      target_content_hwnd = active_tab->hwnd;
     }
+
+    RECT target_rect = {0};
+    if (target_content_hwnd && IsWindow(target_content_hwnd)) {
+      GetWindowRect(target_content_hwnd, &target_rect);
+    } else {
+      GetWindowRect(root_owner, &target_rect);
+      UINT dpi = GetDpiForWindow(root_owner);
+      int ui_h = (int)(72.0 * ((double)dpi / 96.0));
+      target_rect.top += ui_h;
+    }
+
+    int content_w = target_rect.right - target_rect.left;
+    int target_x = target_rect.left + (content_w - dialog_w) / 2;
+    int target_y = target_rect.top;  // 0px offset directly below toolbar (Edge style)
+
+    // Clamp to current monitor work area so dialog never falls off screen
+    HMONITOR hMon = MonitorFromRect(&target_rect, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi = {sizeof(MONITORINFO)};
+    if (GetMonitorInfo(hMon, &mi)) {
+      if (target_x < mi.rcWork.left) target_x = mi.rcWork.left;
+      if (target_x + dialog_w > mi.rcWork.right) target_x = mi.rcWork.right - dialog_w;
+      if (target_y < mi.rcWork.top) target_y = mi.rcWork.top;
+      if (target_y + dialog_h > mi.rcWork.bottom) target_y = mi.rcWork.bottom - dialog_h;
+    }
+
+    *out_x = target_x;
+    *out_y = target_y;
+    return 1;
   }
 
-  RECT target_rect = {0};
-  if (target_content_hwnd && IsWindow(target_content_hwnd)) {
-    GetWindowRect(target_content_hwnd, &target_rect);
-  } else {
-    GetWindowRect(root_owner, &target_rect);
-    UINT dpi = GetDpiForWindow(root_owner);
-    int ui_h = (int)(72.0 * ((double)dpi / 96.0));
-    target_rect.top += ui_h;
-  }
-
-  int content_w = target_rect.right - target_rect.left;
-  int target_x = target_rect.left + (content_w - dialog_w) / 2;
-  int target_y = target_rect.top;  // 0px offset directly below toolbar (Edge style)
-
-  // Clamp to current monitor work area so dialog never falls off screen
-  HMONITOR hMon = MonitorFromRect(&target_rect, MONITOR_DEFAULTTONEAREST);
-  MONITORINFO mi = {sizeof(MONITORINFO)};
-  if (GetMonitorInfo(hMon, &mi)) {
-    if (target_x < mi.rcWork.left) target_x = mi.rcWork.left;
-    if (target_x + dialog_w > mi.rcWork.right) target_x = mi.rcWork.right - dialog_w;
-    if (target_y < mi.rcWork.top) target_y = mi.rcWork.top;
-    if (target_y + dialog_h > mi.rcWork.bottom) target_y = mi.rcWork.bottom - dialog_h;
-  }
-
-  *out_x = target_x;
-  *out_y = target_y;
-  return 1;
+  // 3. Other windows (Autofill, suggestions, dropdowns, etc.) - do not reposition
+  return 0;
 }
 
 static BOOL is_candidate_dialog_window(HWND hwnd) {
@@ -231,6 +270,7 @@ static LRESULT CALLBACK ModalDialogSubclassProc(
 
     case WM_NCDESTROY:
       RemovePropA(hWnd, "LiteBrowser_IsBubble");
+      RemovePropA(hWnd, "LiteBrowser_IsModal");
       RemoveWindowSubclass(hWnd, ModalDialogSubclassProc, uIdSubclass);
       break;
   }

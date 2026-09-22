@@ -1368,3 +1368,62 @@ Jira(`https://jira.chipsnmedia.com/browse/ILUMAT26-67`) 등 자바스크립트 �
   - `https://jira.chipsnmedia.com/browse/ILUMAT26-67`에서 링크를 `Ctrl + 좌클릭` 또는 우클릭 컨텍스트 메뉴로 새 탭을 열었을 때, 주소창 클릭 없이 댓글/검색 필드 클릭 즉시 Windows 11 사각형 플로팅 IME 조합창 없이 정상 인라인 한글 조합 동작 확인.
   - 상단 탭 전환(`switch-tab`), 주소창 직접 입력, 단축키, 창 크기 조절 등 모든 기능이 정상 작동함을 최종 검증 완료.
 
+---
+
+## 44. 다이얼로그 3단계 분리 배치 아키텍처 (다운로드 완료 버블 / 웹 모달 다이얼로그 / 입력 도우미 분리 제어)
+
+### 44.1 개요
+CEF 코어가 생성하는 팝업 윈도우(`Chrome_WidgetWin_1`)는 Win32 레벨에서 자식 윈도우(`WS_CHILD`인 탭 콘텐츠)를 `GW_OWNER`로 둘 수 없어 모두 메인 최상위 윈도우(`root_owner`)를 소유자로 가집니다.
+이로 인해 다운로드 완료 버블을 우측 상단으로 이동시키는 과정에서 웹 모달 다이얼로그(Alert, Confirm 등)와 텍스트 필드의 **자동완성(Autofill) 추천 목록** 등 입력 도우미 팝업까지 중앙 상단으로 튀는 사이드 이펙트가 발생했습니다.
+이를 해결하기 위해 윈도우 스타일, DPI 비례 치수, 타이틀 및 다운로드 상태를 종합 분석하여 다이얼로그를 **3단계로 완전 분리 제어**하는 아키텍처를 구축했습니다.
+
+### 44.2 실측 윈도우 시그니처 분석
+진단 로거를 통해 수집된 실제 윈도우 데이터 분석 결과:
+
+1. **다운로드 완료 버블 ("최근 다운로드 기록" / "Recent download history")**:
+   - `ex_style`: `WS_EX_TOOLWINDOW (0x80)` 보유, `WS_EX_DLGMODALFRAME (0x01)` 미보유
+   - 너비: 418px 고정 (`views::BubbleDialogDelegateView` 표준 규격, DPI 비례: `(int)(418.0 * dpi / 96.0)`)
+   - 상태: 다운로드 완료 직후 이벤트(`bubble_exp == 1`)
+   - **배치 위치**: 브라우저 창의 **우측 상단** (우측 끝 1px 여백, 툴바 하단 2px 여백)
+2. **웹 모달 다이얼로그 (Alert, Confirm, Prompt, BeforeUnload, HTTP Auth, 사이트 권한 요청)**:
+   - `ex_style` / `style`: `WS_EX_DLGMODALFRAME (0x01)` 또는 `DS_MODALFRAME (0x80)` 보유, `WS_EX_TOOLWINDOW` 미보유
+   - 윈도우 제목: `GetWindowTextLengthW > 0` (메시지 또는 도메인 표기)
+   - 크기: 너비 360px 이상 (Chromium 표준 모달 너비: 512px ~ 580px)
+   - **배치 위치**: 활성 탭 본문 영역의 **가로 중앙 상단** (툴바 직하단 0px 오프셋, Edge 스타일)
+3. **기타 윈도우 (자동완성/Autofill 팝업, 추천 목록, 셀렉트박스 드롭다운 등)**:
+   - `WS_EX_DLGMODALFRAME` 및 `WS_EX_TOOLWINDOW` 없음
+   - 윈도우 제목 없음 (`title_len == 0`)
+   - **배치 위치**: **원래 위치 유지** (재배치 금지, 입력 필드 바로 아래 정상 노출)
+
+### 44.3 주요 구현 내용 (`simple_dialog_helper.c`)
+1. **복합 다운로드 버블 판별기 (`is_download_bubble_window`)**:
+   - `WS_EX_DLGMODALFRAME` 감지 시 즉시 0 반환 (웹 모달 배제).
+   - `WS_EX_TOOLWINDOW` 보유 시 DPI 비례 418px 너비 일치(`±8px`) 또는 `simple_download_is_bubble_expected()` 활성 검사.
+   - 창 제목 키워드('다운로드'/'Download') 폴백 검사.
+   - 첫 감지 시 `SetPropA(dialog_hwnd, "LiteBrowser_IsBubble", (HANDLE)1)`로 태깅하여 연속적인 `WM_WINDOWPOSCHANGING` 시 일관성 보장.
+2. **웹 모달 판별기 (`is_web_modal_dialog_window`)**:
+   - `WS_EX_TOOLWINDOW` 배제.
+   - `WS_EX_DLGMODALFRAME` 또는 `DS_MODALFRAME` 검사.
+   - 창 제목 존재(`title_len > 0`) 및 모달 표준 너비(`w >= 360px * (dpi / 96)`) 검사.
+   - 감지 시 `SetPropA(dialog_hwnd, "LiteBrowser_IsModal", (HANDLE)1)` 태깅.
+3. **3단계 분기 타깃 좌표 계산기 (`calculate_dialog_target_pos`)**:
+   - 1단계: 다운로드 버블인 경우 우측 상단(우측 1px, 하단 2px) 좌표 계산 후 `return 1;`
+   - 2단계: 웹 모달인 경우 활성 탭(분할 뷰 좌/우 탭 핸들 포함) 가로 중앙 상단 좌표 계산 후 `return 1;`
+   - 3단계: 기타 윈도우(자동완성 등)는 **`return 0;` 반환**하여 `pos->flags &= ~SWP_NOMOVE` 및 `SetWindowPos`를 일체 호출하지 않음으로써 본래 위치 보존.
+4. **상태바/링크 툴팁 간섭 차단 및 리소스 정리**:
+   - `w >= 240 && w <= 950 && h >= 80 && h <= 650` 크기 필터 적용으로 28px 높이의 링크 호버 툴팁 간섭 원천 차단.
+   - `WM_NCDESTROY` 수신 시 `LiteBrowser_IsBubble` 및 `LiteBrowser_IsModal` 프로퍼티 완벽 해제.
+
+### 44.4 관련 소스 코드
+- [`cef_binary_151.3.24/tests/cefsimple_capi/simple_dialog_helper.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_dialog_helper.c)
+- [`cef_binary_151.3.24/tests/cefsimple_capi/simple_download_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_download_handler.c)
+
+### 44.5 빌드 및 검증 결과
+- **디버그 빌드**: `cmake --build c:\projects\lite_browser\cef_binary_151.3.24\build --config Debug --target cefsimple_capi` 성공 (`Exit code 0`).
+- **바이너리 생성**: `cef_binary_151.3.24\build\tests\cefsimple_capi\Debug\lite_browser.exe` 및 `lite_browser.dll` 정상 갱신.
+- **실행 검증**:
+  - 회원가입/로그인 양식의 이메일/아이디 입력창에서 자동완성(Autofill) 추천 목록이 입력창 바로 아래에 자연스럽게 노출됨을 확인.
+  - 새로고침 확인 및 JavaScript `alert()` / `confirm()` 창이 활성 탭 가로 중앙 상단에 정확히 배치됨을 확인.
+  - 파일 다운로드 완료 시 나타나는 버블 창이 브라우저 우측 상단(우측 1px 여백)에 완벽히 정렬됨을 최종 검증 완료.
+
+
