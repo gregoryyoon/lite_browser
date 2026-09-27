@@ -1109,6 +1109,76 @@ int CEF_CALLBACK request_handler_on_before_browse(
       }
     }
 
+    // Intercept OAuth 2.0 PKCE Callbacks (Aside style interactive authorization)
+    if (url_utf8.str) {
+      const char* nav_url = url_utf8.str;
+      const char* oauth_prov = NULL;
+      if (strncmp(nav_url, "http://localhost:1455/auth/callback", 35) == 0) {
+        oauth_prov = "openai";
+      } else if (strncmp(nav_url, "https://platform.claude.com/oauth/code/callback", 48) == 0 ||
+                 strncmp(nav_url, "https://console.anthropic.com/oauth/code/callback", 47) == 0 ||
+                 strncmp(nav_url, "https://claude.ai/oauth/code/callback", 37) == 0) {
+        oauth_prov = "anthropic";
+      }
+
+      if (oauth_prov) {
+        const char* q = strchr(nav_url, '?');
+        char* code_val = q ? get_query_param(q + 1, "code") : NULL;
+        char* err_val = q ? get_query_param(q + 1, "error") : NULL;
+        char* err_desc = q ? get_query_param(q + 1, "error_description") : NULL;
+        char* state_val = q ? get_query_param(q + 1, "state") : NULL;
+
+        simple_request_handler_t *req_h = (simple_request_handler_t*)self;
+        simple_handler_t *p_h = req_h->parent;
+        browser_window_t *w_ctx = p_h ? p_h->window_ctx : NULL;
+
+        if (w_ctx) {
+          // If this browser is a tab in w_ctx, close the auth tab
+          for (int t = 0; t < w_ctx->tab_count; ++t) {
+            if (w_ctx->tabs[t].browser &&
+                browser->get_identifier(browser) == w_ctx->tabs[t].browser->get_identifier(w_ctx->tabs[t].browser)) {
+              if (w_ctx->tab_count > 1) {
+                RemoveTabAt(w_ctx, t, 1);
+              }
+              break;
+            }
+          }
+
+          // Forward OAuth code or error to sidepanel browser
+          cef_browser_t* sb = w_ctx->sidepanel_browser;
+          if (sb) {
+            cef_frame_t* sf = sb->get_main_frame(sb);
+            if (sf) {
+              if (err_desc) { for (char* p = err_desc; *p; p++) { if (*p == '\'' || *p == '\"' || *p == '\n' || *p == '\r') *p = ' '; } }
+              if (err_val) { for (char* p = err_val; *p; p++) { if (*p == '\'' || *p == '\"' || *p == '\n' || *p == '\r') *p = ' '; } }
+              if (state_val) { for (char* p = state_val; *p; p++) { if (*p == '\'' || *p == '\"' || *p == '\n' || *p == '\r') *p = ' '; } }
+              char js_call[4096];
+              snprintf(js_call, sizeof(js_call),
+                "if (window.onOAuthCallback) { window.onOAuthCallback('%s', '%s', '%s', '%s'); }",
+                oauth_prov,
+                code_val ? code_val : "",
+                err_val ? (err_desc ? err_desc : err_val) : "",
+                state_val ? state_val : "");
+              cef_string_t js_str = {};
+              cef_string_from_utf8(js_call, strlen(js_call), &js_str);
+              sf->execute_java_script(sf, &js_str, NULL, 0);
+              cef_string_clear(&js_str);
+              sf->base.release(&sf->base);
+            }
+          }
+        }
+
+        if (code_val) free(code_val);
+        if (err_val) free(err_val);
+        if (err_desc) free(err_desc);
+        if (state_val) free(state_val);
+
+        cef_string_utf8_clear(&url_utf8);
+        cef_string_userfree_free(url_userfree);
+        return 1; // Navigation intercepted and canceled
+      }
+    }
+
     if (url_utf8.str && strncmp(url_utf8.str, "http://ui-action/", 17) == 0) {
       const char *action = url_utf8.str + 17;
       LogMsg("Interrupted ui-action: %s\n", action);
@@ -1345,6 +1415,30 @@ int CEF_CALLBACK request_handler_on_before_browse(
             }
             free(provider);
           }
+        } else if (strncmp(action, "oauth-start?", 12) == 0) {
+          const char* query = action + 12;
+          char* prov = get_query_param(query, "provider");
+          char* url_b64 = get_query_param(query, "url_b64");
+          char* url = NULL;
+          if (url_b64) {
+            for (char* p = url_b64; *p; p++) {
+              if (*p == ' ') *p = '+';
+            }
+            size_t decoded_len = 0;
+            unsigned char* decoded = base64_decode(url_b64, &decoded_len);
+            if (decoded) {
+              url = (char*)decoded;
+            }
+            free(url_b64);
+          }
+          if (!url) {
+            url = get_query_param(query, "url");
+          }
+          if (url && strlen(url) > 0 && win_ctx) {
+            CreateNewTab(win_ctx, url);
+          }
+          if (prov) free(prov);
+          if (url) free(url);
         } else if (strncmp(action, "ai-highlight-element?", 21) == 0) {
           const char* query = action + 21;
           char* selector = get_query_param(query, "selector");
@@ -1790,6 +1884,60 @@ int CEF_CALLBACK request_handler_on_before_browse(
                 char* js_code = (char*)malloc(decoded_len + 128);
                 if (js_code) {
                   snprintf(js_code, decoded_len + 128, "if (window.onAgentDomExtracted) { window.onAgentDomExtracted(%s); }", (char*)decoded);
+                  cef_frame_t* rf = target_b->get_main_frame(target_b);
+                  if (rf) {
+                    cef_string_t js_str = {};
+                    cef_string_from_utf8(js_code, strlen(js_code), &js_str);
+                    rf->execute_java_script(rf, &js_str, NULL, 0);
+                    cef_string_clear(&js_str);
+                    rf->base.release(&rf->base);
+                  }
+                  free(js_code);
+                }
+              }
+              free(decoded);
+            }
+            free(data_b64);
+          }
+        } else if (strcmp(action, "ai-get-selection") == 0) {
+          if (cb) {
+            const char* sel_script =
+              "(function() {"
+              "  try {"
+              "    const sel = (window.getSelection() ? window.getSelection().toString() : '').trim();"
+              "    const data = { selection: sel, url: window.location.href, title: document.title };"
+              "    const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(data))));"
+              "    window.location.href = 'http://ui-action/ai-selection-result?data=' + encodeURIComponent(b64);"
+              "  } catch(e) {}"
+              "})();";
+            cef_frame_t* f = cb->get_main_frame(cb);
+            if (f) {
+              cef_string_t js_str = {};
+              cef_string_from_utf8(sel_script, strlen(sel_script), &js_str);
+              f->execute_java_script(f, &js_str, NULL, 0);
+              cef_string_clear(&js_str);
+              f->base.release(&f->base);
+            }
+          }
+        } else if (strncmp(action, "ai-selection-result?", 20) == 0) {
+          const char* query = action + 20;
+          char* data_b64 = get_query_param(query, "data");
+          if (data_b64) {
+            for (char* p = data_b64; *p; p++) {
+              if (*p == ' ') *p = '+';
+            }
+            size_t decoded_len = 0;
+            unsigned char* decoded = base64_decode(data_b64, &decoded_len);
+            if (decoded) {
+              cef_browser_t* target_b = win_ctx->sidepanel_browser;
+              if (!target_b && win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+                tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
+                target_b = (active_tab->is_split && active_tab->right_browser) ? active_tab->right_browser : active_tab->browser;
+              }
+              if (target_b) {
+                char* js_code = (char*)malloc(decoded_len + 128);
+                if (js_code) {
+                  snprintf(js_code, decoded_len + 128, "if (window.onAgentSelectionExtracted) { window.onAgentSelectionExtracted(%s); }", (char*)decoded);
                   cef_frame_t* rf = target_b->get_main_frame(target_b);
                   if (rf) {
                     cef_string_t js_str = {};

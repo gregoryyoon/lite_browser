@@ -104,10 +104,12 @@ class GeminiProvider extends AIProviderInterface {
         if (this.subscriptionToken.startsWith('ya29.')) {
           url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:streamGenerateContent?alt=sse`;
           headers['Authorization'] = `Bearer ${this.subscriptionToken}`;
+        } else if (this.subscriptionToken.startsWith('AIza') || this.subscriptionToken.length >= 20) {
+          url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:streamGenerateContent?alt=sse&key=${encodeURIComponent(this.subscriptionToken)}`;
         } else if (this.apiKey) {
           url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:streamGenerateContent?alt=sse&key=${encodeURIComponent(this.apiKey)}`;
         } else {
-          throw new Error('Google Gemini API 통신을 위해 Google OAuth Access Token(ya29...) 또는 Gemini API Key가 필요합니다. 설정(⚙️)에서 [API Key] 또는 [수동 액세스 토큰]을 등록해주세요.');
+          throw new Error('Google Gemini API 통신을 위해 Google AI Studio 무료 키(AIza...) 또는 Google OAuth 토큰이 필요합니다. 설정(⚙️)에서 등록해주세요.');
         }
       } else {
         if (!this.apiKey) throw new Error('Gemini API 키가 설정되지 않았습니다. 설정(⚙️)에서 입력해주세요.');
@@ -293,56 +295,109 @@ class OpenAIProvider extends AIProviderInterface {
 
   async chatStream({ messages, tools, systemPrompt, onChunk, onThinking, onToolCall, onStatus, onComplete, onError, signal }) {
     try {
-      const headers = { 'Content-Type': 'application/json' };
+      let url = '';
+      const headers = {
+        'Content-Type': 'application/json',
+        'Accept': 'text/event-stream'
+      };
+      let body = {};
+
       if (this.authType === 'subscription') {
-        if (!this.subscriptionToken) throw new Error('OpenAI ChatGPT 구독 계정이 연결되지 않았습니다. 설정(⚙️)에서 로그인해주세요.');
+        if (!this.subscriptionToken) throw new Error('OpenAI ChatGPT 구독 계정이 연결되지 않았습니다. 설정(⚙️)에서 구독 연결을 진행해주세요.');
         headers['Authorization'] = `Bearer ${this.subscriptionToken}`;
-      } else {
-        if (!this.apiKey) throw new Error('OpenAI API 키가 설정되지 않았습니다. 설정(⚙️)에서 입력해주세요.');
-        headers['Authorization'] = `Bearer ${this.apiKey}`;
-      }
+        headers['User-Agent'] = 'codex-cli/1.0';
+        url = 'https://chatgpt.com/backend-api/codex/responses';
 
-      const url = `${this.baseUrl}/chat/completions`;
-      const fullMessages = [];
-      if (systemPrompt) {
-        fullMessages.push({ role: 'system', content: systemPrompt });
-      }
-
-      for (const msg of messages) {
-        if (msg.role === 'tool') {
-          fullMessages.push({
-            role: 'tool',
-            tool_call_id: msg.tool_call_id || msg.id || ('call_' + (msg.name || 'tool')),
-            name: msg.name,
-            content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)
-          });
-        } else if (msg.role === 'assistant') {
-          const m = { role: 'assistant', content: msg.content || null };
-          if (msg.tool_calls && msg.tool_calls.length > 0) {
-            m.tool_calls = msg.tool_calls;
+        // Responses API format: input array and flattened tools
+        const inputItems = [];
+        for (const msg of messages) {
+          if (msg.role === 'tool') {
+            inputItems.push({
+              type: 'function_call_output',
+              call_id: msg.tool_call_id || msg.id || ('call_' + (msg.name || 'tool')),
+              output: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)
+            });
+          } else if (msg.role === 'assistant') {
+            if (msg.content) {
+              inputItems.push({ role: 'assistant', content: msg.content });
+            }
+            if (msg.tool_calls && msg.tool_calls.length > 0) {
+              for (const tc of msg.tool_calls) {
+                const fn = tc.function || tc;
+                inputItems.push({
+                  type: 'function_call',
+                  call_id: tc.id || ('call_' + (fn.name || 'tool')),
+                  name: fn.name,
+                  arguments: typeof fn.arguments === 'string' ? fn.arguments : JSON.stringify(fn.arguments || {})
+                });
+              }
+            }
+          } else if (msg.role === 'user') {
+            inputItems.push({ role: 'user', content: msg.content });
           }
-          fullMessages.push(m);
-        } else if (msg.role === 'user') {
-          fullMessages.push({ role: 'user', content: msg.content });
         }
-      }
 
-      const openaiTools = tools ? tools.map(t => ({
-        type: 'function',
-        function: {
+        const codexTools = tools ? tools.map(t => ({
+          type: 'function',
           name: t.name,
           description: t.description,
           parameters: t.parameters || t.inputSchema || {}
-        }
-      })) : undefined;
+        })) : undefined;
 
-      const body = {
-        model: this.model,
-        messages: fullMessages,
-        temperature: this.temperature,
-        stream: true,
-        tools: openaiTools
-      };
+        body = {
+          model: this.model,
+          instructions: systemPrompt || undefined,
+          input: inputItems,
+          stream: true,
+          store: false,
+          tools: codexTools
+        };
+      } else {
+        if (!this.apiKey) throw new Error('OpenAI API 키가 설정되지 않았습니다. 설정(⚙️)에서 입력해주세요.');
+        headers['Authorization'] = `Bearer ${this.apiKey}`;
+        url = `${this.baseUrl}/chat/completions`;
+
+        const fullMessages = [];
+        if (systemPrompt) {
+          fullMessages.push({ role: 'system', content: systemPrompt });
+        }
+
+        for (const msg of messages) {
+          if (msg.role === 'tool') {
+            fullMessages.push({
+              role: 'tool',
+              tool_call_id: msg.tool_call_id || msg.id || ('call_' + (msg.name || 'tool')),
+              name: msg.name,
+              content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)
+            });
+          } else if (msg.role === 'assistant') {
+            const m = { role: 'assistant', content: msg.content || null };
+            if (msg.tool_calls && msg.tool_calls.length > 0) {
+              m.tool_calls = msg.tool_calls;
+            }
+            fullMessages.push(m);
+          } else if (msg.role === 'user') {
+            fullMessages.push({ role: 'user', content: msg.content });
+          }
+        }
+
+        const openaiTools = tools ? tools.map(t => ({
+          type: 'function',
+          function: {
+            name: t.name,
+            description: t.description,
+            parameters: t.parameters || t.inputSchema || {}
+          }
+        })) : undefined;
+
+        body = {
+          model: this.model,
+          messages: fullMessages,
+          temperature: this.temperature,
+          stream: true,
+          tools: openaiTools
+        };
+      }
 
       const response = await fetchWithBackoff(url, {
         method: 'POST',
@@ -355,6 +410,7 @@ class OpenAIProvider extends AIProviderInterface {
       const decoder = new TextDecoder();
       let buffer = '';
       let fullText = '';
+      let accumulatedThinking = '';
       const toolCallsMap = {};
 
       while (true) {
@@ -373,22 +429,105 @@ class OpenAIProvider extends AIProviderInterface {
 
           try {
             const data = JSON.parse(jsonStr);
-            const delta = data.choices?.[0]?.delta;
-            if (!delta) continue;
 
-            if (delta.content && onChunk) {
-              fullText += delta.content;
-              onChunk(delta.content, fullText);
-            }
-            if (delta.tool_calls) {
-              for (const tc of delta.tool_calls) {
-                const idx = tc.index ?? 0;
-                if (!toolCallsMap[idx]) {
-                  toolCallsMap[idx] = { id: tc.id || '', name: tc.function?.name || '', argsStr: '' };
+            // 1. Standard OpenAI Chat Completions SSE format
+            const delta = data.choices?.[0]?.delta;
+            if (delta) {
+              if (delta.content && onChunk) {
+                fullText += delta.content;
+                onChunk(delta.content, fullText);
+              }
+              if (delta.tool_calls) {
+                for (const tc of delta.tool_calls) {
+                  const idx = tc.index ?? 0;
+                  if (!toolCallsMap[idx]) {
+                    toolCallsMap[idx] = { id: tc.id || '', name: tc.function?.name || '', argsStr: '' };
+                  }
+                  if (tc.id) toolCallsMap[idx].id = tc.id;
+                  if (tc.function?.name) toolCallsMap[idx].name = tc.function.name;
+                  if (tc.function?.arguments) toolCallsMap[idx].argsStr += tc.function.arguments;
                 }
-                if (tc.id) toolCallsMap[idx].id = tc.id;
-                if (tc.function?.name) toolCallsMap[idx].name = tc.function.name;
-                if (tc.function?.arguments) toolCallsMap[idx].argsStr += tc.function.arguments;
+              }
+            }
+
+            // 2. OpenAI Codex Responses API SSE format
+            const eventType = data.type || '';
+
+            // Output text chunks (support all Responses API event variations)
+            if (
+              eventType === 'response.output_text.delta' ||
+              eventType === 'response.text.delta' ||
+              eventType === 'response.output_item.delta' ||
+              eventType === 'response.content_part.delta'
+            ) {
+              const text = data.delta?.text || data.delta?.value || (typeof data.delta === 'string' ? data.delta : '') || data.text || '';
+              if (text) {
+                fullText += text;
+                if (onChunk) onChunk(text, fullText);
+              }
+            }
+
+            // Reasoning / thinking chunks
+            if (
+              eventType === 'response.reasoning_text.delta' ||
+              eventType === 'response.reasoning.delta' ||
+              eventType === 'response.thought.delta'
+            ) {
+              const thought = data.delta?.text || (typeof data.delta === 'string' ? data.delta : '') || data.text || '';
+              if (thought) {
+                accumulatedThinking += thought;
+                if (onThinking) onThinking(thought, accumulatedThinking);
+              }
+            }
+
+            // Function call item added
+            if (eventType === 'response.output_item.added' && (data.item?.type === 'function_call' || data.item?.type === 'custom_tool_call')) {
+              const callId = data.item.call_id || data.item.id || ('call_' + Object.keys(toolCallsMap).length);
+              toolCallsMap[callId] = {
+                id: data.item.call_id || callId,
+                name: data.item.name || '',
+                argsStr: data.item.arguments || ''
+              };
+            }
+
+            // Function call arguments delta
+            if (eventType === 'response.function_call_arguments.delta') {
+              const keys = Object.keys(toolCallsMap);
+              const targetKey = data.call_id || data.item_id || keys[keys.length - 1];
+              if (targetKey && toolCallsMap[targetKey]) {
+                toolCallsMap[targetKey].argsStr += (data.delta || data.arguments || '');
+              }
+            }
+
+            // Function call item completed
+            if (eventType === 'response.output_item.done' && data.item?.type === 'function_call') {
+              const callId = data.item.call_id || data.item.id;
+              if (callId && toolCallsMap[callId] && data.item.arguments) {
+                toolCallsMap[callId].argsStr = data.item.arguments;
+              }
+            }
+
+            // Response completed (full response fallback if deltas were somehow missed)
+            if ((eventType === 'response.completed' || eventType === 'response.done') && data.response?.output) {
+              for (const item of data.response.output) {
+                if (item.type === 'message' && Array.isArray(item.content)) {
+                  for (const part of item.content) {
+                    const partText = part.text || part.output_text || (typeof part === 'string' ? part : '');
+                    if (partText && !fullText) {
+                      fullText = partText;
+                      if (onChunk) onChunk(partText, fullText);
+                    }
+                  }
+                } else if (item.type === 'function_call') {
+                  const callId = item.call_id || item.id || ('call_' + Object.keys(toolCallsMap).length);
+                  if (!toolCallsMap[callId]) {
+                    toolCallsMap[callId] = {
+                      id: item.call_id || callId,
+                      name: item.name || '',
+                      argsStr: item.arguments || ''
+                    };
+                  }
+                }
               }
             }
           } catch (e) {}
@@ -407,7 +546,7 @@ class OpenAIProvider extends AIProviderInterface {
         }
       }
 
-      if (onComplete) onComplete({ fullText });
+      if (onComplete) onComplete({ fullText, accumulatedThinking });
     } catch (err) {
       if (err.name === 'AbortError') {
         if (onComplete) onComplete({ fullText: '', interrupted: true });
@@ -436,7 +575,11 @@ class AnthropicProvider extends AIProviderInterface {
 
       if (this.authType === 'subscription') {
         if (!this.subscriptionToken) throw new Error('Anthropic Claude 구독 계정이 연결되지 않았습니다. 설정(⚙️)에서 로그인해주세요.');
-        headers['Authorization'] = `Bearer ${this.subscriptionToken}`;
+        if (this.subscriptionToken.startsWith('sk-ant-')) {
+          headers['x-api-key'] = this.subscriptionToken;
+        } else {
+          headers['Authorization'] = `Bearer ${this.subscriptionToken}`;
+        }
       } else {
         if (!this.apiKey) throw new Error('Anthropic API 키가 설정되지 않았습니다. 설정(⚙️)에서 입력해주세요.');
         headers['x-api-key'] = this.apiKey;

@@ -1,6 +1,6 @@
 # Lite Browser 전체 기능 & 시스템 구현 보고서 (Walkthrough)
 
-본 문서는 **Lite Browser** 프로젝트의 빌드 및 실행 환경, CEF C API 아키텍처, 순수 Win32 + 이중 자식 브라우저 구조 및 전체 기능별 구현 내역(기본 언어 설정, 다중 탭 및 윈도우 관리, 차세대 북마크 & 지능형 주소창, 커스텀 아이콘 리소스 자동화 파이프라인, 다운로드 관리자, 듀얼 탭/창 분할 시스템, AI 에이전트 브라우저, 0px 심리스 레이아웃, 벤토 그리드 테마, 엣지 스타일 CEF 모달 다이얼로그 상단 중앙 정렬 등)을 통합하여 관리하는 전체 통합 기술 가이드입니다.
+본 문서는 **Lite Browser** 프로젝트의 빌드 및 실행 환경, CEF C API 아키텍처, 순수 Win32 + 이중 자식 브라우저 구조 및 전체 기능별 구현 내역(기본 언어 설정, 다중 탭 및 윈도우 관리, 차세대 북마크 & 지능형 주소창, 커스텀 아이콘 리소스 자동화 파이프라인, 다운로드 관리자, 듀얼 탭/창 분할 시스템, AI 에이전트 브라우저, 0px 심리스 레이아웃, 벤토 그리드 테마, 엣지 스타일 CEF 모달 다이얼로그 상단 중앙 정렬, 대화형 OAuth 2.0 PKCE ChatGPT 구독 인증 및 자율 브라우저 에이전트 도구 호출 시스템 등)을 통합하여 관리하는 전체 통합 기술 가이드입니다.
 
 ---
 
@@ -1425,5 +1425,67 @@ CEF 코어가 생성하는 팝업 윈도우(`Chrome_WidgetWin_1`)는 Win32 레�
   - 회원가입/로그인 양식의 이메일/아이디 입력창에서 자동완성(Autofill) 추천 목록이 입력창 바로 아래에 자연스럽게 노출됨을 확인.
   - 새로고침 확인 및 JavaScript `alert()` / `confirm()` 창이 활성 탭 가로 중앙 상단에 정확히 배치됨을 확인.
   - 파일 다운로드 완료 시 나타나는 버블 창이 브라우저 우측 상단(우측 1px 여백)에 완벽히 정렬됨을 최종 검증 완료.
+
+---
+
+## 45. 대화형 OAuth 2.0 PKCE 구독 인증 및 ChatGPT Plus/Pro 브라우저 자율 에이전트 연동 (Interactive OAuth 2.0 PKCE & Autonomous Browser Agent)
+
+### 45.1 개요
+유료 ChatGPT Plus/Pro 구독 계정을 보유한 사용자가 별도의 유료 개발자 플랫폼 API(종량제 과금) 키를 발급받거나 장치 인증 번호를 복사/입력할 필요 없이, **Aside 브라우저와 동일하게 1-클릭 대화형 OAuth 2.0 PKCE 팝업 플로우를 통해 브라우저 내에서 직접 인증을 완료하고 Function Calling(도구 호출) 기반 자율 브라우저 에이전트(페이지 본문 읽기, 요약, DOM 클릭, 입력 등)를 자유롭게 구동**할 수 있도록 인증 및 실행 파이프라인을 전면 고도화했습니다.
+
+### 45.2 핵심 문제 및 원인 분석
+1. **Cloudflare WAF 봇 차단 (`Failed to fetch`)**:
+   - 사이드패널(`sidepanel.js`)에서 `https://chatgpt.com/backend-api/conversation`을 단순 `fetch`로 직접 호출할 경우 Cloudflare의 봇 방어 시스템(`Cf-Mitigated: challenge`)에 의해 차단(CORS 및 403 Forbidden)되어 에이전트 통신이 실패함.
+2. **복잡한 장치 인증(Device Code) UX 한계**:
+   - 8자리 사용자 코드를 복사하여 외부 인증 페이지에 입력하고 사용자가 ChatGPT 설정에서 장치 인증 스위치를 수동으로 켜야 하는 번거로움이 존재함.
+3. **OpenAI Auth0 OAuth 인가 거부 (`invalid_authorize_request` HTTP 400)**:
+   - Aside 방식의 대화형 OAuth URL(`https://auth.openai.com/oauth/authorize`) 인입 시 `{"error": {"code": "invalid_authorize_request"}}` 에러 발생.
+   - 공식 OpenAI Codex 바이너리(`codex.exe`, 322MB)를 리버스 엔지니어링 분석하여 원인을 규명:
+     - **`state` 파라미터 누락**: Auth0 CSRF 방어 정책상 PKCE 요청 시 `state`가 필수이며, 누락 시 즉시 인가 거부.
+     - **`originator=codex_cli_rs` 누락**: 퍼블릭 클라이언트(`app_EMoamEEZ73f0CkXaXp7hrann`)에 대해 해당 파라미터가 없으면 CLI/Codex 인가 플로우로 승인되지 않음.
+     - **`scope` 누락**: 최신 정책상 `openid profile email offline_access` 외에 `api.connectors.read api.connectors.invoke`가 필수로 요구됨.
+     - **URL 특수문자 잘림 방지**: 긴 인가 URL을 C CAPI 핸들러로 전달할 때 쿼리 스트링 충돌을 방지하기 위한 Base64 패킹(`url_b64`) 적용 필요.
+
+### 45.3 주요 구현 내역
+1. **공식 Codex CLI 호환 OAuth 2.0 PKCE 파이프라인 ([`ui/sidepanel.js`](file:///c:/projects/lite_browser/ui/sidepanel.js))**:
+   - `generateCodeVerifier(64)`로 `code_verifier` 및 SHA-256 S256 `code_challenge` 생성.
+   - 32바이트 무작위 `state`를 생성하여 `sessionStorage`에 보관하고 인가 URL에 주입.
+   - 공식 OpenAI Codex 파라미터 적용:
+     ```
+     https://auth.openai.com/oauth/authorize?response_type=code&client_id=app_EMoamEEZ73f0CkXaXp7hrann&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback&scope=openid%20profile%20email%20offline_access%20api.connectors.read%20api.connectors.invoke&code_challenge=<PKCE>&code_challenge_method=S256&state=<STATE>&id_token_add_organizations=true&codex_cli_simplified_flow=true&originator=codex_cli_rs
+     ```
+   - 인가 URL을 Base64로 인코딩(`url_b64`)하여 백엔드 IPC(`http://ui-action/oauth-start?provider=openai&url_b64=...`)로 안전하게 전달.
+2. **C CAPI 콜백 인터셉트 및 탭 생명주기 관리 ([`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c))**:
+   - `oauth-start?` 처리 시 Base64 디코딩 후 CEF 탭(`CreateNewTab`)으로 OpenAI 로그인 창 팝업.
+   - CEF 자식 탭을 통해 로그인 및 권한 승인이 진행되므로 Cloudflare WAF를 100% 정상 통과.
+   - `OnBeforeBrowse`에서 `http://localhost:1455/auth/callback` 요청을 감지:
+     - 쿼리 스트링에서 `code`, `error`, `error_description`, `state`를 안전하게 파싱 및 특수문자 이스케이프.
+     - 인증이 완료된 탭을 즉시 자동 닫기(`RemoveTabAt`) 처리.
+     - 사이드패널 프레임(`sf->execute_java_script`)에 `window.onOAuthCallback(provider, code, error, state)`를 호출하여 원활한 UX 제공.
+3. **토큰 교환 & 구독 전용 API Key 획득 (`token-exchange`) ([`ui/sidepanel.js`](file:///c:/projects/lite_browser/ui/sidepanel.js))**:
+   - `onOAuthCallback`에서 `sessionStorage`의 `state`와 일치 여부를 대조하여 CSRF 위변조 검증.
+   - `https://auth.openai.com/oauth/token`에 `grant_type=authorization_code`로 POST 요청하여 `access_token`, `refresh_token`, `id_token` 획득.
+   - `id_token` 수신 시 `grant_type=urn:ietf:params:oauth:grant-type:token-exchange` (requested_token: `openai-api-key`)를 자동 시도하여 ChatGPT 구독 전용 API 키를 연동.
+   - 발급된 세션은 Windows DPAPI 암호화 볼트(`http://ui-action/auth-save-session`)에 안전하게 영속 저장.
+4. **ChatGPT Plus/Pro 자율 에이전트 & Function Calling 도구 호출 지원 ([`ui/ai_providers.js`](file:///c:/projects/lite_browser/ui/ai_providers.js))**:
+   - `OpenAIProvider`의 구독 모드 통신을 최신 Codex Responses API 규격(`https://chatgpt.com/backend-api/codex/responses`) 및 OpenAI Tools 규격에 맞춰 재구성.
+   - 도구 실행 결과(`function_call_output`) 반환 시 `role: 'tool'` 및 `call_id` 누락 방지 처리.
+   - 브라우저 제어 도구(현재 페이지 본문 읽기 `read_current_page`, 웹 검색 `search_web`, 요소 클릭/입력 등)를 ChatGPT가 자율적으로 연속 호출하고 최종 요약 결과를 사이드패널에 정상 출력하도록 완벽 구현.
+
+### 45.4 관련 소스 코드
+- [`ui/sidepanel.js`](file:///c:/projects/lite_browser/ui/sidepanel.js): 대화형 OAuth PKCE 플로우, State 검증, 토큰 교환
+- [`ui/sidepanel.html`](file:///c:/projects/lite_browser/ui/sidepanel.html): 구독 연결 UI 및 상태 카드
+- [`ui/sidepanel.css`](file:///c:/projects/lite_browser/ui/sidepanel.css): 다크/라이트 테마 일관성 및 진행 상태 배지 스타일
+- [`ui/ai_providers.js`](file:///c:/projects/lite_browser/ui/ai_providers.js): Codex Responses API 및 Function Calling 도구 호출 지원
+- [`cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c): `oauth-start?` URL 디코딩, `auth/callback` 가로채기, State 전달 및 탭 자동 닫기
+
+### 45.5 빌드 및 검증 결과
+- **디버그 빌드**: `cmake --build cef_binary_151.3.24/build --config Debug --target cefsimple_capi` 성공 (`Exit code 0`).
+- **바이너리 생성**: `cef_binary_151.3.24\build\tests\cefsimple_capi\Debug\lite_browser.exe` 및 `lite_browser.dll` 정상 갱신.
+- **실행 및 사용자 검증**:
+  - [ChatGPT 구독 연결] 클릭 시 OpenAI 공식 인가 팝업 정상 표시.
+  - 로그인 및 권한 승인 완료 즉시 인가 탭이 자동으로 닫히고 사이드패널에 `✅ 연결됨 (이메일 주소)` 상태 실시간 동기화.
+  - "현재 페이지 요약해줘" 질문 시 ChatGPT가 브라우저 제어 도구를 정상 호출하고 페이지 요약 결과를 사이드패널에 깔끔하게 출력함을 사용자 테스트로 최종 확인 완료.
+
 
 

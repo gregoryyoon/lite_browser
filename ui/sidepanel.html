@@ -69,7 +69,7 @@
                 <div class="auth-type-toggle">
                   <button type="button" class="auth-toggle-btn active" data-provider="gemini" data-mode="subscription">
                     <svg viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="5" rx="2"/><line x1="2" x2="22" y1="10" y2="10"/></svg>
-                    <span>Google/Gemini 구독</span>
+                    <span>Google AI Studio (무료)</span>
                   </button>
                   <button type="button" class="auth-toggle-btn" data-provider="gemini" data-mode="apikey">
                     <svg viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></svg>
@@ -80,32 +80,32 @@
 
               <div id="gemini-sub-box" class="auth-sub-card">
                 <div class="auth-sub-status" id="gemini-sub-status">
-                  <span class="auth-badge auth-badge-unconnected">
-                    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>
-                    <span>구독 미연결</span>
+                  <span class="auth-badge auth-badge-connected">
+                    <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+                    <span>1,500회/일 완전 무료 티어</span>
                   </span>
-                  <p class="auth-hint">Google Gemini(Advanced) 계정 로그인 또는 OAuth Access Token을 등록하여 API 키 없이 사용하세요.</p>
+                  <p class="auth-hint">Google AI Studio 키만 등록하면 <strong>추가 비용 0원(신용카드 불필요)</strong>으로 모든 최신 Gemini 모델과 네이티브 실시간 도구 호출을 사용하실 수 있습니다.</p>
                 </div>
                 <div class="auth-sub-actions">
                   <button type="button" class="btn btn-primary btn-sm auth-login-btn" data-provider="gemini">
-                    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
-                    <span>Google Gemini 로그인</span>
+                    <svg viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" x2="21" y1="14" y2="3"/></svg>
+                    <span>Google AI Studio 무료 키 발급</span>
                   </button>
                   <button type="button" class="btn btn-danger-outline btn-sm auth-logout-btn hidden" data-provider="gemini">
                     <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
                     <span>연결 해제</span>
                   </button>
                 </div>
-                <details class="auth-manual-details">
-                  <summary>수동 액세스 토큰 등록 (OAuth / gcloud Token)</summary>
-                  <div class="form-group" style="margin-top: 6px;">
-                    <input type="password" id="gemini-sub-token" placeholder="Bearer Token (gcloud auth print-access-token 또는 OAuth Token)">
-                    <button type="button" class="btn btn-secondary btn-sm auth-save-token-btn" data-provider="gemini" style="margin-top: 4px;">
+                <div class="auth-token-input-group" style="margin-top: 10px;">
+                  <label for="gemini-sub-token" style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px;">Google AI Studio 무료 키 (AIzaSy...):</label>
+                  <div style="display: flex; gap: 6px;">
+                    <input type="password" id="gemini-sub-token" placeholder="AIzaSy... (1,500회/일 완전 무료)" style="flex: 1; font-size: 12px; padding: 6px 10px;">
+                    <button type="button" class="btn btn-secondary btn-sm auth-save-token-btn" data-provider="gemini">
                       <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
-                      <span>토큰 저장</span>
+                      <span>저장</span>
                     </button>
                   </div>
-                </details>
+                </div>
               </div>
 
               <div id="gemini-apikey-box" class="hidden">
@@ -148,28 +148,32 @@
                     <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>
                     <span>구독 미연결</span>
                   </span>
-                  <p class="auth-hint">ChatGPT Plus/Team/Pro 구독 계정을 연결하여 추가 API 요금 없이 사용하세요.</p>
+                  <p class="auth-hint">ChatGPT Plus/Team/Pro 구독 계정을 1-클릭 대화형 승인하여 추가 API 요금 없이 사용하세요.</p>
                 </div>
                 <div class="auth-sub-actions">
                   <button type="button" class="btn btn-primary btn-sm auth-login-btn" data-provider="openai">
                     <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
-                    <span>ChatGPT 로그인</span>
+                    <span>ChatGPT 구독 연결</span>
                   </button>
                   <button type="button" class="btn btn-danger-outline btn-sm auth-logout-btn hidden" data-provider="openai">
                     <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
                     <span>연결 해제</span>
                   </button>
                 </div>
-                <details class="auth-manual-details">
-                  <summary>수동 세션 토큰 등록 (Access / Session Token)</summary>
-                  <div class="form-group" style="margin-top: 6px;">
-                    <input type="password" id="openai-sub-token" placeholder="Bearer Token (DPAPI로 암호화 저장)">
-                    <button type="button" class="btn btn-secondary btn-sm auth-save-token-btn" data-provider="openai" style="margin-top: 4px;">
-                      <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
-                      <span>토큰 저장</span>
-                    </button>
+
+                <!-- Aside Style Interactive OAuth 2.0 PKCE Inline Card -->
+                <div id="openai-oauth-box" class="device-code-box hidden">
+                  <div class="device-code-header">
+                    <span class="device-code-title">대화형 OAuth 승인 대기 중</span>
                   </div>
-                </details>
+                  <div class="device-code-polling">
+                    <div class="spinner-inline"></div>
+                    <span id="openai-oauth-status">새 탭에서 OpenAI 로그인 및 승인을 대기하고 있습니다...</span>
+                  </div>
+                  <p class="auth-hint" style="margin-top: 4px; font-size: 11px;">
+                    브라우저에 열린 승인 페이지에서 <strong>[승인(Authorize)]</strong>을 클릭하면 자동으로 연동이 완료됩니다.
+                  </p>
+                </div>
               </div>
 
               <div id="openai-apikey-box" class="hidden">
@@ -208,30 +212,45 @@
                 <div class="auth-sub-status" id="anthropic-sub-status">
                   <span class="auth-badge auth-badge-unconnected">
                     <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>
-                    <span>구독 미연결</span>
+                    <span>Claude Pro 미연결</span>
                   </span>
-                  <p class="auth-hint">Claude Pro/Team 구독 계정을 연결하여 추가 API 요금 없이 사용하세요.</p>
+                  <p class="auth-hint">Claude Pro/Max 계정을 1-클릭 대화형 승인하여 추가 API 요금 없이 사용하세요.</p>
                 </div>
                 <div class="auth-sub-actions">
                   <button type="button" class="btn btn-primary btn-sm auth-login-btn" data-provider="anthropic">
                     <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
-                    <span>Claude 로그인</span>
+                    <span>Claude Pro 구독 연결</span>
                   </button>
                   <button type="button" class="btn btn-danger-outline btn-sm auth-logout-btn hidden" data-provider="anthropic">
                     <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
                     <span>연결 해제</span>
                   </button>
                 </div>
-                <details class="auth-manual-details">
-                  <summary>수동 세션 토큰 등록 (Session Key / Token)</summary>
-                  <div class="form-group" style="margin-top: 6px;">
-                    <input type="password" id="anthropic-sub-token" placeholder="Session Token (DPAPI로 암호화 저장)">
-                    <button type="button" class="btn btn-secondary btn-sm auth-save-token-btn" data-provider="anthropic" style="margin-top: 4px;">
+
+                <!-- Claude OAuth PKCE Inline Card -->
+                <div id="anthropic-oauth-box" class="device-code-box hidden">
+                  <div class="device-code-header">
+                    <span class="device-code-title">대화형 OAuth 승인 대기 중</span>
+                  </div>
+                  <div class="device-code-polling">
+                    <div class="spinner-inline"></div>
+                    <span id="anthropic-oauth-status">새 탭에서 Claude 로그인 및 승인을 대기하고 있습니다...</span>
+                  </div>
+                  <p class="auth-hint" style="margin-top: 4px; font-size: 11px;">
+                    브라우저에 열린 승인 페이지에서 <strong>[승인]</strong>을 클릭하면 자동으로 연동이 완료됩니다.
+                  </p>
+                </div>
+
+                <div class="auth-token-input-group" style="margin-top: 10px;">
+                  <label for="anthropic-sub-token" style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px;">Claude Code 토큰 (claude setup-token) 또는 API Key:</label>
+                  <div style="display: flex; gap: 6px;">
+                    <input type="password" id="anthropic-sub-token" placeholder="OAuth Token 또는 API Key (DPAPI 암호화)" style="flex: 1; font-size: 12px; padding: 6px 10px;">
+                    <button type="button" class="btn btn-secondary btn-sm auth-save-token-btn" data-provider="anthropic">
                       <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
-                      <span>토큰 저장</span>
+                      <span>저장</span>
                     </button>
                   </div>
-                </details>
+                </div>
               </div>
 
               <div id="anthropic-apikey-box" class="hidden">

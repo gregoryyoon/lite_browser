@@ -84,6 +84,258 @@ document.addEventListener('DOMContentLoaded', () => {
     window.location.href = 'http://ui-action/auth-get-status';
   }
 
+  // --- PKCE OAuth 2.0 Utilities (Aside style) ---
+  function generateCodeVerifier(length = 64) {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
+    const arr = new Uint8Array(length);
+    if (window.crypto && window.crypto.getRandomValues) {
+      window.crypto.getRandomValues(arr);
+    } else {
+      for (let i = 0; i < length; i++) arr[i] = Math.floor(Math.random() * 256);
+    }
+    let res = '';
+    for (let i = 0; i < length; i++) res += chars[arr[i] % chars.length];
+    return res;
+  }
+
+  async function generateCodeChallenge(verifier) {
+    if (window.crypto && window.crypto.subtle && window.crypto.subtle.digest) {
+      try {
+        const data = new TextEncoder().encode(verifier);
+        const hash = await window.crypto.subtle.digest('SHA-256', data);
+        const b64 = btoa(String.fromCharCode(...new Uint8Array(hash)));
+        return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      } catch (e) {
+        console.warn('WebCrypto subtle digest failed, falling back to pure JS SHA256:', e);
+      }
+    }
+    return sha256Base64Url(verifier);
+  }
+
+  function sha256Base64Url(str) {
+    function rightRotate(value, amount) {
+      return (value >>> amount) | (value << (32 - amount));
+    }
+    const words = [];
+    const asciiBitLength = str.length * 8;
+    const hash = [
+      0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+      0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
+    ];
+    const k = [
+      0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+      0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+      0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+      0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+      0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+      0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+      0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+      0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+    ];
+    for (let i = 0; i < str.length; i++) {
+      words[i >> 2] |= (str.charCodeAt(i) & 255) << (8 * (3 - i % 4));
+    }
+    words[asciiBitLength >> 5] |= 0x80 << (24 - asciiBitLength % 32);
+    words[(((asciiBitLength + 64) >> 9) << 4) + 15] = asciiBitLength;
+    for (let i = 0; i < words.length; i += 16) {
+      const oldHash = hash.slice(0);
+      for (let j = 0; j < 64; j++) {
+        let w_j;
+        if (j < 16) {
+          w_j = words[i + j] | 0;
+        } else {
+          const s0 = rightRotate(words[i + j - 15] | 0, 7) ^ rightRotate(words[i + j - 15] | 0, 18) ^ ((words[i + j - 15] | 0) >>> 3);
+          const s1 = rightRotate(words[i + j - 2] | 0, 17) ^ rightRotate(words[i + j - 2] | 0, 19) ^ ((words[i + j - 2] | 0) >>> 10);
+          w_j = ((words[i + j - 16] | 0) + s0 + (words[i + j - 7] | 0) + s1) | 0;
+        }
+        words[i + j] = w_j;
+        const ch = (hash[4] & hash[5]) ^ (~hash[4] & hash[6]);
+        const maj = (hash[0] & hash[1]) ^ (hash[0] & hash[2]) ^ (hash[1] & hash[2]);
+        const temp1 = (hash[7] + (rightRotate(hash[4], 6) ^ rightRotate(hash[4], 11) ^ rightRotate(hash[4], 25)) + ch + k[j] + w_j) | 0;
+        const temp2 = ((rightRotate(hash[0], 2) ^ rightRotate(hash[0], 13) ^ rightRotate(hash[0], 22)) + maj) | 0;
+        hash[7] = hash[6];
+        hash[6] = hash[5];
+        hash[5] = hash[4];
+        hash[4] = (hash[3] + temp1) | 0;
+        hash[3] = hash[2];
+        hash[2] = hash[1];
+        hash[1] = hash[0];
+        hash[0] = (temp1 + temp2) | 0;
+      }
+      for (let j = 0; j < 8; j++) hash[j] = (hash[j] + oldHash[j]) | 0;
+    }
+    const bytes = [];
+    for (let i = 0; i < 8; i++) {
+      for (let j = 3; j >= 0; j--) {
+        bytes.push((hash[i] >> (8 * j)) & 255);
+      }
+    }
+    const b64 = btoa(String.fromCharCode(...bytes));
+    return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+
+  function parseJwtPayload(token) {
+    try {
+      const parts = token.split('.');
+      if (parts.length >= 2) {
+        const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+        const jsonStr = decodeURIComponent(escape(atob(base64)));
+        return JSON.parse(jsonStr);
+      }
+    } catch(e) {}
+    return null;
+  }
+
+  async function startOAuthPKCEFlow(provider) {
+    const oauthBox = document.getElementById(`${provider}-oauth-box`);
+    const oauthStatus = document.getElementById(`${provider}-oauth-status`);
+    if (oauthBox) oauthBox.classList.remove('hidden');
+    if (oauthStatus) oauthStatus.textContent = '새 탭에서 로그인 및 승인을 대기하고 있습니다...';
+
+    const verifier = generateCodeVerifier(64);
+    sessionStorage.setItem(`${provider}_pkce_verifier`, verifier);
+    const challenge = await generateCodeChallenge(verifier);
+
+    const state = generateCodeVerifier(32);
+    sessionStorage.setItem(`${provider}_pkce_state`, state);
+
+    let authUrl = '';
+    if (provider === 'openai') {
+      const redirectUri = 'http://localhost:1455/auth/callback';
+      const scope = encodeURIComponent('openid profile email offline_access api.connectors.read api.connectors.invoke');
+      authUrl = `https://auth.openai.com/oauth/authorize?response_type=code&client_id=app_EMoamEEZ73f0CkXaXp7hrann&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}&code_challenge=${challenge}&code_challenge_method=S256&state=${state}&id_token_add_organizations=true&codex_cli_simplified_flow=true&originator=codex_cli_rs`;
+    } else if (provider === 'anthropic') {
+      const redirectUri = 'https://platform.claude.com/oauth/code/callback';
+      authUrl = `https://claude.ai/oauth/authorize?response_type=code&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e&redirect_uri=${encodeURIComponent(redirectUri)}&scope=org%3Acreate_api_key%20user%3Aprofile&code_challenge=${challenge}&code_challenge_method=S256&state=${state}`;
+    }
+
+    if (authUrl) {
+      const urlB64 = btoa(unescape(encodeURIComponent(authUrl)));
+      window.location.href = `http://ui-action/oauth-start?provider=${provider}&url_b64=${encodeURIComponent(urlB64)}`;
+    }
+  }
+
+  window.onOAuthCallback = async function(provider, code, error, state) {
+    const oauthBox = document.getElementById(`${provider}-oauth-box`);
+    const oauthStatus = document.getElementById(`${provider}-oauth-status`);
+
+    if (error) {
+      if (oauthStatus) oauthStatus.textContent = `인증 오류: ${error}`;
+      return;
+    }
+    if (!code) {
+      if (oauthStatus) oauthStatus.textContent = '승인 코드를 수신하지 못했습니다.';
+      return;
+    }
+
+    const expectedState = sessionStorage.getItem(`${provider}_pkce_state`);
+    if (expectedState && state && state !== expectedState) {
+      console.warn('OAuth state mismatch:', { expectedState, state });
+      if (oauthStatus) oauthStatus.textContent = '보안 경고: 인증 State 불일치(CSRF 위험). 다시 시도해주세요.';
+      return;
+    }
+
+    if (oauthStatus) oauthStatus.textContent = '인증 토큰 교환 중...';
+    const verifier = sessionStorage.getItem(`${provider}_pkce_verifier`) || '';
+
+    try {
+      if (provider === 'openai') {
+        const tokenParams = new URLSearchParams();
+        tokenParams.append('grant_type', 'authorization_code');
+        tokenParams.append('client_id', 'app_EMoamEEZ73f0CkXaXp7hrann');
+        tokenParams.append('code', code);
+        tokenParams.append('code_verifier', verifier);
+        tokenParams.append('redirect_uri', 'http://localhost:1455/auth/callback');
+
+        const tokenResp = await fetch('https://auth.openai.com/oauth/token', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'User-Agent': 'codex-cli/1.0'
+          },
+          body: tokenParams.toString()
+        });
+
+        const tokenData = await tokenResp.json().catch(() => ({}));
+        if (tokenResp.ok && (tokenData.access_token || tokenData.id_token)) {
+          if (oauthBox) oauthBox.classList.add('hidden');
+          let accessToken = tokenData.access_token;
+          const refreshToken = tokenData.refresh_token || '';
+          const idToken = tokenData.id_token || '';
+          const expAt = Math.floor(Date.now() / 1000) + (tokenData.expires_in || 864000);
+
+          let userEmail = 'ChatGPT Plus';
+          if (idToken) {
+            const jwtPayload = parseJwtPayload(idToken);
+            if (jwtPayload && jwtPayload.email) {
+              userEmail = jwtPayload.email;
+            }
+
+            // Attempt token-exchange for openai-api-key if account supports it
+            try {
+              const exchangeParams = new URLSearchParams();
+              exchangeParams.append('grant_type', 'urn:ietf:params:oauth:grant-type:token-exchange');
+              exchangeParams.append('client_id', 'app_EMoamEEZ73f0CkXaXp7hrann');
+              exchangeParams.append('requested_token', 'openai-api-key');
+              exchangeParams.append('subject_token', idToken);
+              exchangeParams.append('subject_token_type', 'urn:ietf:params:oauth:token-type:id_token');
+
+              const exResp = await fetch('https://auth.openai.com/oauth/token', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/x-www-form-urlencoded',
+                  'User-Agent': 'codex-cli/1.0'
+                },
+                body: exchangeParams.toString()
+              });
+              if (exResp.ok) {
+                const exData = await exResp.json().catch(() => ({}));
+                if (exData.access_token) {
+                  accessToken = exData.access_token;
+                }
+              }
+            } catch(e) {
+              console.warn('Optional token-exchange skipped:', e);
+            }
+          }
+
+          window.location.href = `http://ui-action/auth-save-session?provider=openai&email=${encodeURIComponent(userEmail)}&tier=ChatGPT%20Plus&access_token=${encodeURIComponent(accessToken)}&refresh_token=${encodeURIComponent(refreshToken)}&expires_at=${expAt}`;
+        } else {
+          if (oauthStatus) oauthStatus.textContent = `토큰 발급 실패: ${tokenData.error_description || tokenData.error || '알 수 없는 오류'}`;
+        }
+      } else if (provider === 'anthropic') {
+        const tokenParams = new URLSearchParams();
+        tokenParams.append('grant_type', 'authorization_code');
+        tokenParams.append('client_id', '9d1c250a-e61b-44d9-88ed-5944d1962f5e');
+        tokenParams.append('code', code);
+        tokenParams.append('code_verifier', verifier);
+        tokenParams.append('redirect_uri', 'https://platform.claude.com/oauth/code/callback');
+
+        const tokenResp = await fetch('https://platform.claude.com/v1/oauth/token', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded'
+          },
+          body: tokenParams.toString()
+        });
+
+        const tokenData = await tokenResp.json().catch(() => ({}));
+        if (tokenResp.ok && tokenData.access_token) {
+          if (oauthBox) oauthBox.classList.add('hidden');
+          const accessToken = tokenData.access_token;
+          const refreshToken = tokenData.refresh_token || '';
+          const expAt = Math.floor(Date.now() / 1000) + (tokenData.expires_in || 864000);
+
+          window.location.href = `http://ui-action/auth-save-session?provider=anthropic&email=Claude%20Pro&tier=Claude%20Pro&access_token=${encodeURIComponent(accessToken)}&refresh_token=${encodeURIComponent(refreshToken)}&expires_at=${expAt}`;
+        } else {
+          if (oauthStatus) oauthStatus.textContent = `토큰 교환 안내: 공식 API Key 또는 claude setup-token 등록을 권장합니다. (${tokenData.error_description || tokenData.error || ''})`;
+        }
+      }
+    } catch (err) {
+      if (oauthStatus) oauthStatus.textContent = `오류: ${err.message}`;
+    }
+  };
+
   window.renderAuthStatus = function(statusList) {
     if (!Array.isArray(statusList)) return;
     statusList.forEach(item => {
@@ -91,19 +343,21 @@ document.addEventListener('DOMContentLoaded', () => {
       const statusDiv = document.getElementById(`${prov}-sub-status`);
       const loginBtn = document.querySelector(`.auth-login-btn[data-provider="${prov}"]`);
       const logoutBtn = document.querySelector(`.auth-logout-btn[data-provider="${prov}"]`);
+      const oauthBox = document.getElementById(`${prov}-oauth-box`);
 
       if (statusDiv) {
         if (item.connected) {
+          if (oauthBox) oauthBox.classList.add('hidden');
           statusDiv.innerHTML = `
-            <span class="auth-badge auth-badge-connected"><svg class="icon-inline" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg> <span>${escapeHtml(item.tier || '구독 연결됨')}</span></span>
+            <span class="auth-badge auth-badge-connected"><svg class="icon-inline" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg> <span>${escapeHtml(item.tier || '연결됨')}</span></span>
             <p class="auth-hint"><strong>${escapeHtml(item.email || '계정 연결 완료')}</strong></p>
           `;
           if (loginBtn) loginBtn.classList.add('hidden');
           if (logoutBtn) logoutBtn.classList.remove('hidden');
         } else {
           statusDiv.innerHTML = `
-            <span class="auth-badge auth-badge-unconnected"><svg class="icon-inline" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg> <span>구독 미연결</span></span>
-            <p class="auth-hint">구독 계정으로 로그인하여 API 키 없이 사용하세요.</p>
+            <span class="auth-badge auth-badge-unconnected"><svg class="icon-inline" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg> <span>${prov === 'gemini' ? '무료 키 미등록' : '구독 미연결'}</span></span>
+            <p class="auth-hint">${prov === 'gemini' ? 'Google AI Studio 무료 키를 등록하여 1,500회/일 무료로 사용하세요.' : '구독 계정을 1-클릭 대화형 승인하여 API 키 없이 사용하세요.'}</p>
           `;
           if (loginBtn) loginBtn.classList.remove('hidden');
           if (logoutBtn) logoutBtn.classList.add('hidden');
@@ -123,13 +377,19 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.auth-login-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const prov = btn.getAttribute('data-provider');
-      window.location.href = `http://ui-action/auth-login?provider=${prov}`;
+      if (prov === 'openai' || prov === 'anthropic') {
+        startOAuthPKCEFlow(prov);
+      } else {
+        window.location.href = `http://ui-action/auth-login?provider=${prov}`;
+      }
     });
   });
 
   document.querySelectorAll('.auth-logout-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const prov = btn.getAttribute('data-provider');
+      const oauthBox = document.getElementById(`${prov}-oauth-box`);
+      if (oauthBox) oauthBox.classList.add('hidden');
       window.location.href = `http://ui-action/auth-delete-session?provider=${prov}`;
     });
   });
@@ -140,10 +400,15 @@ document.addEventListener('DOMContentLoaded', () => {
       const tokenInput = document.getElementById(`${prov}-sub-token`);
       const token = tokenInput ? tokenInput.value.trim() : '';
       if (!token) {
-        alert('토큰을 입력해주세요.');
+        alert('키 또는 토큰을 입력해주세요.');
         return;
       }
-      window.location.href = `http://ui-action/auth-save-session?provider=${prov}&access_token=${encodeURIComponent(token)}`;
+      let tier = 'Subscription';
+      if (prov === 'gemini') tier = 'Google AI Studio (무료)';
+      else if (prov === 'anthropic') tier = 'Claude Pro';
+      else if (prov === 'openai') tier = 'ChatGPT Plus';
+
+      window.location.href = `http://ui-action/auth-save-session?provider=${prov}&email=${encodeURIComponent(tier)}&tier=${encodeURIComponent(tier)}&access_token=${encodeURIComponent(token)}`;
       tokenInput.value = '';
     });
   });
@@ -373,21 +638,67 @@ document.addEventListener('DOMContentLoaded', () => {
     };
   }
 
+  // Aside Style Friendly Tool Name Mapping
+  const TOOL_NAME_KO = {
+    browser_navigate: '🌐 웹페이지 이동',
+    browser_get_page_content: '📄 페이지 실시간 분석',
+    browser_click_element: '🖱️ 요소 클릭',
+    browser_type_text: '⌨️ 텍스트 입력',
+    browser_scroll: '📜 화면 스크롤',
+    browser_autofill_login: '🔐 볼트 자동 로그인'
+  };
+
   function appendToolCard(toolName, args, result) {
+    const isError = Boolean(result?.isError || result?.status === 'error');
+    const friendlyName = TOOL_NAME_KO[toolName] || toolName;
     const card = document.createElement('div');
-    card.className = 'action-card';
+    card.className = 'timeline-step';
+
+    let argSummary = '';
+    if (toolName === 'browser_navigate') argSummary = `URL: ${args.url || ''}`;
+    else if (toolName === 'browser_click_element') argSummary = `클릭: ${args.text || args.selector || ''}`;
+    else if (toolName === 'browser_type_text') argSummary = `입력: "${args.text || ''}" (${args.selector || ''})`;
+    else if (toolName === 'browser_get_page_content') argSummary = `본문 추출 (형식: ${args.format || 'summary'})`;
+    else argSummary = JSON.stringify(args);
+
+    let resultSummary = '';
+    if (toolName === 'browser_get_page_content' && result?.title) {
+      resultSummary = `[${result.title}] - ${result.url}\n${(result.bodySnippet || result.markdown || '').slice(0, 400)}...`;
+    } else {
+      resultSummary = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+    }
+
     card.innerHTML = `
-      <div class="action-header">
-        <span class="action-title-wrap"><svg class="icon-inline" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg> <strong>${escapeHtml(toolName)}</strong></span>
-        <span class="action-status-badge ${result?.isError ? 'status-error' : 'status-ok'}">
-          ${result?.isError ? '실패' : '완료'}
-        </span>
+      <div class="timeline-step-header">
+        <div class="step-info">
+          <span class="step-badge ${isError ? 'status' : 'tool'}" style="${isError ? 'background: rgba(239, 68, 68, 0.15); color: #ef4444;' : ''}">
+            ${isError ? '오류' : '도구 실행'}
+          </span>
+          <span class="step-name">${escapeHtml(friendlyName)}</span>
+        </div>
+        <span class="step-status-icon">${isError ? '❌ 실패' : '✓ 완료'}</span>
       </div>
-      <div class="action-body">${escapeHtml(JSON.stringify(args))}</div>
+      <div class="timeline-step-body">
+        <div style="font-weight: 500; margin-bottom: 4px; color: var(--text-primary);">${escapeHtml(argSummary)}</div>
+        <details style="margin-top: 4px;">
+          <summary style="font-size: 10.5px; color: var(--text-muted); cursor: pointer;">실행 결과 상세 보기</summary>
+          <pre>${escapeHtml(resultSummary)}</pre>
+        </details>
+      </div>
     `;
+
+    const header = card.querySelector('.timeline-step-header');
+    if (header) {
+      header.addEventListener('click', () => {
+        const body = card.querySelector('.timeline-step-body');
+        if (body) body.classList.toggle('hidden');
+      });
+    }
+
     messagesList.appendChild(card);
     chatContainer.scrollTop = chatContainer.scrollHeight;
   }
+
 
   function getSubscriptionToken(provider) {
     return new Promise((resolve) => {
@@ -495,6 +806,13 @@ document.addEventListener('DOMContentLoaded', () => {
           onToolCall: (tc) => {
             bubble.statusNotice.classList.add('hidden');
             toolCalls.push(tc);
+          },
+          onComplete: ({ fullText }) => {
+            if (fullText && !bubble.contentDiv.innerText.trim()) {
+              bubble.statusNotice.classList.add('hidden');
+              bubble.contentDiv.innerHTML = formatMarkdown(fullText);
+              chatContainer.scrollTop = chatContainer.scrollHeight;
+            }
           }
         });
 
@@ -502,7 +820,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const hasThinking = !bubble.thinkingBox.classList.contains('hidden');
 
         // If turn only produced tool calls and no text or thinking, remove empty placeholder
-        if (!fullAssistantText && !hasThinking) {
+        if (!fullAssistantText && !hasThinking && toolCalls.length > 0) {
           bubble.container.remove();
         }
 

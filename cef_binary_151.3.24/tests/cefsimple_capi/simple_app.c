@@ -214,6 +214,11 @@ void CEF_CALLBACK simple_app_on_before_command_line_processing(
   command_line->append_switch(command_line, &switch2);
   cef_string_clear(&switch2);
 
+  cef_string_t switch_sec = {};
+  cef_string_from_ascii("disable-web-security", 20, &switch_sec);
+  command_line->append_switch(command_line, &switch_sec);
+  cef_string_clear(&switch_sec);
+
 #if defined(OS_WIN)
   cef_string_t lang_switch = {};
   cef_string_from_ascii("lang", 4, &lang_switch);

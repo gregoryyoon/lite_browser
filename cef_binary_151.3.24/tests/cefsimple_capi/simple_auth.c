@@ -368,14 +368,14 @@ void auth_get_login_url(const char* provider, char* out_url, size_t max_len) {
   if (!provider || !out_url || max_len == 0) return;
 
   if (_stricmp(provider, "openai") == 0) {
-    // OpenAI ChatGPT Plus/Team Login
-    snprintf(out_url, max_len, "https://chatgpt.com/auth/login");
+    // OpenAI Device Code Authorization
+    snprintf(out_url, max_len, "https://auth.openai.com/codex/device");
   } else if (_stricmp(provider, "anthropic") == 0) {
     // Claude Pro Login
     snprintf(out_url, max_len, "https://claude.ai/login");
   } else if (_stricmp(provider, "gemini") == 0) {
-    // Google Gemini Advanced / Google Account Login
-    snprintf(out_url, max_len, "https://accounts.google.com/ServiceLogin?continue=https%%3A%%2F%%2Fgemini.google.com%%2Fapp");
+    // Google AI Studio API Key Console (Free Tier 15 RPM / 1,500 RPD)
+    snprintf(out_url, max_len, "https://aistudio.google.com/app/apikey");
   } else {
     snprintf(out_url, max_len, "about:blank");
   }
