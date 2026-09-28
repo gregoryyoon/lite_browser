@@ -1518,6 +1518,66 @@ CEF 코어가 생성하는 팝업 윈도우(`Chrome_WidgetWin_1`)는 Win32 레�
   - 1번째 탭 선택 상태에서 `+` 버튼 및 `Ctrl+T` 입력 시 탭 목록 맨 끝(마지막 탭 우측)에 새 탭이 정상 생성됨을 확인.
   - 웹페이지 내 링크 우클릭 '새 탭에서 링크 열기' 시 현재 탭의 바로 오른쪽에 생성됨을 확인.
 
+---
+
+## 47. 새 탭 생성 및 탭 전환 시 UI/콘텐츠 창 흰색 깜빡임(White Flash) 원천 차단 및 배경색 일치화 (Tab Creation & Switching White Flash Elimination & Background Color Synchronization)
+
+### 47.1 개요
+새 탭(`+` 버튼)을 생성하거나 탭 목록 사이를 전환(`switch-tab`)할 때, 상단 주소창/탭바 윈도우 전체 및 메인 콘텐츠 창이 순간적으로 하얀색으로 지워졌다가 다시 그려지는 심한 깜빡임(White Flash / Invalidation Storm) 현상이 발생했습니다.
+이를 해결하기 위해 Chromium CEF 코어의 렌더링 배경색 결정 알고리즘을 역추적 분석하고, Win32 Z-Order 계층 보존, 탭 전환 시각 순서 최적화(Show-before-Hide), 그리고 프론트엔드 Keyed DOM Diffing을 적용하여 엣지(Edge) 브라우저 수준의 매끄럽고 안정적인 탭 조작 환경을 완성했습니다.
+
+### 47.2 원인 정밀 분석
+1. **Chromium CEF 코어의 순백색(`SK_ColorWHITE`) 강제 폴백**:
+   - CEF 공식 소스 코드(`libcef/browser/context.cc`의 `GetBackgroundColor`) 분석 결과, windowed 모드 브라우저는 `background_color`의 Alpha 채널이 `0xFF`가 아니면(투명 또는 0 지정 시) 글로벌 `settings_.background_color`로 폴백함.
+   - 글로벌 설정마저 기본값(0)인 경우 Chromium은 DirectComposition 및 윈도우 배경색을 강제로 순백색(`SK_ColorWHITE`, `0xFFFFFFFF`)으로 지정하여 D3D 서피스를 하얗게 지우고 렌더링을 시작하는 원인 규명.
+2. **Z-Order 반전 및 불필요한 무효화(Invalidation Storm)**:
+   - 새 탭 및 로드 완료 시 `SetWindowPos(hwnd, HWND_TOP, ...)`을 호출하여 콘텐츠 창이 상단 주소창 윈도우(`ui_hwnd`)를 덮어버림.
+   - 이후 `WM_SIZE`에서 `BringWindowToTop(ui_hwnd)`을 호출하는 과정에서 윈도우 간 Z-Order 역전으로 인해 상단 UI 창 전체가 재페인팅되며 깜빡임 발생.
+3. **탭 전환 시 '숨김 우선(Hide-before-Show)'에 의한 부모 배경 노출**:
+   - `switch-tab` 처리 시 기존 탭을 먼저 `ShowWindow(SW_HIDE)`로 감춘 뒤 새 탭을 표시하여, 찰나의 순간 부모 윈도우 바탕이 화면에 노출됨.
+   - 이와 동시에 `MoveWindow(..., TRUE)` 호출로 인해 Windows GDI가 불필요하게 윈도우 전체 배경을 지우는 현상 발생.
+4. **프론트엔드 전체 DOM 재생성 및 네비게이션 트리거**:
+   - 탭 목록 갱신 시 `innerHTML = ''` 후 전체 탭 DOM을 파괴/재생성하여 시각적 지터 발생.
+   - `window.location.href = 'http://ui-action/...'`를 통해 IPC 액션을 호출하여 브라우저 로딩 상태를 지속적으로 자극함.
+
+### 47.3 주요 구현 내역
+1. **CEF 전역 및 개별 브라우저 배경색 테마 토큰 일치화 (`0xFF141721` / `0xFFF4F4F5`)**:
+   - [`cefsimple_win.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/cefsimple_win.c): `settings.background_color = is_theme_dark() ? 0xFF141721 : 0xFFE4E4E7;`을 설정하여 Chromium 코어가 기본 순백색(`SK_ColorWHITE`)으로 폴백하는 경로를 전역 차단.
+   - [`simple_app.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c) & [`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c):
+     - 상단 UI 브라우저: `0xFF141721` (다크) / `0xFFE4E4E7` (라이트)
+     - 메인 콘텐츠 브라우저: `0xFF0D0F15` (다크) / `0xFFF4F4F5` (라이트)
+     - 메인 윈도우 `wcex.hbrBackground` 및 `WM_ERASEBKGND`: `RGB(244, 244, 245)`로 통일하여 시각적 튐 완전 제거.
+2. **Z-Order 보존 및 탭 전환 시각 순서 최적화 (`Show-before-Hide`)**:
+   - [`simple_life_span_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_life_span_handler.c) & [`simple_load_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_load_handler.c): 새 탭 HWND를 `HWND_TOP` 대신 항상 상단 UI 바로 뒤(`insert_after = win_ctx->ui_hwnd`)로 삽입하여 `ui_hwnd`의 최상위 계층을 무중단 유지.
+   - [`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c) (`switch-tab`): 전환 대상 탭을 먼저 표시(`SWP_SHOWWINDOW`)한 직후 기존 탭을 숨겨 빈 화면 틈을 원천 차단.
+   - `CreateNewTabEx`: 새 탭 준비 전 기존 탭을 조기 숨김(`SW_HIDE`)하던 로직 및 불필요한 중복 `SetFocus` 제거.
+3. **불필요한 강제 다시 그리기(`MoveWindow TRUE`) 억제**:
+   - [`simple_app.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c) (`WM_SIZE`):
+     - `ui_hwnd`, `content_hwnd`, 분할 뷰 창이 이미 정확한 좌표와 크기에 있다면 `MoveWindow`를 생략.
+     - 크기가 변경될 때도 `bRepaint = FALSE`를 지정하여 배경을 하얗게 지우지 않고 Chromium GPU 컴포지터가 직접 버퍼를 갱신하도록 최적화.
+     - `WM_ERASEBKGND`에서 상단 `0 ~ ui_height` 영역을 클리핑 제외(Skip).
+4. **프론트엔드 Keyed DOM Diffing 및 통신 브리지 ([`ui/app.js`](file:///c:/projects/lite_browser/ui/app.js), [`ui/style.css`](file:///c:/projects/lite_browser/ui/style.css))**:
+   - `data-tab-id` 기반의 **Keyed DOM Diffing**을 도입하여 기존 탭 노드를 유지하고 변경된 상태만 핀포인트 갱신하며 새 탭만 즉시(Instant) DOM에 추가.
+   - 숨김 `iframe` 브리지(`sendUiAction`)를 구축하여 네비게이션 트리거 없이 백엔드 C CAPI와 무지연 통신.
+   - 사용자의 피드백에 따라 인위적인 CSS 진입 애니메이션을 제거하고 즉시 반응형 렌더링 유지.
+
+### 47.4 관련 소스 코드
+- [`cef_binary_151.3.24/tests/cefsimple_capi/cefsimple_win.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/cefsimple_win.c)
+- [`cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c)
+- [`cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c)
+- [`cef_binary_151.3.24/tests/cefsimple_capi/simple_life_span_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_life_span_handler.c)
+- [`cef_binary_151.3.24/tests/cefsimple_capi/simple_load_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_load_handler.c)
+- [`ui/app.js`](file:///c:/projects/lite_browser/ui/app.js)
+- [`ui/style.css`](file:///c:/projects/lite_browser/ui/style.css)
+
+### 47.5 빌드 및 검증 결과
+- **디버그 빌드**: `cmake --build cef_binary_151.3.24/build --config Debug --target cefsimple_capi` 성공 (`Exit code 0`).
+- **바이너리 생성**: `cef_binary_151.3.24\build\tests\cefsimple_capi\Debug\lite_browser.exe` 및 `lite_browser.dll` 정상 갱신.
+- **실행 및 동작 검증**:
+  - `+` 버튼 클릭 시 주소창 윈도우 전체가 하얗게 지워졌다 다시 그려지던 현상이 완전히 사라지고 새 탭이 즉시 렌더링됨을 확인.
+  - 마우스로 여러 탭을 연속 클릭하며 전환할 때 메인 웹 콘텐츠 영역의 순간적인 하얀 플래시 현상 없이 매끄럽게 전환됨을 최종 검증 완료.
+
+
 
 
 

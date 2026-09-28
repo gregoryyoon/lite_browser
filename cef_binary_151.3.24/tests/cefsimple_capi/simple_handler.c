@@ -2180,7 +2180,7 @@ int CEF_CALLBACK request_handler_on_before_browse(
 
                 cef_browser_settings_t browser_settings = {};
                 browser_settings.size = sizeof(cef_browser_settings_t);
-                browser_settings.background_color = is_theme_dark() ? 0xFF0D0F15 : 0xFFFFFFFF;
+                browser_settings.background_color = is_theme_dark() ? 0xFF0D0F15 : 0xFFF4F4F5;
 
                 cef_window_info_t content_window_info = {};
                 content_window_info.size = sizeof(cef_window_info_t);
@@ -2260,7 +2260,7 @@ int CEF_CALLBACK request_handler_on_before_browse(
 
             cef_browser_settings_t browser_settings = {};
             browser_settings.size = sizeof(cef_browser_settings_t);
-            browser_settings.background_color = is_theme_dark() ? 0xFF0D0F15 : 0xFFFFFFFF;
+            browser_settings.background_color = is_theme_dark() ? 0xFF0D0F15 : 0xFFF4F4F5;
 
             cef_window_info_t content_window_info = {};
             content_window_info.size = sizeof(cef_window_info_t);
@@ -2706,55 +2706,59 @@ int CEF_CALLBACK request_handler_on_before_browse(
             }
           }
           if (found_idx != -1 && found_idx != win_ctx->active_tab_index) {
-            if (win_ctx->ui_browser) {
-              cef_browser_host_t* ui_host = win_ctx->ui_browser->get_host(win_ctx->ui_browser);
-              if (ui_host) {
-                ui_host->set_focus(ui_host, 1);
-                ui_host->base.release(&ui_host->base);
-              }
-            }
-            if (win_ctx->ui_hwnd && IsWindow(win_ctx->ui_hwnd)) {
-              SetFocus(win_ctx->ui_hwnd);
-            }
+            int old_idx = win_ctx->active_tab_index;
 
-            for (int k = 0; k < win_ctx->tab_count; k++) {
-              if (k != found_idx) {
-                if (win_ctx->tabs[k].browser) {
-                  cef_browser_host_t* prev_h = win_ctx->tabs[k].browser->get_host(win_ctx->tabs[k].browser);
-                  if (prev_h) {
-                    prev_h->set_focus(prev_h, 0);
-                    prev_h->base.release(&prev_h->base);
-                  }
+            // 1. Release focus on previous tab
+            if (old_idx >= 0 && old_idx < win_ctx->tab_count) {
+              if (win_ctx->tabs[old_idx].browser) {
+                cef_browser_host_t* prev_h = win_ctx->tabs[old_idx].browser->get_host(win_ctx->tabs[old_idx].browser);
+                if (prev_h) {
+                  prev_h->set_focus(prev_h, 0);
+                  prev_h->base.release(&prev_h->base);
                 }
-                if (win_ctx->tabs[k].right_browser) {
-                  cef_browser_host_t* prev_rh = win_ctx->tabs[k].right_browser->get_host(win_ctx->tabs[k].right_browser);
-                  if (prev_rh) {
-                    prev_rh->set_focus(prev_rh, 0);
-                    prev_rh->base.release(&prev_rh->base);
-                  }
+              }
+              if (win_ctx->tabs[old_idx].right_browser) {
+                cef_browser_host_t* prev_rh = win_ctx->tabs[old_idx].right_browser->get_host(win_ctx->tabs[old_idx].right_browser);
+                if (prev_rh) {
+                  prev_rh->set_focus(prev_rh, 0);
+                  prev_rh->base.release(&prev_rh->base);
                 }
-                if (win_ctx->tabs[k].hwnd) ShowWindow(win_ctx->tabs[k].hwnd, SW_HIDE);
-                if (win_ctx->tabs[k].right_hwnd) ShowWindow(win_ctx->tabs[k].right_hwnd, SW_HIDE);
               }
             }
 
             win_ctx->active_tab_index = found_idx;
             win_ctx->tabs[found_idx].is_loaded = 1;
+
+            // 2. Show new tab FIRST (placed right behind ui_hwnd, seamlessly over old tab)
             if (win_ctx->tabs[found_idx].hwnd) {
-              SetWindowPos(win_ctx->tabs[found_idx].hwnd, HWND_TOP, 0, 0, 0, 0,
-                           SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
-              
+              HWND insert_after = (win_ctx->ui_hwnd && IsWindow(win_ctx->ui_hwnd)) ? win_ctx->ui_hwnd : HWND_TOP;
+              SetWindowPos(win_ctx->tabs[found_idx].hwnd, insert_after, 0, 0, 0, 0,
+                           SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW | SWP_NOACTIVATE);
+              if (win_ctx->tabs[found_idx].is_split && win_ctx->tabs[found_idx].right_hwnd) {
+                SetWindowPos(win_ctx->tabs[found_idx].right_hwnd, win_ctx->tabs[found_idx].hwnd, 0, 0, 0, 0,
+                             SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW | SWP_NOACTIVATE);
+              }
+
               RECT rect;
               GetClientRect(win_ctx->main_hwnd, &rect);
               PostMessage(win_ctx->main_hwnd, WM_SIZE, 0, MAKELPARAM(rect.right, rect.bottom));
 
-              cef_browser_host_t* host = win_ctx->tabs[found_idx].browser->get_host(win_ctx->tabs[found_idx].browser);
+              cef_browser_host_t* host = win_ctx->tabs[found_idx].browser ? win_ctx->tabs[found_idx].browser->get_host(win_ctx->tabs[found_idx].browser) : NULL;
               if (host) {
                 host->was_resized(host);
                 host->set_focus(host, 1);
                 host->base.release(&host->base);
               }
             }
+
+            // 3. NOW hide previously active tab(s) - no blank gap!
+            for (int k = 0; k < win_ctx->tab_count; k++) {
+              if (k != found_idx) {
+                if (win_ctx->tabs[k].hwnd && IsWindowVisible(win_ctx->tabs[k].hwnd)) ShowWindow(win_ctx->tabs[k].hwnd, SW_HIDE);
+                if (win_ctx->tabs[k].right_hwnd && IsWindowVisible(win_ctx->tabs[k].right_hwnd)) ShowWindow(win_ctx->tabs[k].right_hwnd, SW_HIDE);
+              }
+            }
+
             update_ui_tabs(win_ctx);
             update_ui_nav_state(win_ctx);
           }
@@ -3176,7 +3180,7 @@ void CEF_CALLBACK context_menu_on_before_context_menu(
           int ui_height = GetUIHeightForWindow(win_ctx->main_hwnd);
           cef_browser_settings_t browser_settings = {};
           browser_settings.size = sizeof(cef_browser_settings_t);
-          browser_settings.background_color = is_theme_dark() ? 0xFF0D0F15 : 0xFFFFFFFF;
+          browser_settings.background_color = is_theme_dark() ? 0xFF0D0F15 : 0xFFF4F4F5;
           
           cef_window_info_t content_window_info = {};
           content_window_info.size = sizeof(cef_window_info_t);
@@ -3262,20 +3266,22 @@ void CreateNewTabEx(browser_window_t* win_ctx, const char* url, int insert_at_en
         prev_rh->base.release(&prev_rh->base);
       }
     }
-    if (win_ctx->tabs[k].hwnd) ShowWindow(win_ctx->tabs[k].hwnd, SW_HIDE);
-    if (win_ctx->tabs[k].right_hwnd) ShowWindow(win_ctx->tabs[k].right_hwnd, SW_HIDE);
   }
 
-  // 2. 상단 UI 창으로 포커스 인계
-  if (win_ctx->ui_browser) {
-    cef_browser_host_t* ui_host = win_ctx->ui_browser->get_host(win_ctx->ui_browser);
-    if (ui_host) {
-      ui_host->set_focus(ui_host, 1);
-      ui_host->base.release(&ui_host->base);
+  // 2. 상단 UI 창으로 포커스 인계 (이미 UI 창이나 하위 창이 포커스를 가지고 있다면 재호출 방지)
+  HWND cur_focus = GetFocus();
+  int ui_has_focus = (cur_focus == win_ctx->ui_hwnd) || (win_ctx->ui_hwnd && IsChild(win_ctx->ui_hwnd, cur_focus));
+  if (!ui_has_focus) {
+    if (win_ctx->ui_browser) {
+      cef_browser_host_t* ui_host = win_ctx->ui_browser->get_host(win_ctx->ui_browser);
+      if (ui_host) {
+        ui_host->set_focus(ui_host, 1);
+        ui_host->base.release(&ui_host->base);
+      }
     }
-  }
-  if (win_ctx->ui_hwnd && IsWindow(win_ctx->ui_hwnd)) {
-    SetFocus(win_ctx->ui_hwnd);
+    if (win_ctx->ui_hwnd && IsWindow(win_ctx->ui_hwnd)) {
+      SetFocus(win_ctx->ui_hwnd);
+    }
   }
 
   RECT rect;
@@ -3289,7 +3295,7 @@ void CreateNewTabEx(browser_window_t* win_ctx, const char* url, int insert_at_en
 
   cef_browser_settings_t browser_settings = {};
   browser_settings.size = sizeof(cef_browser_settings_t);
-  browser_settings.background_color = is_theme_dark() ? 0xFF0D0F15 : 0xFFFFFFFF;
+  browser_settings.background_color = is_theme_dark() ? 0xFF0D0F15 : 0xFFF4F4F5;
 
   cef_window_info_t content_window_info = {};
   content_window_info.size = sizeof(cef_window_info_t);
@@ -3382,7 +3388,7 @@ void CreateRightSplitBrowser(browser_window_t* win_ctx, tab_info_t* tab, const c
 
   cef_browser_settings_t browser_settings = {};
   browser_settings.size = sizeof(cef_browser_settings_t);
-  browser_settings.background_color = is_theme_dark() ? 0xFF0D0F15 : 0xFFFFFFFF;
+  browser_settings.background_color = is_theme_dark() ? 0xFF0D0F15 : 0xFFF4F4F5;
 
   cef_window_info_t right_window_info = {};
   right_window_info.size = sizeof(cef_window_info_t);

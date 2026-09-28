@@ -472,10 +472,14 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
     HDC hdc = (HDC)wParam;
     RECT r;
     GetClientRect(hwnd, &r);
-    int dark = is_theme_dark();
-    HBRUSH bg_brush = CreateSolidBrush(dark ? RGB(13, 15, 21) : RGB(228, 228, 231));
-    FillRect(hdc, &r, bg_brush);
-    DeleteObject(bg_brush);
+    int ui_height = GetUIHeightForWindow(hwnd);
+    RECT content_r = {0, ui_height, r.right, r.bottom};
+    if (content_r.bottom > content_r.top) {
+      int dark = is_theme_dark();
+      HBRUSH bg_brush = CreateSolidBrush(dark ? RGB(13, 15, 21) : RGB(244, 244, 245));
+      FillRect(hdc, &content_r, bg_brush);
+      DeleteObject(bg_brush);
+    }
     return 1;
   }
   case WM_PAINT:
@@ -787,8 +791,22 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
           if (host) {
             HWND left_hwnd = host->get_window_handle(host);
             if (left_hwnd) {
-              MoveWindow(left_hwnd, left_x + 2, content_y + 2, left_w - 4, content_h - 4, TRUE);
-              ShowWindow(left_hwnd, SW_SHOW);
+              RECT cur_rc;
+              GetWindowRect(left_hwnd, &cur_rc);
+              POINT pt = {cur_rc.left, cur_rc.top};
+              ScreenToClient(hwnd, &pt);
+              int cur_w = cur_rc.right - cur_rc.left;
+              int cur_h = cur_rc.bottom - cur_rc.top;
+              int target_x = left_x + 2;
+              int target_y = content_y + 2;
+              int target_w = left_w - 4;
+              int target_h = content_h - 4;
+              if (pt.x != target_x || pt.y != target_y || cur_w != target_w || cur_h != target_h) {
+                MoveWindow(left_hwnd, target_x, target_y, target_w, target_h, FALSE);
+              }
+              if (!IsWindowVisible(left_hwnd)) {
+                ShowWindow(left_hwnd, SW_SHOW);
+              }
             }
             host->base.release(&host->base);
           }
@@ -798,8 +816,22 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
         if (r_host) {
           HWND right_hwnd = r_host->get_window_handle(r_host);
           if (right_hwnd) {
-            MoveWindow(right_hwnd, right_x + 2, content_y + 2, right_w - 4, content_h - 4, TRUE);
-            ShowWindow(right_hwnd, SW_SHOW);
+            RECT cur_rc;
+            GetWindowRect(right_hwnd, &cur_rc);
+            POINT pt = {cur_rc.left, cur_rc.top};
+            ScreenToClient(hwnd, &pt);
+            int cur_w = cur_rc.right - cur_rc.left;
+            int cur_h = cur_rc.bottom - cur_rc.top;
+            int target_x = right_x + 2;
+            int target_y = content_y + 2;
+            int target_w = right_w - 4;
+            int target_h = content_h - 4;
+            if (pt.x != target_x || pt.y != target_y || cur_w != target_w || cur_h != target_h) {
+              MoveWindow(right_hwnd, target_x, target_y, target_w, target_h, FALSE);
+            }
+            if (!IsWindowVisible(right_hwnd)) {
+              ShowWindow(right_hwnd, SW_SHOW);
+            }
           }
           r_host->base.release(&r_host->base);
         }
@@ -817,8 +849,18 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
             HWND content_hwnd = host->get_window_handle(host);
             if (content_hwnd)
             {
-              MoveWindow(content_hwnd, 0, content_y, main_area_w, content_h, TRUE);
-              ShowWindow(content_hwnd, SW_SHOW);
+              RECT cur_rc;
+              GetWindowRect(content_hwnd, &cur_rc);
+              POINT pt = {cur_rc.left, cur_rc.top};
+              ScreenToClient(hwnd, &pt);
+              int cur_w = cur_rc.right - cur_rc.left;
+              int cur_h = cur_rc.bottom - cur_rc.top;
+              if (pt.x != 0 || pt.y != content_y || cur_w != main_area_w || cur_h != content_h) {
+                MoveWindow(content_hwnd, 0, content_y, main_area_w, content_h, FALSE);
+              }
+              if (!IsWindowVisible(content_hwnd)) {
+                ShowWindow(content_hwnd, SW_SHOW);
+              }
             }
             host->base.release(&host->base);
           }
@@ -829,7 +871,7 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
           if (r_host)
           {
             HWND right_hwnd = r_host->get_window_handle(r_host);
-            if (right_hwnd) ShowWindow(right_hwnd, SW_HIDE);
+            if (right_hwnd && IsWindowVisible(right_hwnd)) ShowWindow(right_hwnd, SW_HIDE);
             r_host->base.release(&r_host->base);
           }
         }
@@ -837,8 +879,8 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
 
       for (int k = 0; k < win_ctx->tab_count; k++) {
         if (k != win_ctx->active_tab_index) {
-          if (win_ctx->tabs[k].hwnd) ShowWindow(win_ctx->tabs[k].hwnd, SW_HIDE);
-          if (win_ctx->tabs[k].right_hwnd) ShowWindow(win_ctx->tabs[k].right_hwnd, SW_HIDE);
+          if (win_ctx->tabs[k].hwnd && IsWindowVisible(win_ctx->tabs[k].hwnd)) ShowWindow(win_ctx->tabs[k].hwnd, SW_HIDE);
+          if (win_ctx->tabs[k].right_hwnd && IsWindowVisible(win_ctx->tabs[k].right_hwnd)) ShowWindow(win_ctx->tabs[k].right_hwnd, SW_HIDE);
         }
       }
     }
@@ -875,8 +917,15 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
           int target_ui_h = (win_ctx->is_ui_expanded && win_ctx->ui_expanded_height > 0) 
                               ? win_ctx->ui_expanded_height 
                               : ui_height;
-          SetWindowPos(ui_hwnd, HWND_TOP, 0, 0, width, target_ui_h, SWP_SHOWWINDOW);
-          BringWindowToTop(ui_hwnd);
+          RECT cur_rc;
+          GetWindowRect(ui_hwnd, &cur_rc);
+          POINT pt = {cur_rc.left, cur_rc.top};
+          ScreenToClient(hwnd, &pt);
+          int cur_w = cur_rc.right - cur_rc.left;
+          int cur_h = cur_rc.bottom - cur_rc.top;
+          if (pt.x != 0 || pt.y != 0 || cur_w != width || cur_h != target_ui_h) {
+            SetWindowPos(ui_hwnd, HWND_TOP, 0, 0, width, target_ui_h, SWP_NOACTIVATE);
+          }
         }
         host->base.release(&host->base);
       }
@@ -1017,7 +1066,7 @@ void CreateSidepanelBrowser(browser_window_t* win_ctx) {
 
   cef_browser_settings_t browser_settings = {};
   browser_settings.size = sizeof(cef_browser_settings_t);
-  browser_settings.background_color = is_theme_dark() ? 0xFF0D0F15 : 0xFFFFFFFF;
+  browser_settings.background_color = is_theme_dark() ? 0xFF0D0F15 : 0xFFF4F4F5;
 
   cef_window_info_t sidepanel_window_info = {};
   sidepanel_window_info.size = sizeof(cef_window_info_t);
@@ -1060,7 +1109,7 @@ browser_window_t* create_browser_window(const char* startup_url) {
     wcex.hInstance = hInstance;
     wcex.hCursor = LoadCursor(NULL, IDC_ARROW);
     int dark_init = is_theme_dark();
-    wcex.hbrBackground = CreateSolidBrush(dark_init ? RGB(13, 15, 21) : RGB(228, 228, 231));
+    wcex.hbrBackground = CreateSolidBrush(dark_init ? RGB(13, 15, 21) : RGB(244, 244, 245));
     wcex.lpszClassName = L"LiteBrowserMainWindowClass";
     RegisterClassEx(&wcex);
     class_registered = 1;
@@ -1131,11 +1180,11 @@ browser_window_t* create_browser_window(const char* startup_url) {
 
   cef_browser_settings_t ui_browser_settings = {};
   ui_browser_settings.size = sizeof(cef_browser_settings_t);
-  ui_browser_settings.background_color = 0; // Transparent background for frameless UI expansion
+  ui_browser_settings.background_color = is_theme_dark() ? 0xFF141721 : 0xFFE4E4E7;
 
   cef_browser_settings_t browser_settings = {};
   browser_settings.size = sizeof(cef_browser_settings_t);
-  browser_settings.background_color = is_theme_dark() ? 0xFF0D0F15 : 0xFFFFFFFF;
+  browser_settings.background_color = is_theme_dark() ? 0xFF0D0F15 : 0xFFF4F4F5;
 
   int ui_height = GetUIHeightForWindow(main_hwnd);
   int content_y = ui_height;
@@ -1145,7 +1194,7 @@ browser_window_t* create_browser_window(const char* startup_url) {
   cef_window_info_t ui_window_info = {};
   ui_window_info.size = sizeof(cef_window_info_t);
   ui_window_info.style =
-      WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN;
+      WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
   ui_window_info.parent_window = main_hwnd;
   ui_window_info.bounds.x = 0;
   ui_window_info.bounds.y = 0;
@@ -1267,7 +1316,7 @@ browser_window_t* create_browser_window_for_detached(cef_browser_t* detached_bro
 
   cef_browser_settings_t ui_browser_settings = {};
   ui_browser_settings.size = sizeof(cef_browser_settings_t);
-  ui_browser_settings.background_color = 0; // Transparent background for frameless UI expansion
+  ui_browser_settings.background_color = is_theme_dark() ? 0xFF141721 : 0xFFE4E4E7;
 
   int ui_height = GetUIHeightForWindow(main_hwnd);
   int content_y = ui_height;
@@ -1277,7 +1326,7 @@ browser_window_t* create_browser_window_for_detached(cef_browser_t* detached_bro
   cef_window_info_t ui_window_info = {};
   ui_window_info.size = sizeof(cef_window_info_t);
   ui_window_info.style =
-      WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN;
+      WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
   ui_window_info.parent_window = main_hwnd;
   ui_window_info.bounds.x = 0;
   ui_window_info.bounds.y = 0;

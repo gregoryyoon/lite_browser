@@ -10,6 +10,7 @@
 #include "tests/cefsimple_capi/simple_app.h"
 #include "tests/cefsimple_capi/simple_utils.h"
 #include "tests/cefsimple_capi/simple_dialog_helper.h"
+#include "tests/cefsimple_capi/simple_handler.h"
 
 static int RunMain(HINSTANCE hInstance,
                    LPTSTR lpCmdLine,
@@ -48,6 +49,7 @@ static int RunMain(HINSTANCE hInstance,
   // Specify CEF global settings here.
   cef_settings_t settings = {};
   settings.size = sizeof(cef_settings_t);
+  settings.background_color = is_theme_dark() ? 0xFF141721 : 0xFFE4E4E7;
 
   if (!sandbox_info) {
     settings.no_sandbox = 1;

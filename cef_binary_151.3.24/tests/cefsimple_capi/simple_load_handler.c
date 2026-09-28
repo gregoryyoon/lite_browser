@@ -81,7 +81,7 @@ load_handler_on_loading_state_change(cef_load_handler_t* self,
   simple_load_handler_t* handler = (simple_load_handler_t*)self;
 
   browser_window_t *win_ctx = handler->parent->window_ctx;
-  if (win_ctx && handler->parent->type != BROWSER_TYPE_POPUP) {
+  if (win_ctx && handler->parent->type == BROWSER_TYPE_CONTENT) {
     int found_idx = -1;
     for (int i = 0; i < win_ctx->tab_count; i++) {
       if (win_ctx->tabs[i].browser &&
@@ -102,8 +102,9 @@ load_handler_on_loading_state_change(cef_load_handler_t* self,
               if (win_ctx->tabs[k].right_hwnd) ShowWindow(win_ctx->tabs[k].right_hwnd, SW_HIDE);
             }
           }
-          SetWindowPos(win_ctx->tabs[found_idx].hwnd, HWND_TOP, 0, 0, 0, 0,
-                       SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+          HWND insert_after = (win_ctx->ui_hwnd && IsWindow(win_ctx->ui_hwnd)) ? win_ctx->ui_hwnd : HWND_TOP;
+          SetWindowPos(win_ctx->tabs[found_idx].hwnd, insert_after, 0, 0, 0, 0,
+                       SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW | SWP_NOACTIVATE);
 
           RECT rect;
           GetClientRect(win_ctx->main_hwnd, &rect);

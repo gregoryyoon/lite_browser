@@ -197,7 +197,8 @@ void CEF_CALLBACK life_span_handler_on_after_created(
               }
             }
             win_ctx->active_tab_index = i;
-            SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+            HWND insert_after = (win_ctx->ui_hwnd && IsWindow(win_ctx->ui_hwnd)) ? win_ctx->ui_hwnd : HWND_TOP;
+            SetWindowPos(hwnd, insert_after, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW | SWP_NOACTIVATE);
 
             cef_browser_host_t* new_host = browser->get_host(browser);
             if (new_host) {
@@ -396,7 +397,7 @@ int CEF_CALLBACK life_span_handler_on_before_popup(
     }
 
     if (settings) {
-      settings->background_color = dark_init ? 0xFF0D0F15 : 0xFFFFFFFF;
+      settings->background_color = dark_init ? 0xFF0D0F15 : 0xFFF4F4F5;
     }
 
     popup_window_ctx_t* pctx = (popup_window_ctx_t*)calloc(1, sizeof(popup_window_ctx_t));

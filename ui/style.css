@@ -70,7 +70,7 @@ html, body {
   padding: 0;
   height: 100%;
   width: 100%;
-  background-color: transparent;
+  background-color: var(--bg-tabs-bar);
   overflow: hidden;
 }
 
@@ -147,6 +147,7 @@ body {
   color: var(--text-primary);
   box-shadow: var(--shadow-sm);
 }
+
 
 .tab-favicon {
   width: 16px;

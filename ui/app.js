@@ -1,38 +1,51 @@
+function sendUiAction(url) {
+  let bridge = document.getElementById('ui-action-bridge');
+  if (bridge) {
+    bridge.remove();
+  }
+  bridge = document.createElement('iframe');
+  bridge.id = 'ui-action-bridge';
+  bridge.style.display = 'none';
+  bridge.src = url;
+  document.body.appendChild(bridge);
+}
+window.sendUiAction = sendUiAction;
+
 function goBack() {
-  window.location.href = 'http://ui-action/back';
+  sendUiAction('http://ui-action/back');
 }
 
 function goForward() {
-  window.location.href = 'http://ui-action/forward';
+  sendUiAction('http://ui-action/forward');
 }
 
 function reloadPage() {
-  window.location.href = 'http://ui-action/reload';
+  sendUiAction('http://ui-action/reload');
 }
 
 function newTab() {
-  window.location.href = 'http://ui-action/new-tab';
+  sendUiAction('http://ui-action/new-tab');
 }
 
 function switchTab(id) {
-  window.location.href = 'http://ui-action/switch-tab?id=' + id;
+  sendUiAction('http://ui-action/switch-tab?id=' + id);
 }
 
 function closeTab(id, event) {
   event.stopPropagation();
-  window.location.href = 'http://ui-action/close-tab?id=' + id;
+  sendUiAction('http://ui-action/close-tab?id=' + id);
 }
 
 function detachTab(id) {
-  window.location.href = 'http://ui-action/detach-tab?id=' + id;
+  sendUiAction('http://ui-action/detach-tab?id=' + id);
 }
 
 function toggleDualSplit() {
-  window.location.href = 'http://ui-action/toggle-dual-split';
+  sendUiAction('http://ui-action/toggle-dual-split');
 }
 
 function toggleAiSidepanel() {
-  window.location.href = 'http://ui-action/toggle-ai-sidepanel';
+  sendUiAction('http://ui-action/toggle-ai-sidepanel');
 }
 
 window.updateDualSplitState = function(isSplit, activeSplit) {
@@ -80,7 +93,7 @@ function handleKey(event) {
       event.target.blur();
     }
     closeOmniboxDropdown();
-    window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(url);
+    sendUiAction('http://ui-action/load?url=' + encodeURIComponent(url));
   }
 }
 
@@ -108,9 +121,9 @@ let currentUrl = '';
 let currentTitle = '';
 
 function requestLoadBookmarks() {
-  window.location.href = 'http://ui-action/load-bookmarks';
+  sendUiAction('http://ui-action/load-bookmarks');
   setTimeout(() => {
-    window.location.href = 'http://ui-action/load-history';
+    sendUiAction('http://ui-action/load-history');
   }, 150);
 }
 
@@ -140,7 +153,7 @@ function saveBookmarksToBackend() {
   try {
     const jsonStr = JSON.stringify(bookmarksData);
     const b64Str = btoa(unescape(encodeURIComponent(jsonStr)));
-    window.location.href = 'http://ui-action/save-bookmarks?data=' + encodeURIComponent(b64Str);
+    sendUiAction('http://ui-action/save-bookmarks?data=' + encodeURIComponent(b64Str));
   } catch (e) {
     console.error("Failed to save bookmarks:", e);
   }
@@ -150,7 +163,7 @@ function saveHistoryToBackend() {
   try {
     const jsonStr = JSON.stringify(historyData);
     const b64Str = btoa(unescape(encodeURIComponent(jsonStr)));
-    window.location.href = 'http://ui-action/save-history?data=' + encodeURIComponent(b64Str);
+    sendUiAction('http://ui-action/save-history?data=' + encodeURIComponent(b64Str));
   } catch (e) {
     console.error("Failed to save history:", e);
   }
@@ -283,147 +296,252 @@ function getDomainFromUrl(url) {
   }
 }
 
+function getTabInfoMeta(tab) {
+  const isManager = tab.url && (tab.url.indexOf('ui/manager.html') !== -1 || tab.url.indexOf('lite://favorites') !== -1);
+  const isDownloads = tab.url && (tab.url.indexOf('ui/downloads.html') !== -1 || tab.url.indexOf('lite://downloads') !== -1);
+  const isSettings = tab.url && (tab.url.indexOf('ui/settings.html') !== -1 || tab.url.indexOf('lite://settings') !== -1);
+  const isSidepanel = tab.url && (tab.url.indexOf('ui/sidepanel.html') !== -1 || tab.url.indexOf('lite://sidepanel') !== -1);
+  const displayTitle = isManager ? '북마크 관리자' : (isDownloads ? '다운로드 관리자' : (isSettings ? '설정' : (isSidepanel ? 'AI 사이드패널' : (tab.title || '새 탭'))));
+  return { isManager, isDownloads, isSettings, isSidepanel, displayTitle };
+}
+
+function getTabFaviconUrl(tab, meta) {
+  if (meta.isManager) return FAVORITES_ICON_SVG;
+  if (meta.isDownloads) return DOWNLOADS_ICON_SVG;
+  if (meta.isSidepanel) return SIDEPANEL_ICON_SVG;
+  const domain = getDomainFromUrl(tab.url);
+  const googleFaviconUrl = domain ? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=32` : '';
+  return tab.favicon || googleFaviconUrl || DEFAULT_GLOBE_SVG;
+}
+
+function wireFaviconElement(favEl, tab) {
+  const domain = getDomainFromUrl(tab.url);
+  const googleFaviconUrl = domain ? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=32` : '';
+  favEl.onerror = () => {
+    if (googleFaviconUrl && favEl.src !== googleFaviconUrl) {
+      favEl.src = googleFaviconUrl;
+    } else {
+      favEl.src = DEFAULT_GLOBE_SVG;
+    }
+  };
+}
+
+function createTabDom(tab, isActive) {
+  const meta = getTabInfoMeta(tab);
+  const tabEl = document.createElement('div');
+  tabEl.setAttribute('data-tab-id', tab.id);
+  tabEl.className = 'tab' + (isActive ? ' active' : '');
+  tabEl.draggable = false;
+  tabEl.title = meta.displayTitle;
+
+  tabEl.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const x = Math.round(e.clientX);
+    const y = Math.round(e.clientY);
+    sendUiAction('http://ui-action/show-tab-menu?id=' + tab.id + '&x=' + x + '&y=' + y);
+  });
+
+  if (tab.is_split) {
+    const splitIcon = document.createElement('span');
+    splitIcon.className = 'tab-split-badge';
+    splitIcon.title = '듀얼 탭 분할 상태';
+    splitIcon.innerHTML = `<svg viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M12 3v18"/></svg>`;
+    tabEl.appendChild(splitIcon);
+  }
+
+  // Favicon or Spinner
+  if (tab.is_loading) {
+    const spinnerEl = document.createElement('span');
+    spinnerEl.className = 'tab-spinner';
+    tabEl.appendChild(spinnerEl);
+  } else {
+    const favEl = document.createElement('img');
+    favEl.className = 'tab-favicon';
+    const favSrc = getTabFaviconUrl(tab, meta);
+    favEl.dataset.currentSrc = favSrc;
+    favEl.src = favSrc;
+    wireFaviconElement(favEl, tab);
+    tabEl.appendChild(favEl);
+  }
+
+  const titleEl = document.createElement('span');
+  titleEl.className = 'tab-title';
+  titleEl.innerText = meta.displayTitle;
+  titleEl.title = meta.displayTitle;
+  tabEl.appendChild(titleEl);
+
+  const closeEl = document.createElement('button');
+  closeEl.className = 'tab-close';
+  closeEl.innerHTML = '<svg viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
+  closeEl.onclick = (e) => closeTab(tab.id, e);
+  closeEl.addEventListener('pointerdown', (e) => {
+    e.stopPropagation();
+  });
+  tabEl.appendChild(closeEl);
+
+  let isDragging = false;
+  let startX = 0;
+  let startY = 0;
+
+  tabEl.addEventListener('pointerdown', (e) => {
+    isDragging = false;
+    startX = e.clientX;
+    startY = e.clientY;
+    tabEl.setPointerCapture(e.pointerId);
+    document.body.style.cursor = 'grabbing';
+    tabEl.style.cursor = 'grabbing';
+  });
+
+  tabEl.addEventListener('pointermove', (e) => {
+    if (tabEl.hasPointerCapture(e.pointerId)) {
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+        isDragging = true;
+      }
+
+      if (isDragging) {
+        const tabsBar = document.querySelector('.tabs-bar');
+        if (tabsBar) {
+          const rect = tabsBar.getBoundingClientRect();
+          const x = e.clientX;
+          const y = e.clientY;
+
+          if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
+            document.body.style.cursor = 'copy';
+            tabEl.style.cursor = 'copy';
+          } else {
+            document.body.style.cursor = 'grabbing';
+            tabEl.style.cursor = 'grabbing';
+          }
+        }
+      }
+    }
+  });
+
+  tabEl.addEventListener('pointerup', (e) => {
+    if (tabEl.hasPointerCapture(e.pointerId)) {
+      tabEl.releasePointerCapture(e.pointerId);
+      document.body.style.cursor = '';
+      tabEl.style.cursor = '';
+
+      if (isDragging) {
+        sendUiAction('http://ui-action/drag-end?id=' + tab.id);
+      } else {
+        switchTab(tab.id);
+      }
+    }
+  });
+
+  return tabEl;
+}
+
+function updateTabDom(tabEl, tab, isActive) {
+  const meta = getTabInfoMeta(tab);
+
+  // Active state
+  if (isActive) {
+    tabEl.classList.add('active');
+  } else {
+    tabEl.classList.remove('active');
+  }
+
+  // Title
+  if (tabEl.title !== meta.displayTitle) {
+    tabEl.title = meta.displayTitle;
+  }
+  const titleEl = tabEl.querySelector('.tab-title');
+  if (titleEl && titleEl.innerText !== meta.displayTitle) {
+    titleEl.innerText = meta.displayTitle;
+    titleEl.title = meta.displayTitle;
+  }
+
+  // Split badge
+  let splitBadge = tabEl.querySelector('.tab-split-badge');
+  if (tab.is_split && !splitBadge) {
+    splitBadge = document.createElement('span');
+    splitBadge.className = 'tab-split-badge';
+    splitBadge.title = '듀얼 탭 분할 상태';
+    splitBadge.innerHTML = `<svg viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M12 3v18"/></svg>`;
+    tabEl.insertBefore(splitBadge, tabEl.firstChild);
+  } else if (!tab.is_split && splitBadge) {
+    splitBadge.remove();
+  }
+
+  // Favicon or Spinner
+  const refNode = tabEl.querySelector('.tab-title');
+  const existingSpinner = tabEl.querySelector('.tab-spinner');
+  const existingFavicon = tabEl.querySelector('.tab-favicon');
+
+  if (tab.is_loading) {
+    if (existingFavicon) existingFavicon.remove();
+    if (!existingSpinner) {
+      const spinnerEl = document.createElement('span');
+      spinnerEl.className = 'tab-spinner';
+      tabEl.insertBefore(spinnerEl, refNode);
+    }
+  } else {
+    if (existingSpinner) existingSpinner.remove();
+    const favSrc = getTabFaviconUrl(tab, meta);
+    if (!existingFavicon) {
+      const favEl = document.createElement('img');
+      favEl.className = 'tab-favicon';
+      favEl.dataset.currentSrc = favSrc;
+      favEl.src = favSrc;
+      wireFaviconElement(favEl, tab);
+      tabEl.insertBefore(favEl, refNode);
+    } else if (existingFavicon.dataset.currentSrc !== favSrc) {
+      existingFavicon.dataset.currentSrc = favSrc;
+      existingFavicon.src = favSrc;
+      wireFaviconElement(existingFavicon, tab);
+    }
+  }
+}
+
 window.updateTabsList = function(tabs, activeId) {
   const container = document.getElementById('tabs');
   if (!container) return;
 
-  container.innerHTML = '';
-  tabs.forEach(tab => {
-    const isManager = tab.url && (tab.url.indexOf('ui/manager.html') !== -1 || tab.url.indexOf('lite://favorites') !== -1);
-    const isDownloads = tab.url && (tab.url.indexOf('ui/downloads.html') !== -1 || tab.url.indexOf('lite://downloads') !== -1);
-    const isSettings = tab.url && (tab.url.indexOf('ui/settings.html') !== -1 || tab.url.indexOf('lite://settings') !== -1);
-    const isSidepanel = tab.url && (tab.url.indexOf('ui/sidepanel.html') !== -1 || tab.url.indexOf('lite://sidepanel') !== -1);
-    const displayTitle = isManager ? '북마크 관리자' : (isDownloads ? '다운로드 관리자' : (isSettings ? '설정' : (isSidepanel ? 'AI 사이드패널' : (tab.title || '새 탭'))));
-    if (tab.id === activeId) {
-      currentTitle = isManager ? '북마크 관리자' : (isDownloads ? '다운로드 관리자' : (isSettings ? '설정' : (isSidepanel ? 'AI 사이드패널' : (tab.title || ''))));
+  const currentTabMap = new Map();
+  container.querySelectorAll('.tab').forEach(el => {
+    const tid = el.getAttribute('data-tab-id');
+    if (tid !== null) {
+      currentTabMap.set(String(tid), el);
     }
-    const tabEl = document.createElement('div');
-    tabEl.className = 'tab' + (tab.id === activeId ? ' active' : '');
-    tabEl.draggable = false;
-    tabEl.title = displayTitle;
-    
-    tabEl.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const x = Math.round(e.clientX);
-      const y = Math.round(e.clientY);
-      window.location.href = 'http://ui-action/show-tab-menu?id=' + tab.id + '&x=' + x + '&y=' + y;
-    });
-    
-    if (tab.is_split) {
-      const splitIcon = document.createElement('span');
-      splitIcon.className = 'tab-split-badge';
-      splitIcon.title = '듀얼 탭 분할 상태';
-      splitIcon.innerHTML = `<svg viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M12 3v18"/></svg>`;
-      tabEl.appendChild(splitIcon);
+  });
+
+  const validIds = new Set(tabs.map(t => String(t.id)));
+
+  // Remove closed/deleted tabs
+  currentTabMap.forEach((el, tid) => {
+    if (!validIds.has(tid)) {
+      el.remove();
+      currentTabMap.delete(tid);
+    }
+  });
+
+  tabs.forEach((tab, index) => {
+    const tid = String(tab.id);
+    const isActive = (tab.id === activeId);
+    if (isActive) {
+      const meta = getTabInfoMeta(tab);
+      currentTitle = meta.displayTitle === '새 탭' ? '' : meta.displayTitle;
     }
 
-    // Render Favicon or Loading Spinner
-    if (tab.is_loading) {
-      const spinnerEl = document.createElement('span');
-      spinnerEl.className = 'tab-spinner';
-      tabEl.appendChild(spinnerEl);
-    } else if (isManager) {
-      const favEl = document.createElement('img');
-      favEl.className = 'tab-favicon';
-      favEl.src = FAVORITES_ICON_SVG;
-      tabEl.appendChild(favEl);
-    } else if (isDownloads) {
-      const favEl = document.createElement('img');
-      favEl.className = 'tab-favicon';
-      favEl.src = DOWNLOADS_ICON_SVG;
-      tabEl.appendChild(favEl);
-    } else if (isSidepanel) {
-      const favEl = document.createElement('img');
-      favEl.className = 'tab-favicon';
-      favEl.src = SIDEPANEL_ICON_SVG;
-      tabEl.appendChild(favEl);
+    let tabEl = currentTabMap.get(tid);
+    if (tabEl) {
+      updateTabDom(tabEl, tab, isActive);
     } else {
-      const favEl = document.createElement('img');
-      favEl.className = 'tab-favicon';
-      const domain = getDomainFromUrl(tab.url);
-      const googleFaviconUrl = domain ? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=32` : '';
-      favEl.src = tab.favicon || googleFaviconUrl || DEFAULT_GLOBE_SVG;
-      favEl.onerror = () => {
-        if (googleFaviconUrl && favEl.src !== googleFaviconUrl) {
-          favEl.src = googleFaviconUrl;
-        } else {
-          favEl.src = DEFAULT_GLOBE_SVG;
-        }
-      };
-      tabEl.appendChild(favEl);
+      tabEl = createTabDom(tab, isActive);
+      currentTabMap.set(tid, tabEl);
     }
 
-    const titleEl = document.createElement('span');
-    titleEl.className = 'tab-title';
-    titleEl.innerText = displayTitle;
-    titleEl.title = displayTitle;
-    tabEl.appendChild(titleEl);
-
-    const closeEl = document.createElement('button');
-    closeEl.className = 'tab-close';
-    closeEl.innerHTML = '<svg viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
-    closeEl.onclick = (e) => closeTab(tab.id, e);
-    closeEl.addEventListener('pointerdown', (e) => {
-      e.stopPropagation();
-    });
-    tabEl.appendChild(closeEl);
-
-    let isDragging = false;
-    let startX = 0;
-    let startY = 0;
-
-    tabEl.addEventListener('pointerdown', (e) => {
-      isDragging = false;
-      startX = e.clientX;
-      startY = e.clientY;
-      tabEl.setPointerCapture(e.pointerId);
-      document.body.style.cursor = 'grabbing';
-      tabEl.style.cursor = 'grabbing';
-    });
-
-    tabEl.addEventListener('pointermove', (e) => {
-      if (tabEl.hasPointerCapture(e.pointerId)) {
-        const dx = e.clientX - startX;
-        const dy = e.clientY - startY;
-        if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
-          isDragging = true;
-        }
-
-        if (isDragging) {
-          const tabsBar = document.querySelector('.tabs-bar');
-          if (tabsBar) {
-            const rect = tabsBar.getBoundingClientRect();
-            const x = e.clientX;
-            const y = e.clientY;
-
-            if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
-              document.body.style.cursor = 'copy';
-              tabEl.style.cursor = 'copy';
-            } else {
-              document.body.style.cursor = 'grabbing';
-              tabEl.style.cursor = 'grabbing';
-            }
-          }
-        }
-      }
-    });
-
-    tabEl.addEventListener('pointerup', (e) => {
-      if (tabEl.hasPointerCapture(e.pointerId)) {
-        tabEl.releasePointerCapture(e.pointerId);
-        document.body.style.cursor = '';
-        tabEl.style.cursor = '';
-
-        if (isDragging) {
-          window.location.href = 'http://ui-action/drag-end?id=' + tab.id;
-        } else {
-          switchTab(tab.id);
-        }
-      }
-    });
-
-    container.appendChild(tabEl);
+    // Ensure correct DOM order
+    const childAtIndex = container.children[index];
+    if (childAtIndex !== tabEl) {
+      container.insertBefore(tabEl, childAtIndex || null);
+    }
   });
 
   const activeTabEl = container.querySelector('.tab.active');
@@ -439,7 +557,7 @@ function toggleMenu(event) {
     const rect = btn.getBoundingClientRect();
     const x = Math.round(rect.right);
     const y = Math.round(rect.bottom);
-    window.location.href = 'http://ui-action/show-menu?x=' + x + '&y=' + y;
+    sendUiAction('http://ui-action/show-menu?x=' + x + '&y=' + y);
   }
 }
 
@@ -453,7 +571,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (target.closest('.tab') || target.closest('.tab-btn') || target.closest('.win-control-btn')) {
         return;
       }
-      window.location.href = 'http://ui-action/drag-window';
+      sendUiAction('http://ui-action/drag-window');
     });
   }
 
@@ -482,15 +600,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // 최소화, 최대화, 닫기 액션 디스패치 함수
 function minimizeWindow() {
-  window.location.href = 'http://ui-action/window-minimize';
+  sendUiAction('http://ui-action/window-minimize');
 }
 
 function maximizeWindow() {
-  window.location.href = 'http://ui-action/window-maximize';
+  sendUiAction('http://ui-action/window-maximize');
 }
 
 function closeWindow() {
-  window.location.href = 'http://ui-action/window-close';
+  sendUiAction('http://ui-action/window-close');
 }
 
 // 최대화 상태에 따른 아이콘 갱신 함수 (백엔드 C 코드에서 호출)
@@ -520,11 +638,11 @@ function closeAllPopups() {
   if (listPopup) listPopup.classList.add('hide');
   if (backdrop) backdrop.classList.add('hide');
 
-  window.location.href = 'http://ui-action/collapse-ui';
+  sendUiAction('http://ui-action/collapse-ui');
 }
 
 function expandUI(height, showBackdrop = true) {
-  window.location.href = 'http://ui-action/expand-ui?height=' + height;
+  sendUiAction('http://ui-action/expand-ui?height=' + height);
   const backdrop = document.getElementById('popup-backdrop');
   if (backdrop) {
     if (showBackdrop) {
@@ -680,7 +798,7 @@ function renderBookmarksTree(filterQuery = '') {
         itemEl.className = 'bm-item';
         itemEl.onclick = (e) => {
           e.stopPropagation();
-          window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(bm.url);
+          sendUiAction('http://ui-action/load?url=' + encodeURIComponent(bm.url));
           closeAllPopups();
         };
 
@@ -743,7 +861,7 @@ function triggerContextualBookmark(event) {
   }
 
   // 등록되지 않은 경우 메타데이터 수집 후 추가
-  window.location.href = 'http://ui-action/extract-and-save-bookmark';
+  sendUiAction('http://ui-action/extract-and-save-bookmark');
 }
 
 window.onContextualBookmarkExtractedB64 = function(b64Str) {
@@ -821,7 +939,7 @@ let g_hasUnseenCompletedDownload = false;
 let g_lastActiveCount = 0;
 
 function openBookmarkDashboard() {
-  window.location.href = 'http://ui-action/open-bookmark-manager';
+  sendUiAction('http://ui-action/open-bookmark-manager');
 }
 
 function openDownloadDashboard() {
@@ -831,7 +949,7 @@ function openDownloadDashboard() {
     btn.title = '다운로드 관리자 (Ctrl+J)';
   }
   g_hasUnseenCompletedDownload = false;
-  window.location.href = 'http://ui-action/open-download-manager';
+  sendUiAction('http://ui-action/open-download-manager');
 }
 
 window.updateDownloadButtonStatus = function(items) {
@@ -906,7 +1024,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.ctrlKey && (e.key === 'f' || e.key === 'F')) {
       if (!isInput) {
         e.preventDefault();
-        window.location.href = 'http://ui-action/trigger-find';
+        sendUiAction('http://ui-action/trigger-find');
       }
     } else if (e.ctrlKey && (e.key === 'j' || e.key === 'J')) {
       e.preventDefault();
@@ -1104,9 +1222,9 @@ function navigateOmniboxUrl(url, isNewTab = false) {
   }
   closeOmniboxDropdown();
   if (isNewTab) {
-    window.location.href = 'http://ui-action/new-tab?url=' + encodeURIComponent(url);
+    sendUiAction('http://ui-action/new-tab?url=' + encodeURIComponent(url));
   } else {
-    window.location.href = 'http://ui-action/load?url=' + encodeURIComponent(url);
+    sendUiAction('http://ui-action/load?url=' + encodeURIComponent(url));
   }
 }
 
