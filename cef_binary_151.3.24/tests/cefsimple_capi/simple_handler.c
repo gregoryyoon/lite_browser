@@ -2128,17 +2128,17 @@ int CEF_CALLBACK request_handler_on_before_browse(
             DestroyMenu(hMenu);
 
             if (cmd == 1001) {
-              CreateNewTab(win_ctx, "lite://favorites");
+              CreateNewTabEx(win_ctx, "lite://favorites", 1);
             } else if (cmd == 1002) {
               create_browser_window("lite://favorites");
             } else if (cmd == 1008) {
-              CreateNewTab(win_ctx, "lite://downloads");
+              CreateNewTabEx(win_ctx, "lite://downloads", 1);
             } else if (cmd == 1011) {
-              CreateNewTab(win_ctx, "chrome://password-manager/passwords");
+              CreateNewTabEx(win_ctx, "chrome://password-manager/passwords", 1);
             } else if (cmd == 1009) {
               simple_installer_check_update_async(win_ctx);
             } else if (cmd == 1010) {
-              CreateNewTab(win_ctx, "lite://settings");
+              CreateNewTabEx(win_ctx, "lite://settings", 1);
             } else if (cmd == 1003) {
               if (cb) {
                 cef_browser_host_t* host = cb->get_host(cb);
@@ -2493,11 +2493,11 @@ int CEF_CALLBACK request_handler_on_before_browse(
           }
         } else if (strcmp(action, "open-bookmark-manager") == 0) {
           if (win_ctx) {
-            CreateNewTab(win_ctx, "lite://favorites");
+            CreateNewTabEx(win_ctx, "lite://favorites", 1);
           }
         } else if (strcmp(action, "open-download-manager") == 0) {
           if (win_ctx) {
-            CreateNewTab(win_ctx, "lite://downloads");
+            CreateNewTabEx(win_ctx, "lite://downloads", 1);
           }
         } else if (strcmp(action, "load-bookmarks-v2") == 0) {
           char filepath[MAX_PATH];
@@ -2691,11 +2691,11 @@ int CEF_CALLBACK request_handler_on_before_browse(
               }
             }
             decoded[j] = '\0';
-            CreateNewTab(win_ctx, decoded);
+            CreateNewTabEx(win_ctx, decoded, 1);
             free(decoded);
           }
         } else if (strcmp(action, "new-tab") == 0) {
-          CreateNewTab(win_ctx, "lite://favorites");
+          CreateNewTabEx(win_ctx, "lite://favorites", 1);
         } else if (strncmp(action, "switch-tab?id=", 14) == 0) {
           int target_id = atoi(action + 14);
           int found_idx = -1;
@@ -3242,7 +3242,7 @@ simple_context_menu_handler_t *context_menu_handler_create(simple_handler_t *par
   return handler;
 }
 
-void CreateNewTab(browser_window_t* win_ctx, const char* url) {
+void CreateNewTabEx(browser_window_t* win_ctx, const char* url, int insert_at_end) {
   if (!win_ctx) return;
   if (win_ctx->tab_count >= MAX_TABS) return;
 
@@ -3312,7 +3312,7 @@ void CreateNewTab(browser_window_t* win_ctx, const char* url) {
   content_handler->window_ctx = win_ctx;
 
   int insert_idx = win_ctx->tab_count;
-  if (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+  if (!insert_at_end && win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
     insert_idx = win_ctx->active_tab_index + 1;
   }
 
@@ -3345,6 +3345,10 @@ void CreateNewTab(browser_window_t* win_ctx, const char* url) {
       &content_window_info, &content_handler->client, &content_url,
       &browser_settings, NULL, NULL);
   cef_string_clear(&content_url);
+}
+
+void CreateNewTab(browser_window_t* win_ctx, const char* url) {
+  CreateNewTabEx(win_ctx, url, 0);
 }
 
 void CreateRightSplitBrowser(browser_window_t* win_ctx, tab_info_t* tab, const char* initial_url) {

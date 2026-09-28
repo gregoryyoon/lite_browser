@@ -1561,7 +1561,7 @@ int CEF_CALLBACK browser_process_handler_on_already_running_app_relaunch(
       ShowWindow(target_win->main_hwnd, SW_RESTORE);
     }
     SetForegroundWindow(target_win->main_hwnd);
-    CreateNewTab(target_win, target_url);
+    CreateNewTabEx(target_win, target_url, 1);
   } else {
     browser_window_t* new_win = create_browser_window(target_url);
     if (new_win && new_win->main_hwnd) {

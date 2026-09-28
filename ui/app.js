@@ -425,6 +425,11 @@ window.updateTabsList = function(tabs, activeId) {
 
     container.appendChild(tabEl);
   });
+
+  const activeTabEl = container.querySelector('.tab.active');
+  if (activeTabEl) {
+    activeTabEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+  }
 };
 
 function toggleMenu(event) {
@@ -906,6 +911,9 @@ document.addEventListener('DOMContentLoaded', () => {
     } else if (e.ctrlKey && (e.key === 'j' || e.key === 'J')) {
       e.preventDefault();
       openDownloadDashboard();
+    } else if (e.ctrlKey && (e.key === 't' || e.key === 'T')) {
+      e.preventDefault();
+      newTab();
     } else if (e.ctrlKey && e.shiftKey && (e.key === 'a' || e.key === 'A')) {
       e.preventDefault();
       toggleAiSidepanel();

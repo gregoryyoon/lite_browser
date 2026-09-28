@@ -1487,5 +1487,37 @@ CEF 코어가 생성하는 팝업 윈도우(`Chrome_WidgetWin_1`)는 Win32 레�
   - 로그인 및 권한 승인 완료 즉시 인가 탭이 자동으로 닫히고 사이드패널에 `✅ 연결됨 (이메일 주소)` 상태 실시간 동기화.
   - "현재 페이지 요약해줘" 질문 시 ChatGPT가 브라우저 제어 도구를 정상 호출하고 페이지 요약 결과를 사이드패널에 깔끔하게 출력함을 사용자 테스트로 최종 확인 완료.
 
+---
+
+## 46. 새 탭(+) 생성 시 탭 목록 맨 끝(마지막 탭 우측) 생성 정책 분기 (New Tab Creation Position Policy)
+
+### 46.1 개요
+기존에는 모든 새 탭이 현재 활성화된 탭의 바로 오른쪽에 생성되었으나, 사용자 사용 편의성을 고려하여 새 탭 생성 위치 정책을 이원화했습니다.
+- 상단 탭바의 `+` 버튼 클릭, `Ctrl+T` 단축키, 툴바 관리자 버튼(북마크, 다운로드 등), 옴니박스 새 탭 열기 등 **사용자 주도의 새 탭 액션**은 항상 **탭 목록의 가장 마지막(맨 우측)**에 추가됩니다.
+- 웹페이지 내 링크 우클릭('새 탭에서 링크 열기'), `target="_blank"`, `window.open` 등 **현재 탐색 중인 웹페이지와 연계된 링크 새 탭**은 기존처럼 **현재 탭의 바로 오른쪽**에 생성되어 문맥을 유지합니다.
+
+### 46.2 핵심 구현 내역
+1. **`CreateNewTabEx` 분기 파라미터 추가 ([`simple_handler.h`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.h), [`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c))**:
+   - `CreateNewTabEx(browser_window_t* win_ctx, const char* url, int insert_at_end)` 함수 구현:
+     - `insert_at_end == 1`: 삽입 인덱스를 `win_ctx->tab_count`로 지정하여 기존 탭 배열 시프트 없이 맨 끝 슬롯에 새 탭 생성.
+     - `insert_at_end == 0`: 삽입 인덱스를 `win_ctx->active_tab_index + 1`로 지정하여 현재 활성 탭 바로 우측에 삽입.
+   - 기존 `CreateNewTab(win_ctx, url)`는 `CreateNewTabEx(win_ctx, url, 0)`를 래핑하여 기존 웹페이지 링크/팝업 핸들러가 현재 탭 우측 생성을 기본 유지하도록 보장.
+2. **사용자 주도 UI 액션 분기 적용 ([`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c), [`simple_app.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c))**:
+   - `+` 버튼 클릭 (`http://ui-action/new-tab`): `CreateNewTabEx(win_ctx, "lite://favorites", 1)`
+   - 옴니박스 새 탭 (`http://ui-action/new-tab?url=...`): `CreateNewTabEx(win_ctx, decoded, 1)`
+   - 툴바 메뉴 및 버튼(북마크 대시보드, 다운로드 대시보드, 설정, 비밀번호 관리자): `CreateNewTabEx(win_ctx, ..., 1)`
+   - 외부 커맨드라인 실행 URL 수신(`WM_COPYDATA`): `CreateNewTabEx(target_win, target_url, 1)`
+3. **단축키 및 탭 뷰포트 자동 스크롤 동기화 ([`ui/app.js`](file:///c:/projects/lite_browser/ui/app.js))**:
+   - 새 탭 단축키 `Ctrl+T` 이벤트 핸들러 추가 (`newTab()` 호출).
+   - 탭이 많아져 탭바 가로 폭을 초과할 때, 맨 끝에 추가된 활성 탭이 화면에 잘리지 않고 보이도록 `scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' })` 적용.
+
+### 46.3 빌드 및 검증 결과
+- **디버그 빌드**: `cmake --build cef_binary_151.3.24/build --config Debug --target cefsimple_capi` 성공 (`Exit code 0`).
+- **바이너리 생성**: `cef_binary_151.3.24\build\tests\cefsimple_capi\Debug\lite_browser.exe` 및 `lite_browser.dll` 정상 갱신.
+- **동작 검증**:
+  - 1번째 탭 선택 상태에서 `+` 버튼 및 `Ctrl+T` 입력 시 탭 목록 맨 끝(마지막 탭 우측)에 새 탭이 정상 생성됨을 확인.
+  - 웹페이지 내 링크 우클릭 '새 탭에서 링크 열기' 시 현재 탭의 바로 오른쪽에 생성됨을 확인.
+
+
 
 
