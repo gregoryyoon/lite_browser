@@ -1577,6 +1577,60 @@ CEF 코어가 생성하는 팝업 윈도우(`Chrome_WidgetWin_1`)는 Win32 레�
   - `+` 버튼 클릭 시 주소창 윈도우 전체가 하얗게 지워졌다 다시 그려지던 현상이 완전히 사라지고 새 탭이 즉시 렌더링됨을 확인.
   - 마우스로 여러 탭을 연속 클릭하며 전환할 때 메인 웹 콘텐츠 영역의 순간적인 하얀 플래시 현상 없이 매끄럽게 전환됨을 최종 검증 완료.
 
+---
+
+## 48. 새 탭 링크 열기 시 Windows TSF IME 플로팅 조합창 발생 원천 해결 및 포커스 파이프라인 정밀화 (New Tab Link Opening TSF IME Floating Composition Box Elimination & Focus Pipeline Refinement)
+
+### 48.1 개요
+웹페이지 내 링크에서 마우스 우클릭 "새 탭으로 링크 열기"나 휠 클릭, Ctrl+클릭을 통해 생성된 새 탭(네이버 카페, Jira 등)에서 본문의 검색 텍스트 필드를 처음 클릭하고 한글을 입력할 때, 브라우저 내부 인라인 조합 대신 화면 엉뚱한 위치에 Windows 11 사각형 플로팅 IME 조합창이 뜨는 현상이 발생했습니다.
+특히 새 탭을 먼저 열어두고 주소를 직접 입력하여 들어가는 경우에는 정상 동작하지만, 웹 링크를 통해 백그라운드/신규 생성된 탭에서만 간헐적으로 재현되는 특이점을 보였습니다.
+이를 해결하기 위해 CEF 공식 C++ 소스 코드의 윈도우 포커스 및 TSF(Text Services Framework) 바인딩 메커니즘을 역추적 분석하고, 새 탭 생성 시점의 포커스 인계 분기, 윈도우 활성화 플래그(`SWP_NOACTIVATE` 제거), 페이지 로드 완료 시점의 포커스 보장, 그리고 렌더러 서브클래스 포커스 사이클을 정밀화하여 문제를 완벽히 해결했습니다.
+
+### 48.2 원인 정밀 분석 (Chromium CEF 코어 레벨)
+1. **Chromium `InputMethodWinBase::IsWindowFocused` 검사 실패**:
+   - CEF 공식 소스 코드(`cef/libcef/browser/native/browser_platform_delegate_native_win.cc:304-311`) 분석 결과:
+     ```cpp
+     bool BrowserPlatformDelegateNativeWin::IsWindowFocused() const {
+       HWND hwnd = GetHostWindowHandle();
+       return ::GetFocus() == hwnd;
+     }
+     ```
+   - Chromium의 Windows IME 인터페이스는 OS 키보드 포커스가 정확히 해당 브라우저 윈도우(`::GetFocus() == hwnd`)에 있을 때만 TSF 세션과 텍스트 서비스 컨텍스트를 안정적으로 연결(Bind)합니다.
+2. **`CreateNewTabEx`의 무조건적인 UI 포커스 강탈**:
+   - 기존 구현에서는 `CreateNewTabEx`가 호출될 때 URL의 종류(빈 탭 vs 외부 웹 링크)를 구분하지 않고 항상 상단 주소창 UI 윈도우(`win_ctx->ui_hwnd`)로 포커스를 강제로 넘겼습니다(`SetFocus(win_ctx->ui_hwnd)`).
+   - 이로 인해 사용자가 링크 클릭으로 새 탭을 열었음에도 OS 수준의 키보드 포커스는 주소창에 머물러 있어, Chromium의 `IsWindowFocused`가 `false`를 반환하고 TSF 바인딩이 보류/취소되었습니다.
+3. **`SWP_NOACTIVATE` 플래그에 의한 윈도우 비활성화 상태 유지**:
+   - `simple_life_span_handler.c`와 `simple_load_handler.c`에서 새 탭 HWND를 배치할 때 `SWP_NOACTIVATE` 플래그가 지정되어 있어, 윈도우가 화면에 표시되더라도 OS 수준에서 비활성 상태로 유지되었습니다.
+4. **`ChildBorderSubclassProc`의 포커스 리셋 지연**:
+   - 렌더러 창 클릭 시 `SetFocus(main_hwnd)` -> `SetFocus(curFocus)`로 메인 윈도우를 경유하는 사이클이 발생하여 찰나의 포커스 전환 지연이 발생했고, TSF 세션이 준비되지 않은 상태에서 첫 글자가 입력되면서 OS 기본 사각형 플로팅 박스가 유발되었습니다.
+
+### 48.3 주요 구현 내역
+1. **새 탭 종류에 따른 포커스 인계 분기 ([`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c))**:
+   - `CreateNewTabEx`에서 새 탭 URL이 즐겨찾기/빈 탭(`is_blank_or_fav`: 빈 문자열, `lite://favorites`, `lite://bookmarks`)인 경우에만 상단 주소창 UI(`ui_hwnd`)로 포커스를 인계하도록 수정.
+   - 외부 웹 링크 클릭으로 생성된 탭은 본문 웹 브라우저의 포커스를 가로채지 않아 네비게이션 시점에 TSF 세션이 정상적으로 바인딩되도록 보장.
+2. **`SWP_NOACTIVATE` 제거 및 선제적 포커스 바인딩 ([`simple_life_span_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_life_span_handler.c))**:
+   - 새 탭 윈도우 배치 시 `SWP_NOACTIVATE` 플래그를 제거하여 정상 활성화되도록 수정.
+   - `new_host->set_focus(new_host, 1)` 및 `SetFocus(hwnd)`를 명시적으로 호출하여 OS 수준 포커스와 WebContents 포커스를 선제적으로 일치시킴.
+3. **페이지 로드 완료 시점 활성 탭 포커스 보장 ([`simple_load_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_load_handler.c))**:
+   - `load_handler_on_loading_state_change`에서 페이지 로딩 완료(`!isLoading`) 시점에 `SWP_NOACTIVATE`를 제거.
+   - 활성 탭에 대해 `host->set_focus(host, 1)`와 `SetFocus(win_ctx->tabs[found_idx].hwnd)`를 호출하여 SPA나 무거운 웹페이지 로딩 완료 후에도 TSF 세션이 즉시 준비되도록 완벽 보장.
+4. **렌더러 창 클릭 시 즉시 포커스 인계 ([`simple_app.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c))**:
+   - `ChildBorderSubclassProc`에서 포커스가 이미 `root_tab`에 있는 특수 상황에서만 `SetFocus(main_hwnd)` 사이클을 돌리고, 그 외의 일반적인 클릭 시에는 `SetFocus(root_tab)`을 직접 호출하여 포커스 전환 지연 제거.
+
+### 48.4 관련 소스 코드
+- [`cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c)
+- [`cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c)
+- [`cef_binary_151.3.24/tests/cefsimple_capi/simple_life_span_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_life_span_handler.c)
+- [`cef_binary_151.3.24/tests/cefsimple_capi/simple_load_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_load_handler.c)
+
+### 48.5 빌드 및 검증 결과
+- **디버그 빌드**: `cmake --build cef_binary_151.3.24/build --config Debug --target cefsimple_capi` 성공 (`Exit code 0`).
+- **바이너리 생성**: `cef_binary_151.3.24\build\tests\cefsimple_capi\Debug\lite_browser.exe` 및 `lite_browser.dll` 정상 갱신.
+- **실행 및 동작 검증**:
+  - 네이버 메인에서 "새 탭으로 링크 열기"로 특정 네이버 카페(`https://cafe.naver.com/f-e/cafes/31036121/menus/0`) 진입 후 첫 검색창 클릭 시 사각형 플로팅 조합창 없이 인라인 한글 입력이 완벽히 작동함을 확인.
+  - Jira 이슈 및 기타 웹페이지 링크 열기 시나리오를 포함하여 다각도의 사용자 테스트 진행 결과, 모든 시나리오에서 정상 동작 검증 완료.
+
+
 
 
 

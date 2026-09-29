@@ -104,7 +104,7 @@ load_handler_on_loading_state_change(cef_load_handler_t* self,
           }
           HWND insert_after = (win_ctx->ui_hwnd && IsWindow(win_ctx->ui_hwnd)) ? win_ctx->ui_hwnd : HWND_TOP;
           SetWindowPos(win_ctx->tabs[found_idx].hwnd, insert_after, 0, 0, 0, 0,
-                       SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW | SWP_NOACTIVATE);
+                       SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
 
           RECT rect;
           GetClientRect(win_ctx->main_hwnd, &rect);
@@ -122,6 +122,14 @@ load_handler_on_loading_state_change(cef_load_handler_t* self,
       }
     }
 
+    if (!isLoading && win_ctx->active_tab_index == found_idx && win_ctx->tabs[found_idx].hwnd) {
+      cef_browser_host_t* host = browser->get_host(browser);
+      if (host) {
+        host->set_focus(host, 1);
+        host->base.release(&host->base);
+      }
+      SetFocus(win_ctx->tabs[found_idx].hwnd);
+    }
   }
 }
 

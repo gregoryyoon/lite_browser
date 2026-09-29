@@ -198,13 +198,15 @@ void CEF_CALLBACK life_span_handler_on_after_created(
             }
             win_ctx->active_tab_index = i;
             HWND insert_after = (win_ctx->ui_hwnd && IsWindow(win_ctx->ui_hwnd)) ? win_ctx->ui_hwnd : HWND_TOP;
-            SetWindowPos(hwnd, insert_after, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW | SWP_NOACTIVATE);
+            SetWindowPos(hwnd, insert_after, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
 
             cef_browser_host_t* new_host = browser->get_host(browser);
             if (new_host) {
               new_host->was_resized(new_host);
+              new_host->set_focus(new_host, 1);
               new_host->base.release(&new_host->base);
             }
+            SetFocus(hwnd);
           } else {
             ShowWindow(hwnd, SW_HIDE);
             LogMsg("Defer showing tab %d (HWND %p) until loaded\n", win_ctx->tabs[i].tab_id, hwnd);

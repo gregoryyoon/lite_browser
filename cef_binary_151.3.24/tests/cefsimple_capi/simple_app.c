@@ -282,19 +282,37 @@ static LRESULT CALLBACK ChildBorderSubclassProc(
   if (uMsg == WM_LBUTTONDOWN) {
     char cls[64] = {0};
     GetClassNameA(hWnd, cls, sizeof(cls));
-    if (strcmp(cls, "Chrome_RenderWidgetHostHWND") == 0) {
-      HWND curFocus = GetFocus();
-      HWND main_hwnd = (HWND)dwRefData;
-      browser_window_t* win_ctx = (IsWindow(main_hwnd)) ? (browser_window_t*)GetWindowLongPtr(main_hwnd, GWLP_USERDATA) : NULL;
-      if (win_ctx && curFocus && curFocus != win_ctx->ui_hwnd && curFocus != main_hwnd) {
-        HWND p = hWnd;
-        while (p && p != main_hwnd) {
-          if (p == curFocus) {
-            SetFocus(main_hwnd);
-            SetFocus(curFocus);
-            break;
+    HWND main_hwnd = (HWND)dwRefData;
+    browser_window_t* win_ctx = (IsWindow(main_hwnd)) ? (browser_window_t*)GetWindowLongPtr(main_hwnd, GWLP_USERDATA) : NULL;
+
+    if (strcmp(cls, "Chrome_RenderWidgetHostHWND") == 0 || strcmp(cls, "Chrome_WidgetWin_1") == 0) {
+      if (win_ctx) {
+        HWND root_tab = hWnd;
+        while (root_tab && GetParent(root_tab) != main_hwnd) {
+          root_tab = GetParent(root_tab);
+        }
+        if (root_tab && root_tab != win_ctx->ui_hwnd) {
+          if (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+            tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
+            if (active_tab->is_split) {
+              if (root_tab == active_tab->right_hwnd && active_tab->active_split != 1) {
+                active_tab->active_split = 1;
+                update_ui_nav_state(win_ctx);
+                InvalidateRect(main_hwnd, NULL, FALSE);
+              } else if (root_tab == active_tab->hwnd && active_tab->active_split != 0) {
+                active_tab->active_split = 0;
+                update_ui_nav_state(win_ctx);
+                InvalidateRect(main_hwnd, NULL, FALSE);
+              }
+            }
           }
-          p = GetParent(p);
+          HWND cur_f = GetFocus();
+          if (cur_f == root_tab) {
+            SetFocus(main_hwnd);
+            SetFocus(root_tab);
+          } else {
+            SetFocus(root_tab);
+          }
         }
       }
     }

@@ -3268,19 +3268,25 @@ void CreateNewTabEx(browser_window_t* win_ctx, const char* url, int insert_at_en
     }
   }
 
-  // 2. 상단 UI 창으로 포커스 인계 (이미 UI 창이나 하위 창이 포커스를 가지고 있다면 재호출 방지)
-  HWND cur_focus = GetFocus();
-  int ui_has_focus = (cur_focus == win_ctx->ui_hwnd) || (win_ctx->ui_hwnd && IsChild(win_ctx->ui_hwnd, cur_focus));
-  if (!ui_has_focus) {
-    if (win_ctx->ui_browser) {
-      cef_browser_host_t* ui_host = win_ctx->ui_browser->get_host(win_ctx->ui_browser);
-      if (ui_host) {
-        ui_host->set_focus(ui_host, 1);
-        ui_host->base.release(&ui_host->base);
+  // 2. 새 탭이 즐겨찾기/빈 탭인 경우에만 상단 UI 주소창으로 포커스 인계
+  //    (외부 링크 클릭으로 열린 새 탭은 본문 포커스를 유지하여 TSF IME 세션 정상 바인딩 보장)
+  int is_blank_or_fav = (!url || strlen(url) == 0 ||
+                         strcmp(url, "lite://favorites") == 0 ||
+                         strcmp(url, "lite://bookmarks") == 0);
+  if (is_blank_or_fav) {
+    HWND cur_focus = GetFocus();
+    int ui_has_focus = (cur_focus == win_ctx->ui_hwnd) || (win_ctx->ui_hwnd && IsChild(win_ctx->ui_hwnd, cur_focus));
+    if (!ui_has_focus) {
+      if (win_ctx->ui_browser) {
+        cef_browser_host_t* ui_host = win_ctx->ui_browser->get_host(win_ctx->ui_browser);
+        if (ui_host) {
+          ui_host->set_focus(ui_host, 1);
+          ui_host->base.release(&ui_host->base);
+        }
       }
-    }
-    if (win_ctx->ui_hwnd && IsWindow(win_ctx->ui_hwnd)) {
-      SetFocus(win_ctx->ui_hwnd);
+      if (win_ctx->ui_hwnd && IsWindow(win_ctx->ui_hwnd)) {
+        SetFocus(win_ctx->ui_hwnd);
+      }
     }
   }
 
