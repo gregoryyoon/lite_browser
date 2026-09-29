@@ -89,6 +89,38 @@ static void EscapeJsonStringLocal(const char *in, char *out, size_t out_size) {
   out[j] = '\0';
 }
 
+static void GetDefaultDownloadsDirectory(char *out_path, size_t max_len) {
+  WCHAR wprofile[MAX_PATH] = {0};
+  if (SHGetSpecialFolderPathW(NULL, wprofile, CSIDL_PROFILE, TRUE)) {
+    WCHAR wdownloads[MAX_PATH] = {0};
+    swprintf_s(wdownloads, MAX_PATH, L"%s\\Downloads", wprofile);
+    CreateDirectoryW(wdownloads, NULL);
+    WideCharToMultiByte(CP_UTF8, 0, wdownloads, -1, out_path, (int)max_len, NULL, NULL);
+  } else {
+    snprintf(out_path, max_len, "C:\\Downloads");
+    CreateDirectoryA(out_path, NULL);
+  }
+}
+
+static void UnescapeJsonStringLocal(const char *in, char *out, size_t out_size) {
+  if (!in || !out || out_size == 0) return;
+  size_t j = 0;
+  for (size_t i = 0; in[i] != '\0' && j < out_size - 1; i++) {
+    if (in[i] == '\\' && in[i + 1] != '\0') {
+      i++;
+      if (in[i] == '"') out[j++] = '"';
+      else if (in[i] == '\\') out[j++] = '\\';
+      else if (in[i] == 'n') out[j++] = '\n';
+      else if (in[i] == 'r') out[j++] = '\r';
+      else if (in[i] == 't') out[j++] = '\t';
+      else out[j++] = in[i];
+    } else {
+      out[j++] = in[i];
+    }
+  }
+  out[j] = '\0';
+}
+
 static int CheckPathExistsUtf8(const char *utf8_path) {
   if (!utf8_path || utf8_path[0] == '\0') return 0;
   WCHAR wpath[MAX_PATH * 2] = {0};
@@ -129,6 +161,12 @@ static void SaveDownloadsHistoryToDisk(void) {
       char esc_url[8192] = {0};
       char esc_name[MAX_PATH * 2] = {0};
       char esc_mime[512] = {0};
+
+      if (rec->full_path[0] == '\0' && rec->file_name[0] != '\0') {
+        char dir[MAX_PATH] = {0};
+        GetDefaultDownloadsDirectory(dir, sizeof(dir));
+        snprintf(rec->full_path, sizeof(rec->full_path), "%s\\%s", dir, rec->file_name);
+      }
 
       EscapeJsonStringLocal(rec->full_path, esc_path, sizeof(esc_path));
       EscapeJsonStringLocal(rec->url, esc_url, sizeof(esc_url));
@@ -219,7 +257,12 @@ void download_manager_init(void) {
             p_path += 14;
             char *end_q = strchr(p_path, '"');
             if (end_q && (size_t)(end_q - p_path) < sizeof(rec.full_path)) {
-              strncpy(rec.full_path, p_path, end_q - p_path);
+              char raw_val[MAX_PATH * 2] = {0};
+              size_t len = (size_t)(end_q - p_path);
+              if (len >= sizeof(raw_val)) len = sizeof(raw_val) - 1;
+              strncpy(raw_val, p_path, len);
+              raw_val[len] = '\0';
+              UnescapeJsonStringLocal(raw_val, rec.full_path, sizeof(rec.full_path));
             }
           }
 
@@ -228,7 +271,12 @@ void download_manager_init(void) {
             p_url += 8;
             char *end_q = strchr(p_url, '"');
             if (end_q && (size_t)(end_q - p_url) < sizeof(rec.url)) {
-              strncpy(rec.url, p_url, end_q - p_url);
+              char raw_val[8192] = {0};
+              size_t len = (size_t)(end_q - p_url);
+              if (len >= sizeof(raw_val)) len = sizeof(raw_val) - 1;
+              strncpy(raw_val, p_url, len);
+              raw_val[len] = '\0';
+              UnescapeJsonStringLocal(raw_val, rec.url, sizeof(rec.url));
             }
           }
 
@@ -237,7 +285,12 @@ void download_manager_init(void) {
             p_name += 14;
             char *end_q = strchr(p_name, '"');
             if (end_q && (size_t)(end_q - p_name) < sizeof(rec.file_name)) {
-              strncpy(rec.file_name, p_name, end_q - p_name);
+              char raw_val[MAX_PATH * 2] = {0};
+              size_t len = (size_t)(end_q - p_name);
+              if (len >= sizeof(raw_val)) len = sizeof(raw_val) - 1;
+              strncpy(raw_val, p_name, len);
+              raw_val[len] = '\0';
+              UnescapeJsonStringLocal(raw_val, rec.file_name, sizeof(rec.file_name));
             }
           }
 
@@ -246,7 +299,12 @@ void download_manager_init(void) {
             p_mime += 14;
             char *end_q = strchr(p_mime, '"');
             if (end_q && (size_t)(end_q - p_mime) < sizeof(rec.mime_type)) {
-              strncpy(rec.mime_type, p_mime, end_q - p_mime);
+              char raw_val[512] = {0};
+              size_t len = (size_t)(end_q - p_mime);
+              if (len >= sizeof(raw_val)) len = sizeof(raw_val) - 1;
+              strncpy(raw_val, p_mime, len);
+              raw_val[len] = '\0';
+              UnescapeJsonStringLocal(raw_val, rec.mime_type, sizeof(rec.mime_type));
             }
           }
 
@@ -275,6 +333,13 @@ void download_manager_init(void) {
           if (p_et) sscanf(p_et, "\"end_time\": %lld", (long long*)&rec.end_time);
 
           rec.is_in_progress = 0; // Loaded items are non-active historical items
+
+          // Auto-healing: If full_path is missing or invalid, resolve against default downloads dir
+          if (rec.full_path[0] == '\0' && rec.file_name[0] != '\0') {
+            char dir[MAX_PATH] = {0};
+            GetDefaultDownloadsDirectory(dir, sizeof(dir));
+            snprintf(rec.full_path, sizeof(rec.full_path), "%s\\%s", dir, rec.file_name);
+          }
           rec.file_exists = CheckFileExistsUtf8(rec.full_path);
 
           if (rec.id > 0) {
@@ -410,6 +475,12 @@ static void UpdateDownloadRecord(uint32_t id, const char *full_path, const char 
   if (file_name && file_name[0] != '\0') strncpy(rec->file_name, file_name, sizeof(rec->file_name) - 1);
   if (mime_type && mime_type[0] != '\0') strncpy(rec->mime_type, mime_type, sizeof(rec->mime_type) - 1);
 
+  if (rec->full_path[0] == '\0' && rec->file_name[0] != '\0') {
+    char dir[MAX_PATH] = {0};
+    GetDefaultDownloadsDirectory(dir, sizeof(dir));
+    snprintf(rec->full_path, sizeof(rec->full_path), "%s\\%s", dir, rec->file_name);
+  }
+
   rec->total_bytes = total_bytes;
   rec->received_bytes = received_bytes;
   rec->percent_complete = percent_complete;
@@ -441,19 +512,6 @@ static void UpdateDownloadRecord(uint32_t id, const char *full_path, const char 
 
   SaveDownloadsHistoryToDisk();
   BroadcastDownloadUpdate();
-}
-
-static void GetDefaultDownloadsDirectory(char *out_path, size_t max_len) {
-  WCHAR wprofile[MAX_PATH] = {0};
-  if (SHGetSpecialFolderPathW(NULL, wprofile, CSIDL_PROFILE, TRUE)) {
-    WCHAR wdownloads[MAX_PATH] = {0};
-    swprintf_s(wdownloads, MAX_PATH, L"%s\\Downloads", wprofile);
-    CreateDirectoryW(wdownloads, NULL);
-    WideCharToMultiByte(CP_UTF8, 0, wdownloads, -1, out_path, (int)max_len, NULL, NULL);
-  } else {
-    snprintf(out_path, max_len, "C:\\Downloads");
-    CreateDirectoryA(out_path, NULL);
-  }
 }
 
 static void GenerateNonConflictingPath(const char *downloads_dir, const char *suggested_name, char *out_path, size_t max_len) {
@@ -522,6 +580,36 @@ int CEF_CALLBACK download_handler_on_before_download(
   cef_string_from_utf8(full_path, strlen(full_path), &cef_path);
 
   g_last_download_activity_tick = GetTickCount64();
+
+  // Register the download record immediately with confirmed full_path
+  if (download_item && download_item->is_valid(download_item)) {
+    uint32_t id = download_item->get_id(download_item);
+    char url_str[4096] = {0};
+    cef_string_userfree_t u = download_item->get_url(download_item);
+    if (u) {
+      cef_string_utf8_t u8 = {};
+      cef_string_to_utf8(u->str, u->length, &u8);
+      if (u8.str) strncpy(url_str, u8.str, sizeof(url_str) - 1);
+      cef_string_utf8_clear(&u8);
+      cef_string_userfree_free(u);
+    }
+
+    char mime_type[256] = {0};
+    cef_string_userfree_t mt = download_item->get_mime_type(download_item);
+    if (mt) {
+      cef_string_utf8_t u8 = {};
+      cef_string_to_utf8(mt->str, mt->length, &u8);
+      if (u8.str) strncpy(mime_type, u8.str, sizeof(mime_type) - 1);
+      cef_string_utf8_clear(&u8);
+      cef_string_userfree_free(mt);
+    }
+
+    int64_t total = download_item->get_total_bytes(download_item);
+    UpdateDownloadRecord(id, full_path, url_str, name_utf8, mime_type,
+                         total, 0, 0, 0,
+                         1, 0, 0, 0,
+                         NULL);
+  }
 
   // show_dialog = 0: Save directly to downloads directory without opening Save As dialog
   callback->cont(callback, &cef_path, 0);
@@ -637,6 +725,12 @@ void download_manager_get_list_json(char *out_buf, size_t max_len) {
     char esc_name[MAX_PATH * 2] = {0};
     char esc_mime[512] = {0};
 
+    if (rec->full_path[0] == '\0' && rec->file_name[0] != '\0') {
+      char dir[MAX_PATH] = {0};
+      GetDefaultDownloadsDirectory(dir, sizeof(dir));
+      snprintf(rec->full_path, sizeof(rec->full_path), "%s\\%s", dir, rec->file_name);
+    }
+
     EscapeJsonStringLocal(rec->full_path, esc_path, sizeof(esc_path));
     EscapeJsonStringLocal(rec->url, esc_url, sizeof(esc_url));
     EscapeJsonStringLocal(rec->file_name, esc_name, sizeof(esc_name));
@@ -682,6 +776,13 @@ void download_manager_get_list_json(char *out_buf, size_t max_len) {
 
 int download_manager_open_file(const char *path) {
   if (!path || path[0] == '\0') return 0;
+  char resolved[MAX_PATH] = {0};
+  if (strchr(path, '\\') == NULL && strchr(path, '/') == NULL) {
+    char dir[MAX_PATH] = {0};
+    GetDefaultDownloadsDirectory(dir, sizeof(dir));
+    snprintf(resolved, sizeof(resolved), "%s\\%s", dir, path);
+    path = resolved;
+  }
   WCHAR wpath[MAX_PATH * 2] = {0};
   if (MultiByteToWideChar(CP_UTF8, 0, path, -1, wpath, MAX_PATH * 2) > 0) {
     HINSTANCE hInst = ShellExecuteW(NULL, L"open", wpath, NULL, NULL, SW_SHOWNORMAL);
@@ -699,6 +800,14 @@ int download_manager_show_in_folder(const char *path) {
       return ((INT_PTR)hInst > 32) ? 1 : 0;
     }
     return 0;
+  }
+
+  char resolved[MAX_PATH] = {0};
+  if (strchr(path, '\\') == NULL && strchr(path, '/') == NULL) {
+    char dir[MAX_PATH] = {0};
+    GetDefaultDownloadsDirectory(dir, sizeof(dir));
+    snprintf(resolved, sizeof(resolved), "%s\\%s", dir, path);
+    path = resolved;
   }
 
   WCHAR wpath[MAX_PATH * 2] = {0};
@@ -721,6 +830,13 @@ int download_manager_show_in_folder(const char *path) {
 int download_manager_delete_file(uint32_t id, const char *path) {
   int success = 0;
   if (path && path[0] != '\0') {
+    char resolved[MAX_PATH] = {0};
+    if (strchr(path, '\\') == NULL && strchr(path, '/') == NULL) {
+      char dir[MAX_PATH] = {0};
+      GetDefaultDownloadsDirectory(dir, sizeof(dir));
+      snprintf(resolved, sizeof(resolved), "%s\\%s", dir, path);
+      path = resolved;
+    }
     WCHAR wpath[MAX_PATH * 2] = {0};
     if (MultiByteToWideChar(CP_UTF8, 0, path, -1, wpath, MAX_PATH * 2) > 0) {
       if (GetFileAttributesW(wpath) != INVALID_FILE_ATTRIBUTES) {

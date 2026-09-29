@@ -1630,6 +1630,47 @@ CEF 코어가 생성하는 팝업 윈도우(`Chrome_WidgetWin_1`)는 Win32 레�
   - 네이버 메인에서 "새 탭으로 링크 열기"로 특정 네이버 카페(`https://cafe.naver.com/f-e/cafes/31036121/menus/0`) 진입 후 첫 검색창 클릭 시 사각형 플로팅 조합창 없이 인라인 한글 입력이 완벽히 작동함을 확인.
   - Jira 이슈 및 기타 웹페이지 링크 열기 시나리오를 포함하여 다각도의 사용자 테스트 진행 결과, 모든 시나리오에서 정상 동작 검증 완료.
 
+---
+
+## 49. 다운로드 관리자 전체 너비(100vw) 확장 및 디스크 파일 존재 검사·경로 복원(Auto-healing) 정밀화 (Download Manager Full Width Expansion & Disk File Existence Check / Path Auto-Healing)
+
+### 49.1 개요
+다운로드 관리자(`ui/downloads.html`, `ui/downloads.css`)의 기존 고정폭(1200px) 중앙 배치 레이아웃을 북마크 관리자와 동일하게 가로 전체 화면(`width: 100vw; max-width: none`)으로 전면 확장하여 긴 파일명과 다운로드 URL을 시원하게 노출하도록 개선했습니다.
+아울러, 실제 파일이 다운로드 디렉터리에 온전히 존재함에도 다운로드 관리자에서 "파일 없음 (삭제/이동됨)"으로 오판정되고 실행/폴더보기 버튼이 비활성화되던 문제를 조사하여, CEF `get_full_path()`의 빈 경로 반환 특성 및 JSON 역직렬화 누락을 원천 해결하고 기존 기록에 대한 자동 복구(Auto-healing) 파이프라인을 구축했습니다.
+
+### 49.2 문제 원인 분석
+1. **다운로드 관리자 뷰포트 제한**:
+   - `.dl-app-container`가 `max-width: 1200px`로 고정되어 대화면 모니터에서 좌우 빈 여백이 발생하고, `.dl-file-name`(450px)과 `.dl-url`(360px)의 너비 제한으로 인해 긴 파일명과 URL이 조기에 말줄임표로 잘렸습니다.
+2. **CEF `download_item->get_full_path()` 빈 문자열 반환**:
+   - `on_download_updated` 콜백 시점에 CEF C API `get_full_path()`가 내부 상태(Target Pending 등)에 따라 빈 문자열을 반환하여 내부 레코드의 `full_path`가 영구적으로 빈 문자열(`""`)로 유지되었습니다.
+3. **다운로드 시작 시점 경로 미등록**:
+   - `on_before_download`에서 확정한 전체 경로(`full_path`)를 다운로드 레코드에 즉시 바인딩하지 않아 이후 업데이트 과정에서 경로가 소실되었습니다.
+4. **`downloads.json` 로드 시 복원 부재 및 이스케이프 이슈**:
+   - 디스크의 `downloads.json`을 읽을 때 역슬래시 unescape 처리가 누락되었고, 기존 기록이 `full_path: ""`로 저장되어 있을 때 실제 디스크 파일 존재 여부를 검증하고 복원하는 로직이 없어 `CheckFileExistsUtf8("")`가 항상 `false`를 반환했습니다.
+
+### 49.3 주요 구현 내역
+1. **다운로드 관리자 전체 너비 및 가변 Flex 확장 ([`ui/downloads.css`](file:///c:/projects/lite_browser/ui/downloads.css))**:
+   - `.dl-app-container`를 `width: 100vw; max-width: none; margin: 0;`으로 확장하고 외곽 테두리 및 그림자 제거.
+   - 북마크 관리자와 동일한 `28px` 좌우 패딩 동기화 및 검색창 너비 `560px` 확장.
+   - `.dl-file-name` 및 `.dl-url`에 `max-width: none; flex: 1; min-width: 0;`을 적용하여 가로 공간 전체를 유연하게 활용하면서 말줄임표(`ellipsis`) 처리.
+2. **다운로드 시작 시점(`on_before_download`) 즉시 경로 확정 등록 ([`simple_download_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_download_handler.c))**:
+   - `GenerateNonConflictingPath`로 생성된 `full_path`를 `on_before_download` 호출 즉시 `UpdateDownloadRecord`를 통해 등록하여, 이후 진행률 콜백에서 빈 경로가 오더라도 안전하게 보존.
+3. **JSON 역직렬화(Unescape) 및 자동 복원(Auto-healing) 구축 ([`simple_download_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_download_handler.c))**:
+   - `UnescapeJsonStringLocal` 헬퍼 함수를 구현하여 JSON 파싱 시 역슬래시 중첩 문제 방지.
+   - `download_manager_init`에서 디스크 기록 로드 시 `full_path`가 비어있을 경우 기본 다운로드 디렉터리와 `file_name`을 결합하여 실제 파일 존재를 검사하고 자동 복구한 뒤 `downloads.json`에 재저장.
+4. **IPC 및 파일 조작 함수 안전성 강화 ([`simple_download_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_download_handler.c))**:
+   - `download_manager_get_list_json`, `download_manager_open_file`, `download_manager_show_in_folder`, `download_manager_delete_file`에 상대 경로/누락 경로 자동 결합 방어 코드를 적용.
+
+### 49.4 관련 소스 코드
+- [`ui/downloads.css`](file:///c:/projects/lite_browser/ui/downloads.css)
+- [`cef_binary_151.3.24/tests/cefsimple_capi/simple_download_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_download_handler.c)
+
+### 49.5 빌드 및 검증 결과
+- **디버그 빌드**: `cmake --build cef_binary_151.3.24/build --config Debug --target cefsimple_capi` 성공 (`Exit code 0, 경고 0개, 오류 0개`).
+- **자동 복구 검증**: 브라우저 기동 시 기존 `downloads.json`의 15개 이상 다운로드 항목이 `C:\Users\grego\Downloads\...` 경로와 함께 `file_exists: true`로 정상 자동 복원됨을 확인.
+- **UI 및 동작 검증**: `lite://downloads` 탭이 전체 가로 화면으로 채워지며, 기존 다운로드 파일들이 `완료됨` 배지와 함께 표시되고 `열기 (실행)` 및 `폴더에서 보기`가 즉각 정상 동작함을 사용자 확인 완료.
+
+
 
 
 
