@@ -641,8 +641,12 @@ function closeAllPopups() {
   sendUiAction('http://ui-action/collapse-ui');
 }
 
-function expandUI(height, showBackdrop = true) {
-  sendUiAction('http://ui-action/expand-ui?height=' + height);
+function expandUI(height, showBackdrop = true, omniX = -1, omniW = -1) {
+  let url = 'http://ui-action/expand-ui?height=' + height;
+  if (omniX >= 0 && omniW > 0) {
+    url += '&x=' + omniX + '&width=' + omniW;
+  }
+  sendUiAction(url);
   const backdrop = document.getElementById('popup-backdrop');
   if (backdrop) {
     if (showBackdrop) {
@@ -1076,6 +1080,13 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
   });
+
+  window.addEventListener('resize', () => {
+    const dropdown = document.getElementById('omnibox-dropdown');
+    if (dropdown && !dropdown.classList.contains('hide')) {
+      updateOmniboxHeight();
+    }
+  });
 });
 
 function formatTimeAgo(timestamp) {
@@ -1206,10 +1217,14 @@ function updateOmniboxHeight() {
   if (!dropdown || dropdown.classList.contains('hide')) return;
 
   requestAnimationFrame(() => {
+    const rect = dropdown.getBoundingClientRect();
+    const omniX = Math.floor(rect.left);
+    const omniRight = Math.ceil(rect.right);
+    const omniW = Math.max(1, omniRight - omniX);
     const dropHeight = dropdown.offsetHeight || dropdown.scrollHeight || 0;
-    // 툴바 높이(72px) + 오프셋 + 실제 드롭다운 높이 + 여백(16px) -> 스크롤 없이 가변 높이 확장
-    const targetHeight = Math.min(650, Math.max(90, 72 + dropHeight + 16));
-    expandUI(targetHeight, false);
+    // 드롭다운 실제 바닥 경계(rect.bottom)를 정확한 높이로 지정
+    const targetHeight = Math.min(650, Math.max(90, Math.ceil(rect.bottom) || (76 + dropHeight)));
+    expandUI(targetHeight, false, omniX, omniW);
   });
 }
 

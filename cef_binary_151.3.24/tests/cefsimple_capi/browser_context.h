@@ -38,6 +38,8 @@ typedef struct _browser_window_t {
   int tab_count;
   int is_ui_expanded;
   int ui_expanded_height;
+  int ui_expanded_omni_x;
+  int ui_expanded_omni_w;
 
   // Splitter resizer tracking
   int is_resizing_splitter;

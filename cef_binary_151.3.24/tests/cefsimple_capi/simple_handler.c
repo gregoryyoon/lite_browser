@@ -2345,24 +2345,54 @@ int CEF_CALLBACK request_handler_on_before_browse(
           }
         } else if (strncmp(action, "expand-ui?", 10) == 0) {
           int h = 500;
-          if (sscanf(action + 10, "height=%d", &h) == 1) {
-            if (win_ctx) {
-              double scale = 1.0;
-              UINT dpi = GetDpiForWindow(win_ctx->main_hwnd);
-              if (dpi > 0) scale = (double)dpi / 96.0;
-              win_ctx->is_ui_expanded = 1;
-              win_ctx->ui_expanded_height = (int)(h * scale);
-              if (win_ctx->ui_hwnd) {
-                RECT rect;
-                GetClientRect(win_ctx->main_hwnd, &rect);
-                SetWindowPos(win_ctx->ui_hwnd, HWND_TOP, 0, 0, rect.right, win_ctx->ui_expanded_height, SWP_NOACTIVATE);
+          int omni_x = -1, omni_w = -1;
+          const char* params = action + 10;
+          const char* p_h = strstr(params, "height=");
+          if (p_h) sscanf(p_h + 7, "%d", &h);
+          const char* p_x = strstr(params, "x=");
+          if (p_x) sscanf(p_x + 2, "%d", &omni_x);
+          const char* p_w = strstr(params, "width=");
+          if (p_w) sscanf(p_w + 6, "%d", &omni_w);
+
+          if (win_ctx) {
+            double scale = 1.0;
+            UINT dpi = GetDpiForWindow(win_ctx->main_hwnd);
+            if (dpi > 0) scale = (double)dpi / 96.0;
+            win_ctx->is_ui_expanded = 1;
+            win_ctx->ui_expanded_height = (int)(h * scale);
+            win_ctx->ui_expanded_omni_x = (omni_x >= 0) ? (int)(omni_x * scale) : -1;
+            win_ctx->ui_expanded_omni_w = (omni_w > 0) ? (int)(omni_w * scale) : -1;
+
+            if (win_ctx->ui_hwnd) {
+              RECT rect;
+              GetClientRect(win_ctx->main_hwnd, &rect);
+              SetWindowPos(win_ctx->ui_hwnd, HWND_TOP, 0, 0, rect.right, win_ctx->ui_expanded_height, SWP_NOACTIVATE);
+
+              if (win_ctx->ui_expanded_omni_x >= 0 && win_ctx->ui_expanded_omni_w > 0) {
+                int default_h = GetUIHeightForWindow(win_ctx->main_hwnd);
+                HRGN rgnTop = CreateRectRgn(0, 0, rect.right, default_h);
+                int rgn_right = win_ctx->ui_expanded_omni_x + win_ctx->ui_expanded_omni_w + 1;
+                int rgn_bottom = win_ctx->ui_expanded_height + 1;
+                HRGN rgnOmni = CreateRectRgn(win_ctx->ui_expanded_omni_x, default_h, 
+                                             rgn_right, 
+                                             rgn_bottom);
+                HRGN rgnCombined = CreateRectRgn(0, 0, 0, 0);
+                CombineRgn(rgnCombined, rgnTop, rgnOmni, RGN_OR);
+                SetWindowRgn(win_ctx->ui_hwnd, rgnCombined, TRUE);
+                DeleteObject(rgnTop);
+                DeleteObject(rgnOmni);
+              } else {
+                SetWindowRgn(win_ctx->ui_hwnd, NULL, TRUE);
               }
             }
           }
         } else if (strcmp(action, "collapse-ui") == 0) {
           if (win_ctx) {
             win_ctx->is_ui_expanded = 0;
+            win_ctx->ui_expanded_omni_x = -1;
+            win_ctx->ui_expanded_omni_w = -1;
             if (win_ctx->ui_hwnd) {
+              SetWindowRgn(win_ctx->ui_hwnd, NULL, TRUE);
               RECT rect;
               GetClientRect(win_ctx->main_hwnd, &rect);
               int default_h = GetUIHeightForWindow(win_ctx->main_hwnd);
@@ -3011,29 +3041,44 @@ void CEF_CALLBACK context_menu_on_before_context_menu(
   model->clear(model);
   
   // Check if this right-click is on the UI browser.
-  // If so, do not display any context menu.
   simple_context_menu_handler_t* ctx_handler = (simple_context_menu_handler_t*)self;
+  int is_ui_browser = 0;
   if (ctx_handler && ctx_handler->parent && ctx_handler->parent->window_ctx) {
     browser_window_t* win_ctx = ctx_handler->parent->window_ctx;
     if (win_ctx->ui_browser) {
       int ui_id = win_ctx->ui_browser->get_identifier(win_ctx->ui_browser);
       int cur_id = browser->get_identifier(browser);
       if (ui_id == cur_id) {
-        LogMsg("on_before_context_menu: bypassed for ui_browser\n");
-        return;
+        is_ui_browser = 1;
       }
     }
   }
-  
-  // Use GetCursorPos to get exact mouse coordinate on the screen,
-  // preventing alignment/DPI/DWM shadow margins offset mismatch.
-  POINT pt = {};
-  GetCursorPos(&pt);
-  
+
+  int has_selection = 0;
+  int is_editable = 0;
+  cef_context_menu_edit_state_flags_t edit_flags = CM_EDITFLAG_NONE;
   int has_link = 0;
   char* link_url_str = NULL;
-  
+
   if (params) {
+    cef_context_menu_type_flags_t type_flags = params->get_type_flags(params);
+    if (type_flags & CM_TYPEFLAG_SELECTION) {
+      has_selection = 1;
+    }
+    if (type_flags & CM_TYPEFLAG_EDITABLE) {
+      is_editable = 1;
+    }
+
+    cef_string_userfree_t sel_text = params->get_selection_text(params);
+    if (sel_text && sel_text->length > 0) {
+      has_selection = 1;
+    }
+    if (sel_text) {
+      cef_string_userfree_free(sel_text);
+    }
+
+    edit_flags = params->get_edit_state_flags(params);
+
     cef_string_userfree_t link_url = params->get_link_url(params);
     if (link_url && link_url->length > 0) {
       cef_string_utf8_t utf8 = {};
@@ -3048,33 +3093,79 @@ void CEF_CALLBACK context_menu_on_before_context_menu(
       cef_string_userfree_free(link_url);
     }
   }
-  
+
+  // If this is the UI browser, only show context menu when inside an editable element (address bar) or when text is selected
+  if (is_ui_browser && !is_editable && !has_selection) {
+    LogMsg("on_before_context_menu: bypassed for ui_browser (not editable, no selection)\n");
+    return;
+  }
+
+  // Use GetCursorPos to get exact mouse coordinate on the screen,
+  // preventing alignment/DPI/DWM shadow margins offset mismatch.
+  POINT pt = {};
+  GetCursorPos(&pt);
+
   cef_browser_host_t* host = browser->get_host(browser);
   if (host) {
     HWND hwnd = host->get_window_handle(host);
     
     HMENU hMenu = CreatePopupMenu();
-    
-    if (has_link) {
-      AppendMenuW(hMenu, MF_STRING, 3001, L"새 탭에서 링크 열기");
-      AppendMenuW(hMenu, MF_STRING, 3004, L"다른 분할 화면에서 열기");
-      AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
-      AppendMenuW(hMenu, MF_STRING, 3002, L"링크 페이지 저장");
-      AppendMenuW(hMenu, MF_STRING, 3003, L"링크 복사");
-      AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
-      AppendMenuW(hMenu, MF_STRING, MENU_ID_USER_FIRST, L"검사 (Inspect)");
+
+    int can_paste = IsClipboardFormatAvailable(CF_UNICODETEXT) ||
+                    IsClipboardFormatAvailable(CF_TEXT) ||
+                    ((edit_flags & CM_EDITFLAG_CAN_PASTE) != 0);
+
+    if (is_ui_browser) {
+      if (has_selection) {
+        AppendMenuW(hMenu, MF_STRING, MENU_ID_COPY, L"복사");
+        if (is_editable) {
+          AppendMenuW(hMenu, MF_STRING, MENU_ID_CUT, L"잘라내기");
+        }
+        if (is_editable) {
+          AppendMenuW(hMenu, MF_STRING | (can_paste ? 0 : MF_GRAYED), MENU_ID_PASTE, L"붙여넣기");
+        }
+        AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+        AppendMenuW(hMenu, MF_STRING, MENU_ID_SELECT_ALL, L"모두 선택");
+      } else {
+        AppendMenuW(hMenu, MF_STRING | (can_paste ? 0 : MF_GRAYED), MENU_ID_PASTE, L"붙여넣기");
+        AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+        AppendMenuW(hMenu, MF_STRING, MENU_ID_SELECT_ALL, L"모두 선택");
+      }
     } else {
-      int can_back = browser->can_go_back(browser);
-      int can_forward = browser->can_go_forward(browser);
-      
-      AppendMenuW(hMenu, MF_STRING | (can_back ? 0 : MF_GRAYED), MENU_ID_BACK, L"뒤로 가기");
-      AppendMenuW(hMenu, MF_STRING | (can_forward ? 0 : MF_GRAYED), MENU_ID_FORWARD, L"앞으로 가기");
-      AppendMenuW(hMenu, MF_STRING, MENU_ID_RELOAD, L"새로고침");
-      AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
-      AppendMenuW(hMenu, MF_STRING, MENU_ID_PRINT, L"인쇄...");
-      AppendMenuW(hMenu, MF_STRING, MENU_ID_VIEW_SOURCE, L"페이지 소스 보기");
-      AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
-      AppendMenuW(hMenu, MF_STRING, MENU_ID_USER_FIRST, L"검사 (Inspect)");
+      if (has_selection) {
+        AppendMenuW(hMenu, MF_STRING, MENU_ID_COPY, L"복사");
+        if (is_editable) {
+          AppendMenuW(hMenu, MF_STRING, MENU_ID_CUT, L"잘라내기");
+          AppendMenuW(hMenu, MF_STRING | (can_paste ? 0 : MF_GRAYED), MENU_ID_PASTE, L"붙여넣기");
+        }
+        AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+      } else if (is_editable) {
+        AppendMenuW(hMenu, MF_STRING | (can_paste ? 0 : MF_GRAYED), MENU_ID_PASTE, L"붙여넣기");
+        AppendMenuW(hMenu, MF_STRING, MENU_ID_SELECT_ALL, L"모두 선택");
+        AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+      }
+
+      if (has_link) {
+        AppendMenuW(hMenu, MF_STRING, 3001, L"새 탭에서 링크 열기");
+        AppendMenuW(hMenu, MF_STRING, 3004, L"다른 분할 화면에서 열기");
+        AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+        AppendMenuW(hMenu, MF_STRING, 3002, L"링크 페이지 저장");
+        AppendMenuW(hMenu, MF_STRING, 3003, L"링크 복사");
+        AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+        AppendMenuW(hMenu, MF_STRING, MENU_ID_USER_FIRST, L"검사 (Inspect)");
+      } else {
+        int can_back = browser->can_go_back(browser);
+        int can_forward = browser->can_go_forward(browser);
+        
+        AppendMenuW(hMenu, MF_STRING | (can_back ? 0 : MF_GRAYED), MENU_ID_BACK, L"뒤로 가기");
+        AppendMenuW(hMenu, MF_STRING | (can_forward ? 0 : MF_GRAYED), MENU_ID_FORWARD, L"앞으로 가기");
+        AppendMenuW(hMenu, MF_STRING, MENU_ID_RELOAD, L"새로고침");
+        AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+        AppendMenuW(hMenu, MF_STRING, MENU_ID_PRINT, L"인쇄...");
+        AppendMenuW(hMenu, MF_STRING, MENU_ID_VIEW_SOURCE, L"페이지 소스 보기");
+        AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+        AppendMenuW(hMenu, MF_STRING, MENU_ID_USER_FIRST, L"검사 (Inspect)");
+      }
     }
     
     LogMsg("on_before_context_menu: calling TrackPopupMenu (blocking) at screen coords x=%d, y=%d\n", pt.x, pt.y);
@@ -3083,7 +3174,23 @@ void CEF_CALLBACK context_menu_on_before_context_menu(
     DestroyMenu(hMenu);
     
     if (cmd > 0) {
-      if (cmd == MENU_ID_USER_FIRST) {
+      if (cmd == MENU_ID_COPY) {
+        if (frame) {
+          frame->copy(frame);
+        }
+      } else if (cmd == MENU_ID_CUT) {
+        if (frame) {
+          frame->cut(frame);
+        }
+      } else if (cmd == MENU_ID_PASTE) {
+        if (frame) {
+          frame->paste(frame);
+        }
+      } else if (cmd == MENU_ID_SELECT_ALL) {
+        if (frame) {
+          frame->select_all(frame);
+        }
+      } else if (cmd == MENU_ID_USER_FIRST) {
         LogMsg("on_before_context_menu: show dev tools\n");
         cef_window_info_t windowInfo = {};
         windowInfo.size = sizeof(cef_window_info_t);

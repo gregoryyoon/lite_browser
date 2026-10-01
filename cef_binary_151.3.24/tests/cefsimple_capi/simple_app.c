@@ -214,11 +214,6 @@ void CEF_CALLBACK simple_app_on_before_command_line_processing(
   command_line->append_switch(command_line, &switch2);
   cef_string_clear(&switch2);
 
-  cef_string_t switch_sec = {};
-  cef_string_from_ascii("disable-web-security", 20, &switch_sec);
-  command_line->append_switch(command_line, &switch_sec);
-  cef_string_clear(&switch_sec);
-
 #if defined(OS_WIN)
   cef_string_t lang_switch = {};
   cef_string_from_ascii("lang", 4, &lang_switch);
@@ -935,6 +930,21 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
           int cur_h = cur_rc.bottom - cur_rc.top;
           if (pt.x != 0 || pt.y != 0 || cur_w != width || cur_h != target_ui_h) {
             SetWindowPos(ui_hwnd, HWND_TOP, 0, 0, width, target_ui_h, SWP_NOACTIVATE);
+            if (win_ctx->is_ui_expanded && win_ctx->ui_expanded_omni_x >= 0 && win_ctx->ui_expanded_omni_w > 0) {
+              HRGN rgnTop = CreateRectRgn(0, 0, width, ui_height);
+              int rgn_right = win_ctx->ui_expanded_omni_x + win_ctx->ui_expanded_omni_w + 1;
+              int rgn_bottom = win_ctx->ui_expanded_height + 1;
+              HRGN rgnOmni = CreateRectRgn(win_ctx->ui_expanded_omni_x, ui_height, 
+                                           rgn_right, 
+                                           rgn_bottom);
+              HRGN rgnCombined = CreateRectRgn(0, 0, 0, 0);
+              CombineRgn(rgnCombined, rgnTop, rgnOmni, RGN_OR);
+              SetWindowRgn(ui_hwnd, rgnCombined, TRUE);
+              DeleteObject(rgnTop);
+              DeleteObject(rgnOmni);
+            } else if (!win_ctx->is_ui_expanded) {
+              SetWindowRgn(ui_hwnd, NULL, TRUE);
+            }
           }
         }
         host->base.release(&host->base);

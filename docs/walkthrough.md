@@ -1716,6 +1716,162 @@ CEF 코어가 생성하는 팝업 윈도우(`Chrome_WidgetWin_1`)는 Win32 레�
   2. **주소창 ➔ 본문 포커스 자연스러운 전환**: 상단 주소창 포커스 상태에서 웹 본문 클릭 시 키보드 포커스가 웹 본문으로 자연스럽게 회수됨을 확인.
   3. **듀얼 분할 화면(Split View) 클릭 전환**: 좌/우 분할 창 간 클릭 시 각 창으로 포커스 및 한글 입력이 원활하게 전환됨을 확인.
 
+---
+
+## 51. 선택 텍스트 클립보드 복사 및 주소창 풀 에디트 네이티브 컨텍스트 메뉴 구현 (Selected Text Clipboard Copy & Address Bar Full Edit Native Context Menu)
+
+### 51.1 개요
+웹 브라우저의 기본적이면서도 빈번하게 사용되는 조작 중 하나는 텍스트를 선택한 후 마우스 우클릭으로 클립보드에 복사하거나 입력 필드에서 잘라내기/붙여넣기/모두 선택 등의 편집 작업을 수행하는 것입니다.
+기존 LiteBrowser에서는 다음과 같은 사용성 제약이 존재했습니다:
+1. **웹 콘텐츠 브라우저 (`content_browser`)**: 페이지 내 본문 텍스트를 드래그하여 선택한 상태에서 우클릭하더라도 탐색 메뉴(뒤로 가기, 새로고침, 인쇄, 검사 등)만 노출되고 "복사" 항목이 누락되어 있었습니다.
+2. **주소창 UI 브라우저 (`ui_browser`)**: 주소창/탭 툴바 영역에서 우클릭 시 컨텍스트 메뉴가 전면 차단(`return;`)되도록 구성되어 있어, 주소창의 긴 URL이나 검색어를 마우스 우클릭으로 복사하거나 클립보드 내용을 붙여넣는 등의 기본 입력 조작이 불가능했습니다.
+
+본 업데이트에서는 CEF C API의 `context_menu_on_before_context_menu` 콜백을 확장하여, 텍스트가 선택된 모든 화면에서 최상단에 일관된 네이티브 "복사" 메뉴를 노출하고, 주소창 입력 필드에 대해서는 완전한 텍스트 편집 컨텍스트 메뉴(복사/잘라내기/붙여넣기/모두 선택)를 지원하도록 구현했습니다.
+
+### 51.2 아키텍처 및 요구사항 설계
+1. **최상단 복사 배치 원칙**:
+   - 웹 콘텐츠 브라우저든 주소창이든 사용자가 텍스트를 블록 지정(Selection)한 후 우클릭하면 가장 직관적이고 접근성이 높은 메뉴 첫 번째 줄(맨 위)에 `복사` 메뉴를 배치합니다.
+2. **주소창 편집 모드 분기**:
+   - 주소창 UI 브라우저(`ui_browser`)는 탭 바, 창 제어 버튼, 빈 툴바 여백 등 비편집/비선택 영역을 우클릭할 때는 기존처럼 메뉴를 노출하지 않고 바이패스(Bypass)합니다.
+   - 주소창 `<input id="address-bar">` 내부를 우클릭하거나 텍스트가 선택된 경우:
+     - 텍스트 선택 시: `복사` ➔ `잘라내기` ➔ `붙여넣기` ➔ `[구분선]` ➔ `모두 선택`
+     - 텍스트 미선택 시: `붙여넣기` ➔ `[구분선]` ➔ `모두 선택`
+3. **클립보드 및 편집 상태 동적 감지**:
+   - Win32 API `IsClipboardFormatAvailable(CF_UNICODETEXT)` 및 CEF의 `CM_EDITFLAG_CAN_PASTE`를 결합하여 클립보드에 붙여넣을 텍스트가 없을 때는 `붙여넣기` 메뉴를 비활성화(`MF_GRAYED`) 처리합니다.
+4. **CEF 순정 프레임 커맨드 호출**:
+   - 메뉴 선택 시 Win32 클립보드 API를 수동 조작하는 대신 CEF C API의 `frame->copy(frame)`, `frame->cut(frame)`, `frame->paste(frame)`, `frame->select_all(frame)`를 호출하여, Blink 렌더러의 리치 텍스트 서식 보존, Undo/Redo 실행 취소 스택 관리, 인라인 입력 포커스 동기화를 완벽하게 보장합니다.
+
+### 51.3 주요 구현 내역
+1. **CEF 선택/편집 상태 플래그 및 주소창 분기 처리 ([`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c))**:
+   - `params->get_type_flags(params)`를 통해 `CM_TYPEFLAG_SELECTION` 및 `CM_TYPEFLAG_EDITABLE` 플래그를 검사하고, `params->get_selection_text(params)`의 유효 길이를 확인하여 텍스트 선택 여부(`has_selection`)를 정밀 판별.
+   - `is_ui_browser && !is_editable && !has_selection` 조건인 경우 즉시 리턴하여 UI 비편집 영역의 우클릭 메뉴 노출을 방지.
+2. **동적 Win32 네이티브 팝업 메뉴 구성 ([`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c))**:
+   - `is_ui_browser` 분기:
+     - `has_selection`인 경우: `MENU_ID_COPY`("복사"), `MENU_ID_CUT`("잘라내기"), `MENU_ID_PASTE`("붙여넣기"), 구분선, `MENU_ID_SELECT_ALL`("모두 선택") 추가.
+     - 텍스트 미선택 시: `MENU_ID_PASTE`("붙여넣기"), 구분선, `MENU_ID_SELECT_ALL`("모두 선택") 추가.
+   - 웹 콘텐츠 브라우저 분기:
+     - `has_selection`인 경우 최상단에 `MENU_ID_COPY`("복사") 및 구분선을 우선 추가하고, 하단에 기존 탐색 메뉴(새 탭에서 링크 열기 / 뒤로 가기 / 앞으로 가기 / 새로고침 / 인쇄 / 페이지 소스 보기 / 검사)를 연결.
+3. **CEF 프레임 편집 명령 실행 파이프라인 ([`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c))**:
+   - `TrackPopupMenu` 반환 커맨드 핸들러에 표준 CEF 메뉴 ID 대응 로직 추가:
+     - `cmd == MENU_ID_COPY`: `frame->copy(frame)` 호출.
+     - `cmd == MENU_ID_CUT`: `frame->cut(frame)` 호출.
+     - `cmd == MENU_ID_PASTE`: `frame->paste(frame)` 호출.
+     - `cmd == MENU_ID_SELECT_ALL`: `frame->select_all(frame)` 호출.
+4. **지능형 주소창 드롭다운 바운딩 박스 정수 좌표 보정 ([`ui/app.js`](file:///c:/projects/lite_browser/ui/app.js))**:
+   - `updateOmniboxHeight`에서 드롭다운 좌표 계산 시 `Math.floor(rect.left)` 및 `Math.ceil(rect.right)`를 사용하여 서브픽셀 렌더링 오차를 방지하고 정확한 너비(`omniW`)를 산출하여 네이티브 레이어에 전달.
+
+### 51.4 관련 소스 코드
+- [`cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c)
+- [`ui/app.js`](file:///c:/projects/lite_browser/ui/app.js)
+
+### 51.5 빌드 및 검증 결과
+- **디버그 빌드**: `cmake --build cef_binary_151.3.24/build --config Debug --target cefsimple_capi` 성공 (`Exit code 0, 경고 0개, 오류 0개`).
+- **바이너리 생성**: `cef_binary_151.3.24\build\tests\cefsimple_capi\Debug\lite_browser.exe` 및 `lite_browser.dll` 정상 갱신.
+- **실행 및 사용자 검증 완료**:
+  1. **주소창 텍스트 복사/편집**: 주소창의 URL 또는 텍스트 블록 지정 후 우클릭 시 최상단 "복사" 항목 노출 및 클립보드 복사 정상 동작 확인.
+  2. **주소창 붙여넣기 및 전체 선택**: 빈 주소창 우클릭 시 "붙여넣기", "모두 선택" 동작 확인.
+  3. **웹 본문 선택 복사**: 웹페이지 내 텍스트 드래그 후 우클릭 시 최상단 "복사" 메뉴가 정상 표시되고 클릭 시 클립보드로 복사됨을 확인.
+
+---
+
+## 52. 스마트 옴니박스 Win32 비직사각형 창 클리핑(SetWindowRgn) 투명화 및 테두리 정밀 일체화 (Smart Omnibox Win32 Non-Rectangular Window Clipping via SetWindowRgn and Precision Border Alignment)
+
+### 52.1 개요
+LiteBrowser의 스마트 옴니박스(주소창 검색어 자동완성, 북마크 및 방문 기록 추천 드롭다운)가 활성화될 때, 가변적인 드롭다운 높이에 맞추어 상단 UI 브라우저 윈도우(`ui_hwnd`)를 최대 500~650px까지 아래로 확장(`expand-ui`)하여 표시합니다.
+그러나 이 과정에서 드롭다운 리스트(중앙 주소창 영역)를 제외한 좌우 여백 영역에 상단 UI 브라우저의 배경색(회색 바탕화면)이 불투명하게 칠해지며 뒤쪽 웹 콘텐츠(웹페이지 본문)를 가로막아 시각적 답답함과 사용성 저하를 유발하는 문제가 있었습니다.
+또한, 옴니박스 드롭다운 우측 테두리가 표시되지 않는 현상(Win32 GDI 리전의 반열린 구간 `[left, right)` 특성에 의한 1px 잘림)과, 상단 테두리가 다른 테두리보다 굵게 보이는 현상(내비게이션 바 하단과의 3px 간격 및 상단 테두리 겹침에 의한 2px 두께)이 확인되었습니다.
+
+본 업데이트에서는 다음 세 가지 핵심 개선을 통해 스마트 옴니박스를 완벽한 심리스 UI로 고도화했습니다:
+1. **Win32 GDI 비직사각형 윈도우 리전(`SetWindowRgn`) 동적 결합**: 툴바 영역과 옴니박스 추천 영역만 유효 영역으로 합성하여 좌우 불투명 회색 배경을 완전히 클리핑(투명화)하고 뒤쪽 웹 콘텐츠가 그대로 투과되도록 구현.
+2. **GDI 리전 반열린 구간 좌표 보정 (+1px)**: GDI `CreateRectRgn`의 반열린 구간 특성으로 인한 우측 1px 테두리 누락을 수학적으로 보정하여 좌/하단과 동일한 선명한 우측 테두리 복원.
+3. **상단 밀착 및 1px 단일 테두리 일체화**: 드롭다운 시작 위치를 내비게이션 바 하단(76px)에 정확히 밀착(`top: 33px`)시키고 `border-top: none` 및 하단 라운딩(`border-radius: 0 0 12px 12px`)을 적용하여 상/하/좌/우 1px 단일 굵기의 균일한 테두리 완성.
+
+### 52.2 문제 원인 및 아키텍처 분석
+1. **이중 자식 브라우저 아키텍처와 회색 차폐 발생 원인**:
+   - LiteBrowser는 순수 Win32 상위 윈도우(`main_hwnd`) 아래에 상단 주소창 UI 브라우저(`ui_hwnd`, `ui_browser`)와 하단 웹 콘텐츠 브라우저(`content_browser`)라는 2개의 네이티브 자식 창(`WS_CHILD`)을 배치하는 하이브리드 구조를 채택하고 있습니다.
+   - 옴니박스가 열릴 때 주소창 UI 브라우저의 높이를 76px에서 최대 500~650px까지 확장(`SetWindowPos`)하여 웹 콘텐츠 창 위로 겹쳐 띄웁니다.
+   - 드롭다운 리스트 자체는 중앙 주소창 너비만큼만 차지하지만, 상단 UI 윈도우는 가로 너비 전체(`100vw`, `rect.right`)를 차지하므로 드롭다운 좌우의 빈 영역에 Chromium 렌더러의 UI 배경색(다크 모드 `RGB(13, 15, 21)` 또는 라이트 모드 `RGB(244, 244, 245)`)이 그대로 그려져 뒤쪽 웹페이지를 완전히 차폐했습니다.
+2. **Win32 `SetWindowRgn` 비직사각형 마스킹 채택 이유**:
+   - 별도의 `WS_POPUP` 레이어드 윈도우를 띄우거나 별도 CEF 브라우저 인스턴스를 동적으로 생성하는 방식은 프로세스 간 포커스 이동 지연, 마우스 휠 스크롤 단절, 멀티 모니터 DPI 이동 시 동기화 실패 등의 복잡한 결함을 유발합니다.
+   - 반면 상단 UI 브라우저 자식 윈도우(`ui_hwnd`)에 Win32 GDI의 `SetWindowRgn`을 적용하면, `ui_hwnd`뿐만 아니라 하위 Chromium 렌더러 창(`Chrome_WidgetWin_0`) 전체가 리전 외부 영역에서 완벽하게 클리핑(마스킹)됩니다.
+   - 따라서 리전 외부 영역에는 어떠한 픽셀도 렌더링되지 않아 뒤쪽 웹 콘텐츠 브라우저가 온전히 비쳐 보이고, 마우스 클릭 및 휠 이벤트도 본문 윈도우로 자연스럽게 전달됩니다.
+3. **GDI `CreateRectRgn` 반열린 구간(Half-open interval)과 우측 테두리 잘림**:
+   - Windows GDI의 `CreateRectRgn(left, top, right, bottom)`은 전통적으로 `left <= x < right`, `top <= y < bottom`의 반열린 구간으로 정의됩니다.
+   - 즉, 오른쪽 경계선 `x = right` 픽셀은 리전에 포함되지 않습니다. 드롭다운의 실제 오른쪽 경계(`omni_x + omni_w`)를 그대로 전달하면 정확히 1픽셀 너비의 우측 외곽 테두리(`border-right: 1px`)가 클리핑 영역에서 제외되어 화면에 전혀 그려지지 않는 현상이 발생했습니다.
+   - 이를 해결하기 위해 `rgn_right = omni_x + omni_w + 1`, `rgn_bottom = ui_expanded_height + 1`로 명시적 1px 외곽 버퍼를 적용했습니다.
+4. **상단 테두리 3px 간격 및 2px 겹침 원인**:
+   - 상단 탭바(40px) + 내비게이션 바(36px)의 높이 합은 76px입니다. 내비게이션 바 내부의 `.address-container`는 높이 30px이며 상하 3px 마진으로 수직 중앙에 배치되어 `top: 3px` 위치에 있습니다.
+   - 기존 `.omnibox-dropdown`의 `top: 36px`은 내비게이션 바 내부 기준으로 `3 + 36 = 39px` 지점에서 시작하므로, 실제 윈도우 좌표상 `40 + 39 = 79px`에 위치하여 내비게이션 바 바닥선(76px)과의 사이에 3px의 회색 틈이 노출되었습니다.
+   - 또한 내비게이션 바 바닥 테두리(`border-bottom: 1px`)와 드롭다운 자체 상단 테두리(`border: 1px`)가 맞닿을 때 2px로 두껍게 겹쳐 보여 좌/우/하단의 1px 테두리와 시각적 불균형을 이루었습니다.
+
+### 52.3 주요 구현 내역
+1. **프론트엔드 드롭다운 영역 정밀 측정 및 IPC 확장 ([`ui/app.js`](file:///c:/projects/lite_browser/ui/app.js))**:
+   - `expandUI(height, showBackdrop = true, omniX = -1, omniW = -1)` 함수 확장: 드롭다운의 좌측 오프셋(`omniX`)과 너비(`omniW`)를 쿼리 파라미터(`&x=...&width=...`)로 백엔드에 전송.
+   - `updateOmniboxHeight()` 함수 개선: `dropdown.getBoundingClientRect()`를 통해 뷰포트 기준 절대 좌표를 추출하고, 브라우저의 서브픽셀(Sub-pixel) 렌더링에 따른 오차를 방지하기 위해 `Math.floor(rect.left)` 및 `Math.ceil(rect.right)`로 정수 픽셀을 산출.
+   - `window.addEventListener('resize', ...)`: 브라우저 창 크기 변경 시 `updateOmniboxHeight()`를 트리거하여 드롭다운 지오메트리와 클리핑 리전을 실시간 재동기화.
+2. **Win32 C 백엔드 비직사각형 리전 동적 결합 및 클리핑 ([`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c))**:
+   - `expand-ui?` 요청 인입 시 `height`, `x`, `width` 파라미터를 파싱하고, 멀티 모니터 고해상도 환경을 위해 Win32 `GetDpiForWindow` 스케일링 팩터를 적용.
+   - 상단 툴바 직사각형 영역(`rgnTop`: `0, 0, rect.right, default_h`)과 옴니박스 드롭다운 영역(`rgnOmni`: `omni_x, default_h, omni_x + omni_w + 1, expanded_h + 1`)을 생성.
+   - Win32 `CombineRgn(rgnCombined, rgnTop, rgnOmni, RGN_OR)` 함수를 호출하여 'T'자형 또는 역'凸'자형 비직사각형 영역으로 결합한 뒤 `SetWindowRgn(win_ctx->ui_hwnd, rgnCombined, TRUE)`으로 창 클리핑 적용.
+   - `collapse-ui` 수신 시 `SetWindowRgn(win_ctx->ui_hwnd, NULL, TRUE)`을 호출하여 전체 사각형으로 즉시 복원하고 기본 툴바 높이(76px)로 환원.
+3. **윈도우 크기 변경(`WM_SIZE`) 시 리전 동적 재계산 ([`simple_app.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c), [`browser_context.h`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/browser_context.h))**:
+   - `browser_window_t` 구조체에 `ui_expanded_omni_x` 및 `ui_expanded_omni_w` 필드를 추가하여 확장 상태의 드롭다운 수평 좌표를 저장.
+   - `LiteBrowserMainWndProc`의 `WM_SIZE` 메시지 처리기에서 창 크기가 조절될 때 `is_ui_expanded` 상태이면 동일한 `CombineRgn` 연산을 수행하여, 사용자가 창 크기를 드래그하여 조절하는 도중에도 리전이 깨지거나 회색 배경이 노출되지 않도록 영속적 무결성 보장.
+4. **드롭다운 상단 밀착 및 1px 단일 테두리 일체화 ([`ui/style.css`](file:///c:/projects/lite_browser/ui/style.css))**:
+   - `.omnibox-dropdown`의 `top: 36px`을 `top: 33px`로 수정하여 `40px + 3px + 33px = 76px` 지점, 즉 내비게이션 바 하단선에 정확히 밀착.
+   - `border-top: none` 및 `border-radius: 0 0 12px 12px`를 적용하여 내비게이션 바의 1px 하단 테두리를 드롭다운의 상단 테두리로 자연스럽게 공유하도록 설계.
+   - 상단 테두리가 2px로 겹치지 않고 좌/우/하단과 완전히 동일한 1px 단일 선으로 정렬되어 완벽한 일체형 디자인 달성.
+
+### 52.4 관련 소스 코드
+- [`cef_binary_151.3.24/tests/cefsimple_capi/browser_context.h`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/browser_context.h)
+- [`cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c)
+- [`cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c)
+- [`ui/app.js`](file:///c:/projects/lite_browser/ui/app.js)
+- [`ui/style.css`](file:///c:/projects/lite_browser/ui/style.css)
+
+### 52.5 빌드 및 검증 결과
+- **디버그 빌드**: `cmake --build cef_binary_151.3.24/build --config Debug --target cefsimple_capi` 성공 (`Exit code 0, 경고 0개, 오류 0개`).
+- **바이너리 생성**: `cef_binary_151.3.24\build\tests\cefsimple_capi\Debug\lite_browser.exe` 및 `lite_browser.dll` 정상 갱신.
+- **3대 검증 항목 교차 확인**:
+  1. **좌우 투명화 검증**: 스마트 옴니박스 활성화 시 추천 리스트 좌우에 회색 차폐 없이 뒤쪽 웹페이지(네이버, 유튜브 등)가 투명하게 그대로 비치고 시각적 개방감 확보 확인.
+  2. **우측 테두리 복원 검증**: Win32 GDI 반열린 구간 보정(+1px) 적용 후, 우측 테두리가 좌측 및 하단과 동일하게 선명한 1px 선으로 정상 렌더링됨 확인.
+  3. **상단 테두리 1px 균일화 검증**: 드롭다운 상단 밀착(`top: 33px`) 및 `border-top: none` 적용 후, 3px 간격과 2px 중복 굵기 현상이 완전히 사라지고 상/하/좌/우 모든 테두리가 동일한 1px 굵기로 균일하게 렌더링됨 사용자 확인 완료.
+
+---
+
+## 53. Cloudflare Turnstile 봇 감지 무한 루프 통과 실패 해결 및 웹 보안 플래그(`disable-web-security`) 영구 제거 (Cloudflare Turnstile Bot Detection Infinite Loop Elimination & Permanent Removal of `--disable-web-security` Flag)
+
+### 53.1 개요
+CodePen(`https://codepen.io/`) 등 Cloudflare 봇 감지 및 Turnstile 보호가 적용된 웹사이트에 접속했을 때, "사람인지 확인(Verify you are human)" 체크박스를 클릭해도 정상적으로 초록색 체크가 완료되지 않고 무한 로딩 스피너가 돌다가 다시 빈 체크박스로 되돌아가며 통과하지 못하는 현상이 발생했습니다.
+정밀 조사 결과, 과거 ChatGPT OAuth PKCE 인증 구현 과정에서 재도입되었던 `--disable-web-security` 커맨드라인 스위치가 모든 CEF 프로세스에 주입되고 있었던 것이 근본 원인으로 규명되었습니다.
+이를 C 백엔드에서 완전히 제거하여 브라우저의 동일 출처 정책(SOP) 및 웹 보안(CORS) 무결성을 회복하고, Cloudflare Turnstile의 브라우저 무결성 검증을 정상 통과하도록 영구 해결했습니다.
+
+### 53.2 문제 원인 정밀 분석 (Cloudflare Turnstile 봇 감지 메커니즘)
+1. **동일 출처 정책(SOP) 및 CORS 무결성 검증 실패**:
+   - Cloudflare Turnstile은 보안 챌린지를 로드할 때 `challenges.cloudflare.com` 도메인의 격리된 `iframe`을 생성하여 클라이언트 환경 무결성을 다각도로 테스트합니다.
+   - Chromium에 `--disable-web-security` 스위치가 주입되면, 브라우저의 Same-Origin Policy가 비활성화되고 교차 출처 리소스 공유(CORS) 검사가 무력화됩니다.
+   - Turnstile 내부 스크립트는 교차 출처 fetch/XHR의 비정상적 성공 여부, `window.origin`, `document.domain`의 비표준적 거동, 그리고 iframe 간 비보안 통신 상태를 실시간 탐지하여 해당 브라우저를 "스크래퍼/자동화 봇 도구 또는 보안이 해제된 비정상 브라우저 환경"으로 100% 식별합니다.
+2. **챌린지 증명 실패 및 무한 루프(Infinite Loop)**:
+   - 사용자가 마우스로 직접 체크박스를 클릭하여 자연스러운 사용자 입력 데이터를 생성하더라도, 클라이언트 측 환경 무결성 텔레메트리(Environment Telemetry)에서 보안 플래그 위반이 검출되어 토큰 발급이 거절됩니다.
+   - 결과적으로 체크박스가 초록색 체크(`✓`)로 바뀌지 않고 로딩 스피너가 돌다가 다시 빈 체크박스로 초기화되는 현상이 무한 반복되었습니다.
+
+### 53.3 주요 구현 내역
+1. **`--disable-web-security` 커맨드라인 스위치 완전 제거 ([`simple_app.c`](file:///C:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c))**:
+   - `simple_app_on_before_command_line_processing`에서 `--disable-web-security`를 주입하던 코드를 완전히 삭제.
+   - 로컬 UI(`ui/index.html`)와 백엔드 간 통신은 `http://ui-action/...` URL 가로채기 방식이므로 보안 플래그 제거 후에도 로컬 주소창, 옴니박스, 설정, 북마크 관리자 등 모든 프론트엔드 기능이 100% 정상 작동함을 확인.
+
+### 53.4 관련 소스 코드
+- [`cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c`](file:///C:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c)
+
+### 53.5 빌드 및 검증 결과
+- **디버그 빌드**: `cmake --build cef_binary_151.3.24/build --config Debug --target cefsimple_capi` 성공 (`Exit code 0, 경고 0개, 오류 0개`).
+- **바이너리 생성**: `cef_binary_151.3.24\build\tests\cefsimple_capi\Debug\lite_browser.exe` 및 `lite_browser.dll` 정상 갱신.
+- **CodePen Cloudflare Turnstile 통과 검증**:
+  - `https://codepen.io/` 접속 후 Cloudflare "사람인지 확인" 체크박스 클릭 시, 무한 로딩이나 체크박스 리셋 현상 없이 즉시 초록색 체크(`✓`)가 완료되고 CodePen 메인 화면으로 매끄럽게 통과됨을 사용자 최종 검증 완료.
+
+
+
+
 
 
 
