@@ -122,14 +122,6 @@ load_handler_on_loading_state_change(cef_load_handler_t* self,
       }
     }
 
-    if (!isLoading && win_ctx->active_tab_index == found_idx && win_ctx->tabs[found_idx].hwnd) {
-      cef_browser_host_t* host = browser->get_host(browser);
-      if (host) {
-        host->set_focus(host, 1);
-        host->base.release(&host->base);
-      }
-      SetFocus(win_ctx->tabs[found_idx].hwnd);
-    }
   }
 }
 

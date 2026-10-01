@@ -306,13 +306,6 @@ static LRESULT CALLBACK ChildBorderSubclassProc(
               }
             }
           }
-          HWND cur_f = GetFocus();
-          if (cur_f == root_tab) {
-            SetFocus(main_hwnd);
-            SetFocus(root_tab);
-          } else {
-            SetFocus(root_tab);
-          }
         }
       }
     }
@@ -490,8 +483,7 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
     HDC hdc = (HDC)wParam;
     RECT r;
     GetClientRect(hwnd, &r);
-    int ui_height = GetUIHeightForWindow(hwnd);
-    RECT content_r = {0, ui_height, r.right, r.bottom};
+    RECT content_r = {0, 0, r.right, r.bottom};
     if (content_r.bottom > content_r.top) {
       int dark = is_theme_dark();
       HBRUSH bg_brush = CreateSolidBrush(dark ? RGB(13, 15, 21) : RGB(244, 244, 245));

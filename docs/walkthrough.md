@@ -1670,6 +1670,53 @@ CEF 코어가 생성하는 팝업 윈도우(`Chrome_WidgetWin_1`)는 Win32 레�
 - **자동 복구 검증**: 브라우저 기동 시 기존 `downloads.json`의 15개 이상 다운로드 항목이 `C:\Users\grego\Downloads\...` 경로와 함께 `file_exists: true`로 정상 자동 복원됨을 확인.
 - **UI 및 동작 검증**: `lite://downloads` 탭이 전체 가로 화면으로 채워지며, 기존 다운로드 파일들이 `완료됨` 배지와 함께 표시되고 `열기 (실행)` 및 `폴더에서 보기`가 즉각 정상 동작함을 사용자 확인 완료.
 
+---
+
+## 50. 인위적 Win32 포커스 개입 전면 제거 및 Chromium/TSF 고유 포커스 파이프라인 복원과 배경 그리기 최적화 (Elimination of Artificial Focus Interventions, Restoration of Native Chromium/TSF Focus Pipeline & Background Erase Optimization)
+
+### 50.1 개요
+새 탭 링크 열기 시 발생하던 Windows 11 사각형 플로팅 IME 조합창 문제를 해결하는 과정에서, 여러 생명주기 훅(`ChildBorderSubclassProc`의 마우스 클릭, `load_handler`의 로딩 완료 시점 등)에 인위적인 `SetFocus` 및 `host->set_focus` 보정 코드들이 분산 추가되어 있었습니다.
+그러나 이러한 강제 포커스 호출은 Chromium과 Windows OS가 자체적으로 조율하는 포커스 상태 머신을 오히려 흔들어, 페이지 로딩 시 주소창 타이핑 방해(Focus Stealing) 및 포커스 플립을 야기할 수 있는 구조적 문제를 안고 있었습니다.
+사용자 주도의 심층 분석과 실험(실험 A 및 3가지 시나리오 검증)을 통해, 근본 원인이었던 `CreateNewTabEx`의 주소창 강제 포커스 부여 코드를 완전히 제거하고, 그에 따라 파생되었던 모든 인위적 `SetFocus` 임시 방편(Band-aid) 코드들을 전면 철거하여 Chromium과 Windows TSF 본래의 순정 포커스 체계로 복원했습니다.
+아울러 `WM_ERASEBKGND`의 클리핑 범위를 윈도우 전체로 일원화하여 탭 생성/크기 조절 시의 잔여 깜빡임 가능성을 원천 차단했습니다.
+
+### 50.2 원인 및 아키텍처 재평가
+1. **근본 원인의 재발견 (`CreateNewTabEx`)**:
+   - `CreateNewTabEx`에서 새 탭을 생성할 때 주소창 UI(`ui_hwnd`)로 포커스를 넘기던 코드가 모든 문제의 출발점이었습니다.
+   - 외부 링크로 새 탭이 열릴 때 주소창으로 포커스를 빼앗아버리니 본문 탭의 TSF 바인딩이 취소되었고, 이를 수습하려다 여러 곳에 강제 `SetFocus`가 번졌던 것이 규명되었습니다.
+2. **인위적 `SetFocus`의 부작용**:
+   - `ChildBorderSubclassProc`: 마우스 좌클릭 시 `SetFocus(main_hwnd)` -> `SetFocus(root_tab)` 사이클로 포커스를 강제로 흔들어 TSF 상태를 불안정하게 만들 수 있었습니다.
+   - `simple_load_handler.c`: 페이지 로딩이 끝날 때마다(`!isLoading`) 무조건 `host->set_focus(1)` 및 `SetFocus`를 호출하여, 로딩 중 주소창에 타이핑하던 사용자의 포커스를 본문으로 빼앗는 현상(Focus Stealing)을 유발했습니다.
+3. **프론트엔드 포커스 제어 분석**:
+   - CSS/JS 조사 결과, 프론트엔드(`ui/`)는 임의로 DOM 포커스를 강제 조작(`.focus()`)하지 않으며, 순수하게 마우스 클릭으로 발생한 포커스를 감지하거나 주소창 엔터 완료 후 `blur()`만 수행하므로 백엔드 포커스에 전혀 간섭하지 않음을 확인했습니다.
+
+### 50.3 주요 구현 내역
+1. **`CreateNewTabEx` 상단 UI 포커스 인계 완전 제거 ([`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c))**:
+   - 새 탭 생성 시 주소창으로 포커스를 강제로 넘기던 `SetFocus(win_ctx->ui_hwnd)` 및 `ui_host->set_focus(1)` 블록을 완전 삭제.
+   - `+` 버튼 클릭 시에는 이미 사용자가 주소창/탭바를 클릭한 상태이므로 자연스럽게 포커스가 유지되고, 링크 클릭 시에는 웹 탭이 활성화 상태를 온전히 유지하여 순정 상태로 복원.
+2. **`ChildBorderSubclassProc` 마우스 클릭 포커스 조작 제거 ([`simple_app.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c))**:
+   - 렌더러 창 클릭 시 `main_hwnd`를 거치거나 `root_tab`에 강제로 `SetFocus`를 호출하던 코드를 완전히 삭제.
+   - 순수하게 듀얼 분할 탭(`is_split`) 활성 창 전환(`active_split`) 및 UI 내비게이션 상태 동기화 로직만 간결하게 보존.
+3. **`load_handler` 로딩 완료 시점 포커스 강탈 제거 ([`simple_load_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_load_handler.c))**:
+   - `!isLoading` 시점에 무조건 `host->set_focus(1)`와 `SetFocus`를 호출하던 블록을 삭제하여 주소창 타이핑 방해(Focus Stealing)를 원천 차단.
+4. **`WM_ERASEBKGND` 전체 클라이언트 영역 테마 배경 동기화 ([`simple_app.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c))**:
+   - 기존 `ui_height ~ bottom` 영역만 채우던 것을 전체 클라이언트 영역 `{0, 0, r.right, r.bottom}`으로 확장하여 다크/라이트 테마 색상(`RGB(13, 15, 21)` / `RGB(244, 244, 245)`)으로 일괄 칠하도록 변경.
+   - 1픽셀 단위 정렬 오차나 탭 조작 시의 순간적 흰색 잔여 깜빡임 가능성을 완전 제거.
+
+### 50.4 관련 소스 코드
+- [`cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_app.c)
+- [`cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c)
+- [`cef_binary_151.3.24/tests/cefsimple_capi/simple_load_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_load_handler.c)
+
+### 50.5 빌드 및 검증 결과
+- **디버그 빌드**: `cmake --build cef_binary_151.3.24/build --config Debug --target cefsimple_capi` 성공 (`Exit code 0, 경고 0개, 오류 0개`).
+- **바이너리 생성**: `cef_binary_151.3.24\build\tests\cefsimple_capi\Debug\lite_browser.exe` 및 `lite_browser.dll` 정상 갱신.
+- **3대 핵심 시나리오 교차 검증**:
+  1. **새 탭 링크 열기 후 한글 입력**: 네이버 카페, Jira 등 링크를 "새 탭으로 열기" 후 첫 검색창 클릭 시 Windows 11 사각형 플로팅 박스 없이 인라인 한글 입력 완벽 작동 확인.
+  2. **주소창 ➔ 본문 포커스 자연스러운 전환**: 상단 주소창 포커스 상태에서 웹 본문 클릭 시 키보드 포커스가 웹 본문으로 자연스럽게 회수됨을 확인.
+  3. **듀얼 분할 화면(Split View) 클릭 전환**: 좌/우 분할 창 간 클릭 시 각 창으로 포커스 및 한글 입력이 원활하게 전환됨을 확인.
+
+
 
 
 
