@@ -2025,3 +2025,49 @@ LiteBrowser의 AI 사이드패널에서 유료 ChatGPT 구독(Plus/Team/Pro) 계
   2. **실시간 SSE 스트리밍**: Base64 인코딩 브리지를 통해 문자 깨짐이나 파싱 에러 없이 토큰 단위 실시간 타이핑 렌더링 확인.
   3. **브라우저 웹 보안 무결성 유지**: `--disable-web-security` 스위치 없이도 구독 통신이 완벽히 작동하며, Cloudflare Turnstile 보호 사이트(CodePen 등) 접근성 100% 보존.
   4. **사용자 최종 동작 검증 완료**: ChatGPT 구독 연동 상태에서 사이드패널 "현재 페이지 요약해줘" 요청 시 끊김 없이 완벽한 요약 결과 출력 확인.
+
+---
+
+## 57. Google Gemini 인증 아키텍처 재정립 및 단일 API Key 모드 UI 전면 개편 (Google Gemini Authentication Architecture Realignment & Unified API Key Mode UI Redesign)
+
+### 57.1 개요
+기존 LiteBrowser의 AI 사이드패널 설정에서 Gemini의 인증 방식이 `[Google AI Studio (무료)]`와 `[API Key]`라는 두 가지 토글 버튼으로 나뉘어 있었으나, 두 방식 모두 실제로는 `AIzaSy...`로 시작하는 동일한 Google AI Studio API 키를 입력받도록 구현되어 있었습니다.
+이는 ChatGPT(Plus/Pro) 및 Claude(Pro/Max)와 달리, Google은 개인 소비자용 구독(Google One AI Premium / Gemini Advanced)을 외부 브라우저 에이전트에 연동하는 공식 OAuth 엔드포인트를 열어두지 않고 대신 개발자 콘솔인 **Google AI Studio**를 통해 일 1,500회 완전 무료 티어(신용카드 불필요) 및 종량제 API Key를 단일 공식 채널로 제공한다는 점을 충분히 반영하지 못하여 발생한 구조적 왜곡이었습니다.
+본 업데이트에서는 사용자 주도의 심층 인터뷰(/grill-me)를 통해 Gemini의 인증 체계를 전면 재검토하고, 혼란을 유발하던 [구독 / API Key] 토글 및 불필요한 상단 안내 카드를 완전히 제거했습니다.
+대신 직관적인 `[Google AI Studio 무료 키 발급]` 액션 버튼과 깔끔한 단일 API Key 입력창을 제공하여, OpenAI 및 Claude의 API Key 입력 방식과 완벽한 일관성을 갖춘 심플하고 실용적인 UI/UX를 완성했습니다.
+
+### 57.2 문제 원인 분석
+1. **제공자별 인증 모델의 특성 차이 및 개념 혼선**:
+   - **OpenAI / Anthropic**: 공식 OAuth(Codex CLI `app_EMoamEEZ73f0CkXaXp7hrann`, Claude Code setup-token)를 통해 개인 유료 구독(ChatGPT Plus, Claude Pro) 계정으로 추가 토큰 비용 없이 에이전트를 구동할 수 있어 [구독]과 [API Key] 모드의 구분이 유효함.
+   - **Google Gemini**: 개인용 Gemini Advanced(Google One) 구독을 외부 에이전트 API로 연결하는 공식 OAuth를 제공하지 않음. 대신 Google AI Studio에서 신용카드 등록 없이도 일 1,500회(15 RPM)를 무료로 사용할 수 있는 무료 티어 API 키를 발급함.
+   - **기존 왜곡**: 이전 구현 시 "비용 0원(무료)"이라는 점만 보고 Google AI Studio 키 발급을 '구독' 탭 자리에 무리하게 배치하여, 양쪽 탭 모두 동일한 `AIzaSy...` 키를 요구하는 모순된 상태가 됨.
+2. **코드 런타임 누락 결함 (`ReferenceError: url is not defined`)**:
+   - 모드 단일화 과정에서 `GeminiProvider.prototype.chatStream`의 변수 선언 키워드(`const`)가 누락되어 질의 실행 시 런타임 에러가 발생함. 이를 즉시 수정하여 `const url`과 `const headers`를 안전하게 초기화.
+
+### 57.3 주요 구현 내역
+1. **설정 UI 레이아웃 직관화 ([`ui/sidepanel.html`](file:///c:/projects/lite_browser/ui/sidepanel.html))**:
+   - Gemini 영역(`gemini-fields`)에서 불필요한 `인증 방식: [Google AI Studio (무료)] / [API Key]` 토글 전면 삭제.
+   - 복잡한 테두리 박스 및 설명 텍스트(`.auth-sub-card`, 배지)를 제거하고, 상단에 가로 전체 너비의 `[Google AI Studio 무료 키 발급]` 버튼을 깔끔하게 단독 배치.
+   - 버튼 바로 아래에 단일 `Gemini API Key (AIzaSy...)` 마스킹 입력 필드와 모델 선택 드롭다운(`gemini-3.8-flash` 등)을 배치하여 시각적 간결성 극대화.
+2. **프론트엔드 상태 관리 및 자동 마이그레이션 ([`ui/sidepanel.js`](file:///c:/projects/lite_browser/ui/sidepanel.js))**:
+   - `[Google AI Studio 무료 키 발급]` 버튼 클릭 시 브라우저 새 탭으로 공식 키 발급 콘솔(`https://aistudio.google.com/app/apikey`) 즉시 연결.
+   - Gemini를 구독 토글 동기화 목록에서 제외하고, 하단 `[설정 저장]` 클릭 시 `geminiAuthMode: 'apikey'`로 일관되게 저장.
+   - **기존 키 자동 복원(Auto-migration)**: 이전에 세션에 키를 저장해 둔 사용자의 경우, 설정 패널 진입 시 백엔드 토큰 저장소에서 자동으로 키를 조회하여 `gemini-key` 입력 필드에 복원.
+3. **Gemini 프로바이더 파이프라인 정규화 ([`ui/ai_providers.js`](file:///c:/projects/lite_browser/ui/ai_providers.js))**:
+   - `AIProviderFactory`: Gemini 기본 인증 모드를 `'apikey'`로 확정하고 `settings.geminiKey` 바인딩.
+   - `GeminiProvider.prototype.chatStream`:
+     - 키 유효성 검사 선행 수행: 미등록 시 *"Gemini API 키가 설정되지 않았습니다. 설정(⚙️)에서 Google AI Studio 무료 키(AIza...)를 등록해주세요."* 명확한 에러 반환.
+     - `const url` 및 `const headers`를 안전하게 정의하고 Google Generative Language 공식 엔드포인트(`https://generativelanguage.googleapis.com/v1beta/models/...`)로 실시간 SSE 스트리밍 통신 완벽 지원.
+
+### 57.4 관련 소스 코드
+- [`ui/sidepanel.html`](file:///c:/projects/lite_browser/ui/sidepanel.html)
+- [`ui/sidepanel.js`](file:///c:/projects/lite_browser/ui/sidepanel.js)
+- [`ui/ai_providers.js`](file:///c:/projects/lite_browser/ui/ai_providers.js)
+
+### 57.5 빌드 및 검증 결과
+- **디버그 빌드**: `cmake --build cef_binary_151.3.24/build --config Debug --target cefsimple_capi` 성공 (`Exit code 0, 경고 0개, 오류 0개`).
+- **바이너리 생성**: `cef_binary_151.3.24\build\tests\cefsimple_capi\Debug\lite_browser.exe` 및 `lite_browser.dll` 정상 갱신.
+- **기능 및 사용자 동작 검증**:
+  1. **UI 확인**: Gemini 선택 시 모호하던 2버튼 토글이 사라지고, 상단 `[Google AI Studio 무료 키 발급]` 버튼과 단일 API Key 입력창이 정갈하게 노출됨 확인.
+  2. **키 발급 연동**: 버튼 클릭 시 브라우저 새 탭으로 Google AI Studio 콘솔 정상 이동 확인.
+  3. **실시간 스트리밍 검증**: Gemini API 키 등록 후 사이드패널에서 "페이지 요약해줘" 요청 시 `url is not defined` 에러 없이 즉시 정상적인 실시간 페이지 요약 결과 출력 및 사용자 최종 검증 완료 ("이제 잘 동작해.").

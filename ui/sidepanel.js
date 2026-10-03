@@ -377,7 +377,9 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.auth-login-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const prov = btn.getAttribute('data-provider');
-      if (prov === 'openai' || prov === 'anthropic') {
+      if (prov === 'gemini') {
+        window.location.href = 'http://ui-action/new-tab?url=' + encodeURIComponent('https://aistudio.google.com/app/apikey');
+      } else if (prov === 'openai' || prov === 'anthropic') {
         startOAuthPKCEFlow(prov);
       } else {
         window.location.href = `http://ui-action/auth-login?provider=${prov}`;
@@ -418,12 +420,21 @@ document.addEventListener('DOMContentLoaded', () => {
     const s = AIProviderFactory.getSettings();
     providerSelect.value = s.provider || 'gemini';
 
-    ['gemini', 'openai', 'anthropic'].forEach(prov => {
+    ['openai', 'anthropic'].forEach(prov => {
       const mode = s[`${prov}AuthMode`] || 'subscription';
       setAuthModeUI(prov, mode);
     });
 
     geminiKeyInput.value = s.geminiKey || '';
+    if (!s.geminiKey) {
+      getSubscriptionToken('gemini').then(token => {
+        if (token && token.startsWith('AIza')) {
+          geminiKeyInput.value = token;
+          s.geminiKey = token;
+          AIProviderFactory.saveSettings(s);
+        }
+      });
+    }
     geminiModelSelect.value = s.geminiModel || 'gemini-3.8-flash';
     if (!geminiModelSelect.value) geminiModelSelect.value = 'gemini-3.8-flash';
     openaiKeyInput.value = s.openaiKey || '';
@@ -447,7 +458,7 @@ document.addEventListener('DOMContentLoaded', () => {
     anthropicFields.classList.toggle('hidden', provider !== 'anthropic');
     ollamaFields.classList.toggle('hidden', provider !== 'ollama');
 
-    if (['gemini', 'openai', 'anthropic'].includes(provider)) {
+    if (['openai', 'anthropic'].includes(provider)) {
       const s = AIProviderFactory.getSettings();
       const mode = s[`${provider}AuthMode`] || 'subscription';
       setAuthModeUI(provider, mode);
@@ -457,19 +468,18 @@ document.addEventListener('DOMContentLoaded', () => {
   providerSelect.addEventListener('change', (e) => {
     const selectedProvider = e.target.value;
     updateProviderFields(selectedProvider);
-    if (['gemini', 'openai', 'anthropic'].includes(selectedProvider)) {
+    if (['openai', 'anthropic'].includes(selectedProvider)) {
       setAuthModeUI(selectedProvider, 'subscription');
     }
   });
 
   saveSettingsBtn.addEventListener('click', () => {
-    const activeGeminiMode = document.querySelector('.auth-toggle-btn[data-provider="gemini"].active')?.getAttribute('data-mode') || 'subscription';
     const activeOpenAIMode = document.querySelector('.auth-toggle-btn[data-provider="openai"].active')?.getAttribute('data-mode') || 'subscription';
     const activeAnthropicMode = document.querySelector('.auth-toggle-btn[data-provider="anthropic"].active')?.getAttribute('data-mode') || 'subscription';
 
     const updated = {
       provider: providerSelect.value,
-      geminiAuthMode: activeGeminiMode,
+      geminiAuthMode: 'apikey',
       openaiAuthMode: activeOpenAIMode,
       anthropicAuthMode: activeAnthropicMode,
       geminiKey: geminiKeyInput.value.trim(),

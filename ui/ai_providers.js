@@ -197,28 +197,12 @@ class GeminiProvider extends AIProviderInterface {
 
   async chatStream({ messages, tools, systemPrompt, onChunk, onThinking, onToolCall, onStatus, onComplete, onError, signal }) {
     try {
-      let url = '';
-      const headers = { 'Content-Type': 'application/json' };
-
-      if (this.authType === 'subscription') {
-        if (!this.subscriptionToken) {
-          throw new Error('Google/Gemini 구독 계정이 연결되지 않았습니다. 설정(⚙️)에서 로그인해주세요.');
-        }
-
-        if (this.subscriptionToken.startsWith('ya29.')) {
-          url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:streamGenerateContent?alt=sse`;
-          headers['Authorization'] = `Bearer ${this.subscriptionToken}`;
-        } else if (this.subscriptionToken.startsWith('AIza') || this.subscriptionToken.length >= 20) {
-          url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:streamGenerateContent?alt=sse&key=${encodeURIComponent(this.subscriptionToken)}`;
-        } else if (this.apiKey) {
-          url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:streamGenerateContent?alt=sse&key=${encodeURIComponent(this.apiKey)}`;
-        } else {
-          throw new Error('Google Gemini API 통신을 위해 Google AI Studio 무료 키(AIza...) 또는 Google OAuth 토큰이 필요합니다. 설정(⚙️)에서 등록해주세요.');
-        }
-      } else {
-        if (!this.apiKey) throw new Error('Gemini API 키가 설정되지 않았습니다. 설정(⚙️)에서 입력해주세요.');
-        url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:streamGenerateContent?alt=sse&key=${encodeURIComponent(this.apiKey)}`;
+      const key = this.apiKey || this.subscriptionToken;
+      if (!key) {
+        throw new Error('Gemini API 키가 설정되지 않았습니다. 설정(⚙️)에서 Google AI Studio 무료 키(AIza...)를 등록해주세요.');
       }
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:streamGenerateContent?alt=sse&key=${encodeURIComponent(key)}`;
+      const headers = { 'Content-Type': 'application/json' };
 
       // Convert messages to Gemini format
       const contents = [];
@@ -1064,7 +1048,7 @@ class AIProviderFactory {
   static getSettings() {
     const defaultSettings = {
       provider: 'gemini',
-      geminiAuthMode: 'subscription',
+      geminiAuthMode: 'apikey',
       openaiAuthMode: 'subscription',
       anthropicAuthMode: 'subscription',
       geminiKey: '',
@@ -1119,9 +1103,8 @@ class AIProviderFactory {
       case 'gemini':
       default:
         return new GeminiProvider({
-          apiKey: settings.geminiKey,
-          authType: settings.authType || settings.geminiAuthMode || 'apikey',
-          subscriptionToken: settings.subscriptionToken || '',
+          apiKey: settings.geminiKey || settings.subscriptionToken || '',
+          authType: 'apikey',
           model: settings.geminiModel || 'gemini-3.8-flash'
         });
     }

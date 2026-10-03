@@ -64,55 +64,16 @@
             </div>
 
             <div id="gemini-fields" class="provider-fields">
+              <div class="form-group" style="margin-bottom: 12px;">
+                <button type="button" class="btn btn-primary btn-sm auth-login-btn" data-provider="gemini" style="width: 100%; justify-content: center;">
+                  <svg viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" x2="21" y1="14" y2="3"/></svg>
+                  <span>Google AI Studio 무료 키 발급</span>
+                </button>
+              </div>
+
               <div class="form-group">
-                <label>인증 방식:</label>
-                <div class="auth-type-toggle">
-                  <button type="button" class="auth-toggle-btn active" data-provider="gemini" data-mode="subscription">
-                    <svg viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="5" rx="2"/><line x1="2" x2="22" y1="10" y2="10"/></svg>
-                    <span>Google AI Studio (무료)</span>
-                  </button>
-                  <button type="button" class="auth-toggle-btn" data-provider="gemini" data-mode="apikey">
-                    <svg viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></svg>
-                    <span>API Key</span>
-                  </button>
-                </div>
-              </div>
-
-              <div id="gemini-sub-box" class="auth-sub-card">
-                <div class="auth-sub-status" id="gemini-sub-status">
-                  <span class="auth-badge auth-badge-connected">
-                    <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
-                    <span>1,500회/일 완전 무료 티어</span>
-                  </span>
-                  <p class="auth-hint">Google AI Studio 키만 등록하면 <strong>추가 비용 0원(신용카드 불필요)</strong>으로 모든 최신 Gemini 모델과 네이티브 실시간 도구 호출을 사용하실 수 있습니다.</p>
-                </div>
-                <div class="auth-sub-actions">
-                  <button type="button" class="btn btn-primary btn-sm auth-login-btn" data-provider="gemini">
-                    <svg viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" x2="21" y1="14" y2="3"/></svg>
-                    <span>Google AI Studio 무료 키 발급</span>
-                  </button>
-                  <button type="button" class="btn btn-danger-outline btn-sm auth-logout-btn hidden" data-provider="gemini">
-                    <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
-                    <span>연결 해제</span>
-                  </button>
-                </div>
-                <div class="auth-token-input-group" style="margin-top: 10px;">
-                  <label for="gemini-sub-token" style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px;">Google AI Studio 무료 키 (AIzaSy...):</label>
-                  <div style="display: flex; gap: 6px;">
-                    <input type="password" id="gemini-sub-token" placeholder="AIzaSy... (1,500회/일 완전 무료)" style="flex: 1; font-size: 12px; padding: 6px 10px;">
-                    <button type="button" class="btn btn-secondary btn-sm auth-save-token-btn" data-provider="gemini">
-                      <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
-                      <span>저장</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <div id="gemini-apikey-box" class="hidden">
-                <div class="form-group">
-                  <label for="gemini-key">Gemini API Key:</label>
-                  <input type="password" id="gemini-key" placeholder="AIzaSy...">
-                </div>
+                <label for="gemini-key">Gemini API Key (AIzaSy...):</label>
+                <input type="password" id="gemini-key" placeholder="AIzaSy... (1,500회/일 완전 무료 키 또는 유료 키)">
               </div>
 
               <div class="form-group">
