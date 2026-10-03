@@ -1910,6 +1910,61 @@ CodePen(`https://codepen.io/`) 등 Cloudflare 봇 감지 및 Turnstile 보호가
 - **실행 검증**:
   - 웹 푸시 알림 권한을 요청하는 웹사이트(예: `biz.heraldcorp.com`) 접속 시 "다음 권한을 요청합니다 - [허용] [차단]" 팝업 다이얼로그가 좌측 상단 구석이 아닌 활성 탭 가로 중앙, 상단 툴바 직하단 0px 밀착 위치(Edge 브라우저 스타일)에 매끄럽게 정렬되어 노출됨을 사용자 최종 검증 완료.
 
+---
+
+## 55. 북마크 관리자 대시보드 인라인 직접 편집(제목 및 본문 요약 수정) 시스템 (Bookmark Manager Dashboard Inline Direct Editing System for Title & Snippet)
+
+### 55.1 개요
+북마크 관리자 대시보드(`lite://favorites`)에서 저장된 각 북마크의 제목(`title`)과 AI가 추출한 본문 요약(`textSnippet`)을 사용자가 필요에 따라 직접 수정하고 영구 저장할 수 있는 인라인 직접 편집(Inline Direct Editing) 기능을 구현했습니다.
+별도의 복잡한 모달 창이나 화면 전환 없이, 사용자가 원하는 북마크의 수정(✏️) 버튼을 클릭하면 카드 뷰(Card View) 및 리스트 뷰(List View) 제자리에서 텍스트가 즉시 입력창(단일행 `<input>` 및 멀티라인 `<textarea>`)으로 전환되는 심플하고 직관적인 UX를 구축했습니다.
+아울러 키보드 단축키(`Ctrl+Enter` 저장, `Escape` 취소)와 C 백엔드 디스크 저장, 그리고 상단 주소창 옴니박스 자동완성과의 실시간 양방향 동기화를 완성했습니다.
+
+### 55.2 문제 분석 및 아키텍처 설계
+1. **사용자 인터페이스의 단순성 원칙 (Simplicity First)**:
+   - 복잡한 모달 다이얼로그나 팝업 창을 띄우는 방식은 사용자가 현재 대시보드의 문맥을 잃게 만들고 추가적인 DOM 레이어 관리 오버헤드를 발생시킵니다.
+   - 따라서 카드/리스트 행 내부의 텍스트 노드를 편집 상태에 따라 입력 폼(`input`, `textarea`)으로 전환하는 인라인 편집 방식을 채택하여 최소한의 코드로 최대의 사용 편의성을 확보했습니다.
+2. **뷰 모드별 최적화된 레이아웃 설계**:
+   - **카드 뷰(Card View)**: 카드 상단 헤더의 제목이 가로 전체 너비의 `<input class="bm-inline-input">`으로 바뀌고, 요약 영역이 3줄 높이의 멀티라인 `<textarea class="bm-inline-textarea">`로 전환되어 카드의 그리드 형태를 유지하면서 수정 가능.
+   - **리스트 뷰(List View)**: 기본 높이(48px)의 단일행이 편집 모드 진입 시 세로 2단(`list-row is-editing`, 자동 높이)으로 확장되어, 첫째 줄에 파비콘, 제목 `<input>`, 단축키 힌트, [저장]/[취소] 버튼이 위치하고, 둘째 줄에 멀티라인 요약 `<textarea>`가 배치되어 긴 요약문도 시각적 잘림 없이 편안하게 편집 가능.
+3. **이벤트 버블링 차단 및 안전 제어**:
+   - 북마크 카드 및 리스트 행은 기본적으로 클릭 시 해당 URL로 웹페이지를 이동(`openBookmarkUrl`)하도록 이벤트가 바인딩되어 있습니다.
+   - 편집 모드(`is-editing`)에서는 카드 및 행의 `onclick` 핸들러에서 `event.stopPropagation()`을 호출하여 입력창 포커스나 텍스트 드래그 시 원치 않는 페이지 이동이 발생하는 문제를 원천 방지했습니다.
+4. **데이터 무결성 및 양방향 동기화 파이프라인**:
+   - 프론트엔드(`manager.js`)에서 `saveBookmarksV2()` 호출 시 기존 폴더 구조(`managerFolders`)를 보존하여 디스크에 저장하도록 보강.
+   - 백엔드(`simple_handler.c`)의 `save-bookmarks?` 액션 핸들러에서 `bookmarks.json` 파일 갱신 즉시 상단 메인 UI 브라우저(`ui_browser`)의 `loadBookmarksDataB64` 함수를 호출하여, 브라우저 재시작 없이도 주소창 옴니박스 추천 리스트에 변경된 북마크 제목과 요약이 즉시 반영되도록 구현.
+
+### 55.3 주요 구현 내역
+1. **프론트엔드 인라인 편집 상태 관리 및 핸들러 ([`ui/manager.js`](file:///c:/projects/lite_browser/ui/manager.js))**:
+   - `editingBookmarkId`: 현재 편집 중인 북마크 ID를 추적하여 한 번에 하나의 북마크만 집중 편집하도록 제어.
+   - `escapeHtml`: 북마크 제목 및 요약 내 특수문자(`"`, `<`, `>`, `&`)로 인한 HTML 어트리뷰트 파싱 오류 방어.
+   - `startEditBookmark(id, event)`: 편집 모드 활성화 후 `requestAnimationFrame`을 통해 제목 입력창으로 자동 포커스 및 텍스트 전체 선택(`select()`) 수행.
+   - `cancelEditBookmark(event)`: 편집을 취소하고 기존 원본 텍스트 뷰로 복귀.
+   - `saveEditBookmark(id, event)`: 공백 제외 유효성 검사 후 `bm.title` 및 `bm.textSnippet` 업데이트, `saveBookmarksV2()` 호출로 디스크 영구 저장 및 대시보드 리렌더링.
+   - `handleInlineEditKeydown(e, id)`: 키보드 인터랙션 지원 (`Escape` 취소, `Ctrl+Enter` 또는 제목에서 `Enter` 시 즉시 저장, 요약창 일반 `Enter` 시 줄바꿈 허용).
+2. **다크/라이트 테마 인라인 편집 스타일링 ([`ui/manager.css`](file:///c:/projects/lite_browser/ui/manager.css))**:
+   - `.bm-inline-input`, `.bm-inline-textarea`: Bento 테마 변수(`var(--bg-app)`, `var(--border-medium)`, `var(--accent-focus-ring)`)를 활용하여 다크/라이트 모드에서 선명하고 일체감 있는 입력 필드 UI 제공.
+   - `.list-row.is-editing`, `.list-row-edit-top`, `.list-row-edit-bottom`: 리스트 뷰에서 세로 확장 시 자연스러운 2단 플렉스 레이아웃 구성.
+   - `.card-action-btn.btn-edit`: Lucide 연필 SVG 아이콘 및 호버 피드백 적용.
+   - `.card-action-btn.btn-save`, `.card-action-btn.btn-cancel`: 저장(그린) 및 취소(레드) 액션 버튼 컬러 및 호버 시각 피드백 추가.
+3. **C 백엔드 디스크 저장 및 주소창 실시간 동기화 ([`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c))**:
+   - `save-bookmarks?` 요청 인입 시 디스크 저장 완료 후 `win_ctx->ui_browser`의 메인 프레임을 획득하여 `loadBookmarksDataB64` 자바스크립트를 비동기 실행.
+   - 북마크 관리자 대시보드에서 편집 완료 즉시 상단 옴니박스 자동완성 데이터셋이 실시간 동기화됨.
+
+### 55.4 관련 소스 코드
+- [`ui/manager.js`](file:///c:/projects/lite_browser/ui/manager.js)
+- [`ui/manager.css`](file:///c:/projects/lite_browser/ui/manager.css)
+- [`cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c)
+
+### 55.5 빌드 및 검증 결과
+- **디버그 빌드**: `cmake --build cef_binary_151.3.24/build --config Debug --target cefsimple_capi` 성공 (`Exit code 0, 경고 0개, 오류 0개`).
+- **바이너리 생성**: `cef_binary_151.3.24\build\tests\cefsimple_capi\Debug\lite_browser.exe` 및 `lite_browser.dll` 정상 갱신.
+- **기능 및 사용성 검증**:
+  1. `lite://favorites` 대시보드에서 카드 뷰 및 리스트 뷰의 각 북마크 ✏️(수정) 버튼 클릭 시 제자리에서 입력 필드로 부드럽게 전환 확인.
+  2. 제목 및 요약 수정 후 `Ctrl+Enter` 또는 [저장] 버튼 클릭 시 변경 사항이 즉시 화면에 반영되고 `bookmarks.json`에 영구 보존됨 확인.
+  3. `Escape` 또는 [취소] 버튼 클릭 시 기존 데이터가 안전하게 복원됨 확인.
+  4. 수정 후 상단 주소창 옴니박스 검색 시에도 변경된 제목 및 요약으로 즉각 검색 및 추천 노출됨 사용자 최종 검증 완료.
+
+
 
 
 
