@@ -35,6 +35,8 @@ set(CEFSIMPLE_CAPI_SRCS
   simple_optimization.h
   simple_dialog_helper.c
   simple_dialog_helper.h
+  simple_ai_proxy.c
+  simple_ai_proxy.h
   )
 set(CEFSIMPLE_CAPI_SRCS_LINUX
   cefsimple_linux.c
@@ -300,7 +302,7 @@ if(OS_WINDOWS)
   endif()
 
   add_dependencies(${CEF_TARGET} libcef_dll_wrapper)
-  target_link_libraries(${CEF_TARGET} libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS} crypt32.lib)
+  target_link_libraries(${CEF_TARGET} libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS} crypt32.lib winhttp.lib)
 
   # Enable C11 atomics support (required for stdatomic.h in MSVC).
   # Must use set_property instead of CEF_C_COMPILER_FLAGS because the Visual Studio

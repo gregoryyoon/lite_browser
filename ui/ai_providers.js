@@ -84,6 +84,110 @@ async function fetchWithBackoff(url, fetchOptions, providerName = 'AI', onStatus
   }
 }
 
+// Universal AI Proxy Stream Runner via native C WinHTTP (Bypasses browser CORS & handles SSE)
+function runAIProxyStream({ url, headers = {}, body, signal, onRawLine, onStatus, onComplete, onError }) {
+  return new Promise((resolve, reject) => {
+    const reqId = 'req_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
+    let sseBuffer = '';
+    let isFinished = false;
+    const decoder = new TextDecoder('utf-8', { stream: true });
+
+    const cleanup = () => {
+      isFinished = true;
+      if (window._aiProxyCallbacks && window._aiProxyCallbacks[reqId]) {
+        delete window._aiProxyCallbacks[reqId];
+      }
+      if (signal) {
+        signal.removeEventListener('abort', onAbort);
+      }
+    };
+
+    const onAbort = () => {
+      if (isFinished) return;
+      window.location.href = `http://ui-action/ai-proxy-cancel?req_id=${encodeURIComponent(reqId)}`;
+      cleanup();
+      const abortErr = new DOMException('Aborted by user', 'AbortError');
+      if (onError) onError(abortErr);
+      reject(abortErr);
+    };
+
+    if (signal?.aborted) return onAbort();
+    if (signal) signal.addEventListener('abort', onAbort, { once: true });
+
+    if (!window._aiProxyCallbacks) {
+      window._aiProxyCallbacks = {};
+      window.onAIProxyChunk = (id, b64Chunk) => {
+        const handler = window._aiProxyCallbacks[id];
+        if (handler && handler.handleChunk) handler.handleChunk(b64Chunk);
+      };
+      window.onAIProxyDone = (id) => {
+        const handler = window._aiProxyCallbacks[id];
+        if (handler && handler.handleDone) handler.handleDone();
+      };
+      window.onAIProxyError = (id, status, b64Err) => {
+        const handler = window._aiProxyCallbacks[id];
+        if (handler && handler.handleError) handler.handleError(status, b64Err);
+      };
+    }
+
+    window._aiProxyCallbacks[reqId] = {
+      handleChunk: (b64Chunk) => {
+        if (isFinished) return;
+        try {
+          const rawBytes = Uint8Array.from(atob(b64Chunk), c => c.charCodeAt(0));
+          const textChunk = decoder.decode(rawBytes, { stream: true });
+          sseBuffer += textChunk;
+          const lines = sseBuffer.split('\n');
+          sseBuffer = lines.pop(); // keep partial line
+          for (const line of lines) {
+            if (onRawLine) onRawLine(line);
+          }
+        } catch (e) {
+          console.warn('AI Proxy Chunk Decode Warning:', e);
+        }
+      },
+      handleDone: () => {
+        if (isFinished) return;
+        const remainder = decoder.decode();
+        if (remainder) sseBuffer += remainder;
+        if (sseBuffer.trim() && onRawLine) {
+          onRawLine(sseBuffer.trim());
+        }
+        cleanup();
+        if (onComplete) onComplete();
+        resolve();
+      },
+      handleError: (status, b64Err) => {
+        if (isFinished) return;
+        cleanup();
+        let errMsg = `HTTP ${status}`;
+        try {
+          const rawBytes = Uint8Array.from(atob(b64Err), c => c.charCodeAt(0));
+          errMsg = new TextDecoder('utf-8').decode(rawBytes);
+        } catch(e) {}
+        const err = new Error(`AI 프록시 통신 오류 (${status}): ${errMsg}`);
+        if (onError) onError(err);
+        reject(err);
+      }
+    };
+
+    // Serialize headers into CRLF string
+    let headersStr = '';
+    for (const [k, v] of Object.entries(headers)) {
+      if (v !== undefined && v !== null) {
+        headersStr += `${k}: ${v}\r\n`;
+      }
+    }
+
+    const bodyStr = typeof body === 'string' ? body : JSON.stringify(body);
+    const urlB64 = btoa(unescape(encodeURIComponent(url)));
+    const headersB64 = btoa(unescape(encodeURIComponent(headersStr)));
+    const bodyB64 = btoa(unescape(encodeURIComponent(bodyStr)));
+
+    window.location.href = `http://ui-action/ai-proxy-stream-start?req_id=${encodeURIComponent(reqId)}&url_b64=${encodeURIComponent(urlB64)}&headers_b64=${encodeURIComponent(headersB64)}&body_b64=${encodeURIComponent(bodyB64)}`;
+  });
+}
+
 // 1. Google Gemini Provider
 class GeminiProvider extends AIProviderInterface {
   constructor(config = {}) {
@@ -217,6 +321,59 @@ class GeminiProvider extends AIProviderInterface {
         body.tools = geminiTools;
       }
 
+      let fullText = '';
+      let accumulatedThinking = '';
+
+      const processLine = (line) => {
+        const trimmed = line.trim();
+        if (!trimmed || !trimmed.startsWith('data: ')) return;
+        const jsonStr = trimmed.substring(6).trim();
+        if (jsonStr === '[DONE]') return;
+
+        try {
+          const data = JSON.parse(jsonStr);
+          const candidates = data.candidates || [];
+          if (candidates.length > 0) {
+            const parts = candidates[0].content?.parts || [];
+            for (const part of parts) {
+              if (part.thought && onThinking) {
+                accumulatedThinking += part.thought;
+                onThinking(part.thought, accumulatedThinking);
+              }
+              if (part.text && onChunk) {
+                fullText += part.text;
+                onChunk(part.text, fullText);
+              }
+              if (part.functionCall && onToolCall) {
+                onToolCall({
+                  name: part.functionCall.name,
+                  args: part.functionCall.args || {},
+                  thought_signature: part.thought_signature || part.thoughtSignature || (part.functionCall ? (part.functionCall.thought_signature || part.functionCall.thoughtSignature) : null) || null
+                });
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('Gemini stream parse warning:', e);
+        }
+      };
+
+      if (this.authType === 'subscription') {
+        await runAIProxyStream({
+          url,
+          headers,
+          body,
+          signal,
+          onRawLine: processLine,
+          onStatus,
+          onComplete: () => {
+            if (onComplete) onComplete({ fullText, accumulatedThinking });
+          },
+          onError
+        });
+        return;
+      }
+
       const response = await fetchWithBackoff(url, {
         method: 'POST',
         headers: headers,
@@ -227,8 +384,6 @@ class GeminiProvider extends AIProviderInterface {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
-      let fullText = '';
-      let accumulatedThinking = '';
 
       while (true) {
         const { done, value } = await reader.read();
@@ -239,37 +394,7 @@ class GeminiProvider extends AIProviderInterface {
         buffer = lines.pop(); // keep partial line
 
         for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed || !trimmed.startsWith('data: ')) continue;
-          const jsonStr = trimmed.substring(6).trim();
-          if (jsonStr === '[DONE]') continue;
-
-          try {
-            const data = JSON.parse(jsonStr);
-            const candidates = data.candidates || [];
-            if (candidates.length > 0) {
-              const parts = candidates[0].content?.parts || [];
-              for (const part of parts) {
-                if (part.thought && onThinking) {
-                  accumulatedThinking += part.thought;
-                  onThinking(part.thought, accumulatedThinking);
-                }
-                if (part.text && onChunk) {
-                  fullText += part.text;
-                  onChunk(part.text, fullText);
-                }
-                if (part.functionCall && onToolCall) {
-                  onToolCall({
-                    name: part.functionCall.name,
-                    args: part.functionCall.args || {},
-                    thought_signature: part.thought_signature || part.thoughtSignature || (part.functionCall ? (part.functionCall.thought_signature || part.functionCall.thoughtSignature) : null) || null
-                  });
-                }
-              }
-            }
-          } catch (e) {
-            console.warn('Gemini stream parse warning:', e);
-          }
+          processLine(line);
         }
       }
 
@@ -399,6 +524,153 @@ class OpenAIProvider extends AIProviderInterface {
         };
       }
 
+      let fullText = '';
+      let accumulatedThinking = '';
+      const toolCallsMap = {};
+
+      const processLine = (line) => {
+        const trimmed = line.trim();
+        if (!trimmed || !trimmed.startsWith('data: ')) return;
+        const jsonStr = trimmed.substring(6).trim();
+        if (jsonStr === '[DONE]') return;
+
+        try {
+          const data = JSON.parse(jsonStr);
+
+          // 1. Standard OpenAI Chat Completions SSE format
+          const delta = data.choices?.[0]?.delta;
+          if (delta) {
+            if (delta.content && onChunk) {
+              fullText += delta.content;
+              onChunk(delta.content, fullText);
+            }
+            if (delta.tool_calls) {
+              for (const tc of delta.tool_calls) {
+                const idx = tc.index ?? 0;
+                if (!toolCallsMap[idx]) {
+                  toolCallsMap[idx] = { id: tc.id || '', name: tc.function?.name || '', argsStr: '' };
+                }
+                if (tc.id) toolCallsMap[idx].id = tc.id;
+                if (tc.function?.name) toolCallsMap[idx].name = tc.function.name;
+                if (tc.function?.arguments) toolCallsMap[idx].argsStr += tc.function.arguments;
+              }
+            }
+          }
+
+          // 2. OpenAI Codex Responses API SSE format
+          const eventType = data.type || '';
+
+          // Output text chunks (support all Responses API event variations)
+          if (
+            eventType === 'response.output_text.delta' ||
+            eventType === 'response.text.delta' ||
+            eventType === 'response.output_item.delta' ||
+            eventType === 'response.content_part.delta'
+          ) {
+            const text = data.delta?.text || data.delta?.value || (typeof data.delta === 'string' ? data.delta : '') || data.text || '';
+            if (text) {
+              fullText += text;
+              if (onChunk) onChunk(text, fullText);
+            }
+          }
+
+          // Reasoning / thinking chunks
+          if (
+            eventType === 'response.reasoning_text.delta' ||
+            eventType === 'response.reasoning.delta' ||
+            eventType === 'response.thought.delta'
+          ) {
+            const thought = data.delta?.text || (typeof data.delta === 'string' ? data.delta : '') || data.text || '';
+            if (thought) {
+              accumulatedThinking += thought;
+              if (onThinking) onThinking(thought, accumulatedThinking);
+            }
+          }
+
+          // Function call item added
+          if (eventType === 'response.output_item.added' && (data.item?.type === 'function_call' || data.item?.type === 'custom_tool_call')) {
+            const callId = data.item.call_id || data.item.id || ('call_' + Object.keys(toolCallsMap).length);
+            toolCallsMap[callId] = {
+              id: data.item.call_id || callId,
+              name: data.item.name || '',
+              argsStr: data.item.arguments || ''
+            };
+          }
+
+          // Function call arguments delta
+          if (eventType === 'response.function_call_arguments.delta') {
+            const keys = Object.keys(toolCallsMap);
+            const targetKey = data.call_id || data.item_id || keys[keys.length - 1];
+            if (targetKey && toolCallsMap[targetKey]) {
+              toolCallsMap[targetKey].argsStr += (data.delta || data.arguments || '');
+            }
+          }
+
+          // Function call item completed
+          if (eventType === 'response.output_item.done' && data.item?.type === 'function_call') {
+            const callId = data.item.call_id || data.item.id;
+            if (callId && toolCallsMap[callId] && data.item.arguments) {
+              toolCallsMap[callId].argsStr = data.item.arguments;
+            }
+          }
+
+          // Response completed (full response fallback if deltas were somehow missed)
+          if ((eventType === 'response.completed' || eventType === 'response.done') && data.response?.output) {
+            for (const item of data.response.output) {
+              if (item.type === 'message' && Array.isArray(item.content)) {
+                for (const part of item.content) {
+                  const partText = part.text || part.output_text || (typeof part === 'string' ? part : '');
+                  if (partText && !fullText) {
+                    fullText = partText;
+                    if (onChunk) onChunk(partText, fullText);
+                  }
+                }
+              } else if (item.type === 'function_call') {
+                const callId = item.call_id || item.id || ('call_' + Object.keys(toolCallsMap).length);
+                if (!toolCallsMap[callId]) {
+                  toolCallsMap[callId] = {
+                    id: item.call_id || callId,
+                    name: item.name || '',
+                    argsStr: item.arguments || ''
+                  };
+                }
+              }
+            }
+          }
+        } catch (e) {}
+      };
+
+      const dispatchToolCalls = () => {
+        for (const idx in toolCallsMap) {
+          const tc = toolCallsMap[idx];
+          if (tc.name && onToolCall) {
+            try {
+              const args = JSON.parse(tc.argsStr || '{}');
+              onToolCall({ id: tc.id, name: tc.name, args });
+            } catch (e) {
+              onToolCall({ id: tc.id, name: tc.name, args: {} });
+            }
+          }
+        }
+      };
+
+      if (this.authType === 'subscription') {
+        await runAIProxyStream({
+          url,
+          headers,
+          body,
+          signal,
+          onRawLine: processLine,
+          onStatus,
+          onComplete: () => {
+            dispatchToolCalls();
+            if (onComplete) onComplete({ fullText, accumulatedThinking });
+          },
+          onError
+        });
+        return;
+      }
+
       const response = await fetchWithBackoff(url, {
         method: 'POST',
         headers: headers,
@@ -409,9 +681,6 @@ class OpenAIProvider extends AIProviderInterface {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
-      let fullText = '';
-      let accumulatedThinking = '';
-      const toolCallsMap = {};
 
       while (true) {
         const { done, value } = await reader.read();
@@ -422,130 +691,11 @@ class OpenAIProvider extends AIProviderInterface {
         buffer = lines.pop();
 
         for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed || !trimmed.startsWith('data: ')) continue;
-          const jsonStr = trimmed.substring(6).trim();
-          if (jsonStr === '[DONE]') continue;
-
-          try {
-            const data = JSON.parse(jsonStr);
-
-            // 1. Standard OpenAI Chat Completions SSE format
-            const delta = data.choices?.[0]?.delta;
-            if (delta) {
-              if (delta.content && onChunk) {
-                fullText += delta.content;
-                onChunk(delta.content, fullText);
-              }
-              if (delta.tool_calls) {
-                for (const tc of delta.tool_calls) {
-                  const idx = tc.index ?? 0;
-                  if (!toolCallsMap[idx]) {
-                    toolCallsMap[idx] = { id: tc.id || '', name: tc.function?.name || '', argsStr: '' };
-                  }
-                  if (tc.id) toolCallsMap[idx].id = tc.id;
-                  if (tc.function?.name) toolCallsMap[idx].name = tc.function.name;
-                  if (tc.function?.arguments) toolCallsMap[idx].argsStr += tc.function.arguments;
-                }
-              }
-            }
-
-            // 2. OpenAI Codex Responses API SSE format
-            const eventType = data.type || '';
-
-            // Output text chunks (support all Responses API event variations)
-            if (
-              eventType === 'response.output_text.delta' ||
-              eventType === 'response.text.delta' ||
-              eventType === 'response.output_item.delta' ||
-              eventType === 'response.content_part.delta'
-            ) {
-              const text = data.delta?.text || data.delta?.value || (typeof data.delta === 'string' ? data.delta : '') || data.text || '';
-              if (text) {
-                fullText += text;
-                if (onChunk) onChunk(text, fullText);
-              }
-            }
-
-            // Reasoning / thinking chunks
-            if (
-              eventType === 'response.reasoning_text.delta' ||
-              eventType === 'response.reasoning.delta' ||
-              eventType === 'response.thought.delta'
-            ) {
-              const thought = data.delta?.text || (typeof data.delta === 'string' ? data.delta : '') || data.text || '';
-              if (thought) {
-                accumulatedThinking += thought;
-                if (onThinking) onThinking(thought, accumulatedThinking);
-              }
-            }
-
-            // Function call item added
-            if (eventType === 'response.output_item.added' && (data.item?.type === 'function_call' || data.item?.type === 'custom_tool_call')) {
-              const callId = data.item.call_id || data.item.id || ('call_' + Object.keys(toolCallsMap).length);
-              toolCallsMap[callId] = {
-                id: data.item.call_id || callId,
-                name: data.item.name || '',
-                argsStr: data.item.arguments || ''
-              };
-            }
-
-            // Function call arguments delta
-            if (eventType === 'response.function_call_arguments.delta') {
-              const keys = Object.keys(toolCallsMap);
-              const targetKey = data.call_id || data.item_id || keys[keys.length - 1];
-              if (targetKey && toolCallsMap[targetKey]) {
-                toolCallsMap[targetKey].argsStr += (data.delta || data.arguments || '');
-              }
-            }
-
-            // Function call item completed
-            if (eventType === 'response.output_item.done' && data.item?.type === 'function_call') {
-              const callId = data.item.call_id || data.item.id;
-              if (callId && toolCallsMap[callId] && data.item.arguments) {
-                toolCallsMap[callId].argsStr = data.item.arguments;
-              }
-            }
-
-            // Response completed (full response fallback if deltas were somehow missed)
-            if ((eventType === 'response.completed' || eventType === 'response.done') && data.response?.output) {
-              for (const item of data.response.output) {
-                if (item.type === 'message' && Array.isArray(item.content)) {
-                  for (const part of item.content) {
-                    const partText = part.text || part.output_text || (typeof part === 'string' ? part : '');
-                    if (partText && !fullText) {
-                      fullText = partText;
-                      if (onChunk) onChunk(partText, fullText);
-                    }
-                  }
-                } else if (item.type === 'function_call') {
-                  const callId = item.call_id || item.id || ('call_' + Object.keys(toolCallsMap).length);
-                  if (!toolCallsMap[callId]) {
-                    toolCallsMap[callId] = {
-                      id: item.call_id || callId,
-                      name: item.name || '',
-                      argsStr: item.arguments || ''
-                    };
-                  }
-                }
-              }
-            }
-          } catch (e) {}
+          processLine(line);
         }
       }
 
-      for (const idx in toolCallsMap) {
-        const tc = toolCallsMap[idx];
-        if (tc.name && onToolCall) {
-          try {
-            const args = JSON.parse(tc.argsStr || '{}');
-            onToolCall({ id: tc.id, name: tc.name, args });
-          } catch (e) {
-            onToolCall({ id: tc.id, name: tc.name, args: {} });
-          }
-        }
-      }
-
+      dispatchToolCalls();
       if (onComplete) onComplete({ fullText, accumulatedThinking });
     } catch (err) {
       if (err.name === 'AbortError') {
@@ -639,6 +789,62 @@ class AnthropicProvider extends AIProviderInterface {
         stream: true
       };
 
+      let fullText = '';
+      let thinkingText = '';
+      let currentTool = null;
+
+      const processLine = (line) => {
+        const trimmed = line.trim();
+        if (!trimmed || !trimmed.startsWith('data: ')) return;
+        const jsonStr = trimmed.substring(6).trim();
+
+        try {
+          const event = JSON.parse(jsonStr);
+          if (event.type === 'content_block_start') {
+            if (event.content_block?.type === 'tool_use') {
+              currentTool = { id: event.content_block.id || 'tool_call_1', name: event.content_block.name, jsonStr: '' };
+            }
+          } else if (event.type === 'content_block_delta') {
+            const delta = event.delta;
+            if (delta.type === 'text_delta' && delta.text && onChunk) {
+              fullText += delta.text;
+              onChunk(delta.text, fullText);
+            } else if (delta.type === 'thinking_delta' && delta.thinking && onThinking) {
+              thinkingText += delta.thinking;
+              onThinking(delta.thinking, thinkingText);
+            } else if (delta.type === 'input_json_delta' && currentTool) {
+              currentTool.jsonStr += delta.partial_json;
+            }
+          } else if (event.type === 'content_block_stop') {
+            if (currentTool && onToolCall) {
+              try {
+                const args = JSON.parse(currentTool.jsonStr || '{}');
+                onToolCall({ id: currentTool.id, name: currentTool.name, args });
+              } catch (e) {
+                onToolCall({ id: currentTool.id, name: currentTool.name, args: {} });
+              }
+              currentTool = null;
+            }
+          }
+        } catch (e) {}
+      };
+
+      if (this.authType === 'subscription') {
+        await runAIProxyStream({
+          url,
+          headers,
+          body,
+          signal,
+          onRawLine: processLine,
+          onStatus,
+          onComplete: () => {
+            if (onComplete) onComplete({ fullText, thinkingText });
+          },
+          onError
+        });
+        return;
+      }
+
       const response = await fetchWithBackoff(url, {
         method: 'POST',
         headers: headers,
@@ -649,9 +855,6 @@ class AnthropicProvider extends AIProviderInterface {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
-      let fullText = '';
-      let thinkingText = '';
-      let currentTool = null;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -662,39 +865,7 @@ class AnthropicProvider extends AIProviderInterface {
         buffer = lines.pop();
 
         for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed || !trimmed.startsWith('data: ')) continue;
-          const jsonStr = trimmed.substring(6).trim();
-
-          try {
-            const event = JSON.parse(jsonStr);
-            if (event.type === 'content_block_start') {
-              if (event.content_block?.type === 'tool_use') {
-                currentTool = { id: event.content_block.id || 'tool_call_1', name: event.content_block.name, jsonStr: '' };
-              }
-            } else if (event.type === 'content_block_delta') {
-              const delta = event.delta;
-              if (delta.type === 'text_delta' && delta.text && onChunk) {
-                fullText += delta.text;
-                onChunk(delta.text, fullText);
-              } else if (delta.type === 'thinking_delta' && delta.thinking && onThinking) {
-                thinkingText += delta.thinking;
-                onThinking(delta.thinking, thinkingText);
-              } else if (delta.type === 'input_json_delta' && currentTool) {
-                currentTool.jsonStr += delta.partial_json;
-              }
-            } else if (event.type === 'content_block_stop') {
-              if (currentTool && onToolCall) {
-                try {
-                  const args = JSON.parse(currentTool.jsonStr || '{}');
-                  onToolCall({ id: currentTool.id, name: currentTool.name, args });
-                } catch (e) {
-                  onToolCall({ id: currentTool.id, name: currentTool.name, args: {} });
-                }
-                currentTool = null;
-              }
-            }
-          } catch (e) {}
+          processLine(line);
         }
       }
 

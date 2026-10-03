@@ -1964,15 +1964,64 @@ CodePen(`https://codepen.io/`) 등 Cloudflare 봇 감지 및 Turnstile 보호가
   3. `Escape` 또는 [취소] 버튼 클릭 시 기존 데이터가 안전하게 복원됨 확인.
   4. 수정 후 상단 주소창 옴니박스 검색 시에도 변경된 제목 및 요약으로 즉각 검색 및 추천 노출됨 사용자 최종 검증 완료.
 
+---
 
+## 56. 범용 C WinHTTP 네이티브 AI 스트리밍 프록시 시스템 (Universal C WinHTTP AI Streaming Proxy System)
 
+### 56.1 개요
+LiteBrowser의 AI 사이드패널에서 유료 ChatGPT 구독(Plus/Team/Pro) 계정의 OAuth 2.0 PKCE 토큰을 연동한 후 "현재 페이지 요약해줘" 등의 프롬프트를 전송할 때, 브라우저 콘솔 및 화면에 `"오류가 발생했습니다: Failed to fetch"` 에러가 발생하며 통신이 중단되는 문제가 발생했습니다.
+정밀 네트워크 패킷 및 CORS 핸드셰이크 분석 결과, Cloudflare가 `chatgpt.com`의 WAF 보안 정책을 강화하여 로컬 파일 시스템(`file:///`) 환경에서 브라우저가 전송하는 `Origin: null` 사전 검사(`OPTIONS` Preflight) 요청에 대해 `400 Bad Request (Disallowed CORS origin)` 응답을 반환하고 차단하고 있었습니다.
+브라우저 표준 상 자바스크립트의 `fetch()`는 보안상 금지된 헤더(`Forbidden header name`)인 `Origin` 헤더를 임의로 변조할 수 없으며, 전역 웹 보안을 해제(`--disable-web-security`)하는 것은 Cloudflare Turnstile 봇 탐지 무한 루프 실패 등 치명적인 부작용을 초래합니다.
+이를 근본적으로 해결하기 위해, 브라우저의 Blink CORS 샌드박스를 우회하여 데스크톱 C 네이티브 네트워크 스택인 **WinHTTP (`winhttp.dll`)**를 기반으로 비동기 멀티스레드 AI 스트리밍 프록시 모듈(`simple_ai_proxy.c`, `simple_ai_proxy.h`)을 구축했습니다.
+이를 통해 ChatGPT뿐만 아니라 Claude, Gemini 등 모든 주요 LLM 제공자의 구독 기반 엔드포인트와 CORS 제약 없이 직접 HTTPS SSE 통신을 수행할 수 있는 범용 고성능 스트리밍 파이프라인을 완성했습니다.
 
+### 56.2 문제 원인 정밀 분석
+1. **Cloudflare WAF의 `Origin: null` 차단 정책 강화**:
+   - LiteBrowser의 UI는 로컬 파일(`file:///`) 환경에서 동작하며, Chromium 표준 사양에 따라 로컬 출처에서 발생하는 교차 출처(Cross-Origin) `fetch` 호출 시 `Origin: null` 헤더가 자동 부여됩니다.
+   - OpenAI의 백엔드(`https://chatgpt.com/backend-api/codex/responses`) 앞단에 배치된 Cloudflare 엣지 프록시는 최근 WAF 규칙을 개정하여 Preflight `OPTIONS` 요청에 담긴 `Origin: null`을 비인가 교차 출처로 판정하고 `HTTP 400 Bad Request (Disallowed CORS origin)`을 반환하여 요청 자체를 전면 거부했습니다.
+2. **브라우저 Fetch API의 표준 보안 제약**:
+   - WHATWG Fetch 사양에 따라 `Origin`, `User-Agent`, `Referer` 등은 브라우저 렌더러가 엄격히 제어하는 금지된 헤더(`Forbidden header name`)로 지정되어 있어, 웹 프론트엔드 자바스크립트 코드에서 임의로 수정하거나 제거할 수 없습니다.
+3. **전역 웹 보안 해제(`--disable-web-security`) 사용 불가**:
+   - 53번 항목에서 확인된 바와 같이, `--disable-web-security` 스위치를 적용하면 Cloudflare Turnstile이 환경 무결성 결함을 탐지하여 사용자를 봇으로 판정하고 무한 검증 루프에 빠뜨립니다. 따라서 일반 브라우징의 웹 보안 정책을 100% 정상 유지하면서도 AI 구독 통신만 안전하게 수행할 수 있는 네이티브 솔루션이 필수적이었습니다.
 
+### 56.3 아키텍처 및 주요 구현 내역
+1. **마이크로 모듈형 비동기 WinHTTP 스트리밍 엔진 ([`simple_ai_proxy.h`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_ai_proxy.h), [`simple_ai_proxy.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_ai_proxy.c))**:
+   - **데스크톱 순정 WinHTTP 스택 채택**: Windows OS가 제공하는 네이티브 HTTP 클라이언트 라이브러리(`winhttp.lib`)를 활용하여 브라우저의 렌더러 CORS 샌드박스와 완전히 분리된 데스크톱 프로세스 레벨의 직접 통신망 구축.
+   - **백그라운드 워커 스레드 풀 (`CreateThread`)**: 메인 UI 스레드 및 CEF 메시지 루프를 블로킹하지 않도록 각 스트리밍 요청마다 독립된 비동기 워커 스레드를 할당하여 HTTPS 핸드셰이크, 요청 헤더/바디 송신, 실시간 응답 버퍼 수신을 처리.
+   - **Base64 전송 브리지 (Data Integrity & Quote-Escaping Immunity)**:
+     - WinHTTP가 수신한 가변 크기의 바이너리/UTF-8 스트림 청크(SSE 데이터)를 CEF C API의 `frame->execute_java_script`로 전달할 때, 따옴표(`"`, `'`), 개행 문자(`\n`, `\r`), JSON 이스케이프 또는 다중 바이트 분할로 인한 스크립트 실행 구문 에러를 원천 차단하기 위해 `CryptBinaryToStringA(CRYPT_STRING_BASE64)`를 통해 Base64로 인코딩하여 전송.
+     - 프론트엔드는 수신된 Base64 데이터를 `Uint8Array.from(atob(b64))` 및 `TextDecoder({ stream: true })`로 역직렬화하여 단 1바이트의 유실 없이 SSE 텍스트 스트림을 완벽 복원.
+   - **원자적 스트림 취소 및 자원 생명주기 관리**:
+     - `ai_proxy_cancel(req_id)` 함수를 지원하여 사용자가 답변 생성 중단(Stop) 버튼을 누르면 해당 요청의 `cancelled` 원자적 플래그를 세팅하고 즉시 HTTP 소켓을 종료.
+     - `ai_proxy_shutdown()`을 통해 브라우저 종료 시 실행 중인 모든 작업 스레드와 WinHTTP 세션/커넥션 핸들을 안전하게 일괄 회수(Graceful Shutdown).
+2. **C CAPI 빌드 및 IPC 라우팅 파이프라인 ([`CMakeLists.txt`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/CMakeLists.txt), [`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c), [`cefsimple_win.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/cefsimple_win.c))**:
+   - `CMakeLists.txt`: 빌드 타깃 `CEFSIMPLE_CAPI_SRCS`에 `simple_ai_proxy.c`, `simple_ai_proxy.h`를 추가하고 Windows `winhttp.lib` 링크 등록.
+   - `simple_handler.c`의 `on_before_browse`:
+     - `http://ui-action/ai-proxy-stream-start?req_id=...&url=...` IPC 가로채기: 쿼리 스트링에서 대상 URL, 메서드, 헤더 및 POST 바디를 추출하여 `ai_proxy_start_stream` 비동기 워커로 즉각 디스패치.
+     - `http://ui-action/ai-proxy-cancel?req_id=...` IPC 가로채기: 해당 요청 ID의 스트림을 즉시 취소.
+   - `cefsimple_win.c`: 애플리케이션 종료(`WM_DESTROY` / `CefQuitMessageLoop`) 루틴에 `ai_proxy_shutdown()`을 등록하여 메모리 누수 방지.
+3. **프론트엔드 유니버설 AI 스트리밍 어댑터 ([`ui/ai_providers.js`](file:///c:/projects/lite_browser/ui/ai_providers.js))**:
+   - **`runAIProxyStream(url, headers, body, onChunk, signal)` 공통 비동기 제너레이터 구현**:
+     - 고유 요청 ID(`req_id`)를 발급하고 `window.onAIProxyChunk`, `window.onAIProxyComplete`, `window.onAIProxyError` 글로벌 콜백을 바인딩.
+     - 사용자 중단(`AbortSignal`) 이벤트 발생 시 `http://ui-action/ai-proxy-cancel?req_id=...`를 즉시 전송.
+     - Base64 디코딩과 SSE 줄 단위 버퍼링 파서를 결합하여 JSON 이벤트 블록(`data: {"type": ...}`)을 실시간 분해하고 청크 텍스트를 호출자에게 yield.
+   - **3대 AI 제공자 구독 모드(Subscription Mode) 통합 라우팅**:
+     - **OpenAI (ChatGPT Plus/Team)**: `OpenAIProvider.prototype.chatStream`의 구독 모드에서 `runAIProxyStream`을 호출하여 `https://chatgpt.com/backend-api/codex/responses` 엔드포인트로 안전하게 질의 전송.
+     - **Anthropic (Claude Pro/Team)** & **Google Gemini (Gemini Advanced)**: 동일한 `runAIProxyStream` 파이프라인 구조를 공유하여 향후 구독 토큰 기반 직접 통신 시 CORS 제한 없이 즉시 활용 가능하도록 확장성 확보.
 
+### 56.4 관련 소스 코드
+- [`cef_binary_151.3.24/tests/cefsimple_capi/CMakeLists.txt`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/CMakeLists.txt)
+- [`cef_binary_151.3.24/tests/cefsimple_capi/cefsimple_win.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/cefsimple_win.c)
+- [`cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_handler.c)
+- [`cef_binary_151.3.24/tests/cefsimple_capi/simple_ai_proxy.h`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_ai_proxy.h)
+- [`cef_binary_151.3.24/tests/cefsimple_capi/simple_ai_proxy.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_ai_proxy.c)
+- [`ui/ai_providers.js`](file:///c:/projects/lite_browser/ui/ai_providers.js)
 
-
-
-
-
-
-
+### 56.5 빌드 및 검증 결과
+- **디버그 빌드**: `cmake --build cef_binary_151.3.24/build --config Debug --target cefsimple_capi` 성공 (`Exit code 0, 경고 0개, 오류 0개`).
+- **바이너리 생성**: `cef_binary_151.3.24\build\tests\cefsimple_capi\Debug\lite_browser.exe` 및 `lite_browser.dll` 정상 갱신.
+- **기능 및 통신 검증**:
+  1. **Cloudflare WAF CORS 차단 무력화**: `Origin: null` 거부 없이 데스크톱 순정 WinHTTP를 통해 `chatgpt.com` 엔드포인트와 `HTTP 200 OK` 정상 수신 확인.
+  2. **실시간 SSE 스트리밍**: Base64 인코딩 브리지를 통해 문자 깨짐이나 파싱 에러 없이 토큰 단위 실시간 타이핑 렌더링 확인.
+  3. **브라우저 웹 보안 무결성 유지**: `--disable-web-security` 스위치 없이도 구독 통신이 완벽히 작동하며, Cloudflare Turnstile 보호 사이트(CodePen 등) 접근성 100% 보존.
+  4. **사용자 최종 동작 검증 완료**: ChatGPT 구독 연동 상태에서 사이드패널 "현재 페이지 요약해줘" 요청 시 끊김 없이 완벽한 요약 결과 출력 확인.

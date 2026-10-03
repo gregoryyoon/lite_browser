@@ -11,6 +11,7 @@
 #include "tests/cefsimple_capi/simple_utils.h"
 #include "tests/cefsimple_capi/simple_dialog_helper.h"
 #include "tests/cefsimple_capi/simple_handler.h"
+#include "tests/cefsimple_capi/simple_ai_proxy.h"
 
 static int RunMain(HINSTANCE hInstance,
                    LPTSTR lpCmdLine,
@@ -116,6 +117,7 @@ static int RunMain(HINSTANCE hInstance,
   simple_dialog_helper_init();
   cef_run_message_loop();
   simple_dialog_helper_cleanup();
+  ai_proxy_shutdown();
 
   // Shut down CEF.
   cef_shutdown();

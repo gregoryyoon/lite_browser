@@ -10,6 +10,7 @@
 #include "tests/cefsimple_capi/default_browser.h"
 #include "tests/cefsimple_capi/simple_optimization.h"
 #include "tests/cefsimple_capi/simple_app.h"
+#include "tests/cefsimple_capi/simple_ai_proxy.h"
 
 #include <stdarg.h>
 #include <stdatomic.h>
@@ -1439,6 +1440,66 @@ int CEF_CALLBACK request_handler_on_before_browse(
           }
           if (prov) free(prov);
           if (url) free(url);
+        } else if (strncmp(action, "ai-proxy-stream-start?", 22) == 0) {
+          const char* query = action + 22;
+          char* req_id = get_query_param(query, "req_id");
+          char* url_b64 = get_query_param(query, "url_b64");
+          char* headers_b64 = get_query_param(query, "headers_b64");
+          char* body_b64 = get_query_param(query, "body_b64");
+
+          char* target_url = NULL;
+          if (url_b64) {
+            for (char* p = url_b64; *p; p++) if (*p == ' ') *p = '+';
+            size_t decoded_len = 0;
+            target_url = (char*)base64_decode(url_b64, &decoded_len);
+            free(url_b64);
+          }
+
+          char* headers = NULL;
+          if (headers_b64) {
+            for (char* p = headers_b64; *p; p++) if (*p == ' ') *p = '+';
+            size_t decoded_len = 0;
+            headers = (char*)base64_decode(headers_b64, &decoded_len);
+            free(headers_b64);
+          }
+
+          char* body = NULL;
+          size_t body_len = 0;
+          if (body_b64) {
+            for (char* p = body_b64; *p; p++) if (*p == ' ') *p = '+';
+            body = (char*)base64_decode(body_b64, &body_len);
+            free(body_b64);
+          }
+
+          cef_frame_t* target_frame = frame;
+          int release_target_frame = 0;
+          if (win_ctx && win_ctx->sidepanel_browser) {
+            cef_frame_t* sf = win_ctx->sidepanel_browser->get_main_frame(win_ctx->sidepanel_browser);
+            if (sf) {
+              target_frame = sf;
+              release_target_frame = 1;
+            }
+          }
+
+          if (target_frame && req_id && target_url) {
+            ai_proxy_start_stream(target_frame, req_id, target_url, headers, body, body_len);
+          }
+
+          if (release_target_frame && target_frame) {
+            target_frame->base.release(&target_frame->base);
+          }
+
+          if (req_id) free(req_id);
+          if (target_url) free(target_url);
+          if (headers) free(headers);
+          if (body) free(body);
+        } else if (strncmp(action, "ai-proxy-cancel?", 16) == 0) {
+          const char* query = action + 16;
+          char* req_id = get_query_param(query, "req_id");
+          if (req_id) {
+            ai_proxy_cancel_stream(req_id);
+            free(req_id);
+          }
         } else if (strncmp(action, "ai-highlight-element?", 21) == 0) {
           const char* query = action + 21;
           char* selector = get_query_param(query, "selector");
