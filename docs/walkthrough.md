@@ -1,6 +1,6 @@
 # Lite Browser 전체 기능 & 시스템 구현 보고서 (Walkthrough)
 
-본 문서는 **Lite Browser** 프로젝트의 빌드 및 실행 환경, CEF C API 아키텍처, 순수 Win32 + 이중 자식 브라우저 구조 및 전체 기능별 구현 내역(기본 언어 설정, 다중 탭 및 윈도우 관리, 차세대 북마크 & 지능형 주소창, 커스텀 아이콘 리소스 자동화 파이프라인, 다운로드 관리자, 듀얼 탭/창 분할 시스템, AI 에이전트 브라우저, 0px 심리스 레이아웃, 벤토 그리드 테마, 엣지 스타일 CEF 모달 다이얼로그 상단 중앙 정렬, 대화형 OAuth 2.0 PKCE ChatGPT 구독 인증 및 자율 브라우저 에이전트 도구 호출 시스템 등)을 통합하여 관리하는 전체 통합 기술 가이드입니다.
+본 문서는 **Lite Browser** 프로젝트의 빌드 및 실행 환경, CEF C API 아키텍처, 순수 Win32 + 이중 자식 브라우저 구조 및 전체 기능별 구현 내역(기본 언어 설정, 다중 탭 및 윈도우 관리, 차세대 북마크 & 지능형 주소창, 커스텀 아이콘 리소스 자동화 파이프라인, 다운로드 관리자, 듀얼 탭/창 분할 시스템, AI 에이전트 브라우저, 0px 심리스 레이아웃, 벤토 그리드 테마, 엣지 스타일 CEF 모달 및 알림/권한 요청 버블 다이얼로그 상단 중앙 정렬, 대화형 OAuth 2.0 PKCE ChatGPT 구독 인증 및 자율 브라우저 에이전트 도구 호출 시스템 등)을 통합하여 관리하는 전체 통합 기술 가이드입니다.
 
 ---
 
@@ -1868,6 +1868,48 @@ CodePen(`https://codepen.io/`) 등 Cloudflare 봇 감지 및 Turnstile 보호가
 - **바이너리 생성**: `cef_binary_151.3.24\build\tests\cefsimple_capi\Debug\lite_browser.exe` 및 `lite_browser.dll` 정상 갱신.
 - **CodePen Cloudflare Turnstile 통과 검증**:
   - `https://codepen.io/` 접속 후 Cloudflare "사람인지 확인" 체크박스 클릭 시, 무한 로딩이나 체크박스 리셋 현상 없이 즉시 초록색 체크(`✓`)가 완료되고 CodePen 메인 화면으로 매끄럽게 통과됨을 사용자 최종 검증 완료.
+
+---
+
+## 54. Chromium Views 권한 요청 버블(Permission Prompt Bubble) 상단 중앙(Top-Center) 배치 시스템 (Chromium Views Permission Prompt Bubble Top-Center Positioning)
+
+### 54.1 개요
+웹 푸시 알림, 마이크, 카메라, 위치 정보 등 웹사이트에서 브라우저 권한을 요청할 때 노출되는 CEF 내장 기본 권한 요청 다이얼로그(`PermissionPromptBubbleView`)가 브라우저 창 좌측 상단 구석(`X ≈ 24~45px`, `Y ≈ 76px`)에 치우쳐 표시되던 현상을 해결했습니다.
+마이크로소프트 엣지(Edge) 브라우저 스타일과 동일하게 활성 웹 콘텐츠 영역의 **가로 중앙 상단(Top-Center, 상단 툴바 직하단 0px 밀착)**으로 완벽하게 자동 재배치되도록 Win32 팝업 후킹 및 위치 산출 파이프라인을 고도화했습니다.
+
+### 54.2 문제 원인 정밀 분석
+1. **Chromium Views 버블 윈도우 스타일 (`WS_EX_TOOLWINDOW`) 배제 문제**:
+   - 기존 `simple_dialog_helper.c`의 `is_web_modal_dialog_window` 함수는 `WS_EX_TOOLWINDOW` 스타일을 가진 윈도우를 툴팁/팝업으로 간주하여 일괄 배제(`return 0`)하고 있었습니다.
+   - 그러나 Chromium의 사이트 권한 프롬프트는 일반 웹 모달 창(`WS_EX_DLGMODALFRAME`)과 달리 Views 프레임워크 기반 버블(`views::BubbleDialogDelegateView`)로 구현되어 `WS_EX_TOOLWINDOW` 속성을 지닙니다.
+   - 결과적으로 권한 프롬프트가 모달 판별기에서 탈락되어 기본 좌표(창 좌측 상단 구석)에 그대로 방치되는 문제가 발생했습니다.
+2. **다운로드 버블 및 입력 도우미 팝업과의 분리 식별 필요성**:
+   - 다운로드 완료 버블은 툴바 우측 상단에 정렬되어야 하며, `<select>` 드롭다운이나 자동완성(Autofill) 추천 목록은 입력 필드 원래 위치를 유지해야 합니다.
+   - 따라서 권한 프롬프트 버블만을 정밀하게 판별해내는 전용 판별 함수(`is_permission_bubble_window`)가 필수적이었습니다.
+
+### 54.3 주요 구현 내역 ([`simple_dialog_helper.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_dialog_helper.c))
+1. **권한 버블 전용 식별기 (`is_permission_bubble_window`) 구현**:
+   - `is_download_bubble_window` 검사 선행 수행으로 다운로드 버블 우선 분기 보장.
+   - 웹 모달 스타일(`WS_EX_DLGMODALFRAME`) 제외 및 툴윈도우 스타일(`WS_EX_TOOLWINDOW`) 검증.
+   - DPI 비례 치수 매칭: Chromium Views 표준 버블 너비인 360 DIP(`(int)(360.0 * dpi / 96.0)`, 허용 오차 `±30px`) 및 높이 범위(80~450px) 검사.
+   - 윈도우 타이틀 키워드 분석: 한국어(`권한`, `요청`, `알림`), 영어(`permission`, `Permission`, `wants to`, `want to`, `notification`, `Notification`, `microphone`, `camera`, `location`), URL 패턴(`://`) 등 다국어 키워드 완벽 매칭.
+   - 윈도우 생성 극초기(`WM_WINDOWPOSCHANGING`) 타이틀 미설정 단계에서도 치수 정밀 매칭을 통한 조기 감지 지원.
+   - 식별 성공 시 `SetPropA(dialog_hwnd, "LiteBrowser_IsPermission", (HANDLE)1)`로 태깅하여 윈도우 프로시저 반복 호출 시 오버헤드 없는 즉시 캐시 반환.
+2. **타깃 좌표 계산기 연동 (`calculate_dialog_target_pos`)**:
+   - `calculate_dialog_target_pos`에서 `is_permission_bubble_window`가 참인 경우 기존 웹 모달 다이얼로그와 동일한 상단 중앙 정렬 경로를 공유하도록 확장.
+   - 단일 탭 및 듀얼 분할 모드(Split View) 모두를 지원하여, 활성 탭 본문 영역(분할 모드 시 해당 좌/우 분할 화면 핸들)의 가로 중앙(`target_x = target_rect.left + (content_w - dialog_w) / 2`) 및 툴바 바로 아래 0px(`target_y = target_rect.top`)에 정밀 배치.
+   - 멀티 모니터 환경에서 화면 경계 밖으로 이탈하지 않도록 모니터 작업 영역(`rcWork`) 클램핑 가드 적용.
+3. **윈도우 소멸 시 프로퍼티 정리 ([`WM_NCDESTROY`])**:
+   - `WM_NCDESTROY` 메시지 처리 루틴에서 `RemovePropA(hWnd, "LiteBrowser_IsPermission")`를 명시적으로 호출하여 윈도우 메모리 및 프로퍼티 누수를 원천 차단.
+
+### 54.4 관련 소스 코드
+- [`cef_binary_151.3.24/tests/cefsimple_capi/simple_dialog_helper.c`](file:///c:/projects/lite_browser/cef_binary_151.3.24/tests/cefsimple_capi/simple_dialog_helper.c)
+
+### 54.5 빌드 및 검증 결과
+- **디버그 빌드**: `cmake --build cef_binary_151.3.24/build --config Debug --target cefsimple_capi` 성공 (`Exit code 0, 경고 0개, 오류 0개`).
+- **바이너리 생성**: `cef_binary_151.3.24\build\tests\cefsimple_capi\Debug\lite_browser.exe` 및 `lite_browser.dll` 정상 갱신.
+- **실행 검증**:
+  - 웹 푸시 알림 권한을 요청하는 웹사이트(예: `biz.heraldcorp.com`) 접속 시 "다음 권한을 요청합니다 - [허용] [차단]" 팝업 다이얼로그가 좌측 상단 구석이 아닌 활성 탭 가로 중앙, 상단 툴바 직하단 0px 밀착 위치(Edge 브라우저 스타일)에 매끄럽게 정렬되어 노출됨을 사용자 최종 검증 완료.
+
 
 
 

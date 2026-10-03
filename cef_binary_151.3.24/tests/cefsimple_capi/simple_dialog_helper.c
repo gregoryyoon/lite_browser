@@ -59,6 +59,60 @@ static int is_download_bubble_window(HWND dialog_hwnd, int dialog_w, HWND root_o
   return 0;
 }
 
+static int is_permission_bubble_window(HWND dialog_hwnd, int dialog_w, int dialog_h, HWND root_owner, browser_window_t* win_ctx) {
+  if (!dialog_hwnd || !IsWindow(dialog_hwnd)) return 0;
+
+  // 1. Cached result lookup
+  HANDLE prop = GetPropA(dialog_hwnd, "LiteBrowser_IsPermission");
+  if (prop != NULL) {
+    return (prop == (HANDLE)1) ? 1 : 0;
+  }
+
+  // 2. Download bubble takes priority (aligned to right)
+  if (is_download_bubble_window(dialog_hwnd, dialog_w, root_owner, win_ctx)) {
+    return 0;
+  }
+
+  DWORD ex_style = GetWindowLong(dialog_hwnd, GWL_EXSTYLE);
+  // Web modal dialogs have WS_EX_DLGMODALFRAME and are handled by is_web_modal_dialog_window
+  if (ex_style & WS_EX_DLGMODALFRAME) {
+    return 0;
+  }
+
+  // Permission prompts in Chromium Views are tool windows
+  if (!(ex_style & WS_EX_TOOLWINDOW)) {
+    return 0;
+  }
+
+  UINT dpi = root_owner ? GetDpiForWindow(root_owner) : 96;
+  int expected_bubble_w = (int)(360.0 * ((double)dpi / 96.0));
+  int is_bubble_w_match = (dialog_w > 0 && abs(dialog_w - expected_bubble_w) <= 30);
+  int is_bubble_h_match = (dialog_h >= (int)(80.0 * ((double)dpi / 96.0)) &&
+                           dialog_h <= (int)(450.0 * ((double)dpi / 96.0)));
+
+  // 3. Check window title for permission-related keywords
+  WCHAR wtitle[256] = {0};
+  int title_len = GetWindowTextW(dialog_hwnd, wtitle, sizeof(wtitle) / sizeof(wtitle[0]));
+  if (title_len > 0) {
+    if (wcsstr(wtitle, L"권한") || wcsstr(wtitle, L"요청") || wcsstr(wtitle, L"알림") ||
+        wcsstr(wtitle, L"permission") || wcsstr(wtitle, L"Permission") ||
+        wcsstr(wtitle, L"wants to") || wcsstr(wtitle, L"want to") ||
+        wcsstr(wtitle, L"notification") || wcsstr(wtitle, L"Notification") ||
+        wcsstr(wtitle, L"microphone") || wcsstr(wtitle, L"camera") ||
+        wcsstr(wtitle, L"location") || wcsstr(wtitle, L"://") ||
+        (is_bubble_w_match && is_bubble_h_match)) {
+      SetPropA(dialog_hwnd, "LiteBrowser_IsPermission", (HANDLE)1);
+      return 1;
+    }
+  } else if (is_bubble_w_match && is_bubble_h_match) {
+    // Early stage before window text is initialized
+    SetPropA(dialog_hwnd, "LiteBrowser_IsPermission", (HANDLE)1);
+    return 1;
+  }
+
+  return 0;
+}
+
 static int is_web_modal_dialog_window(HWND dialog_hwnd, int dialog_w, int dialog_h, HWND root_owner, browser_window_t* win_ctx) {
   if (!dialog_hwnd || !IsWindow(dialog_hwnd)) return 0;
 
@@ -141,8 +195,9 @@ static int calculate_dialog_target_pos(HWND dialog_hwnd, int dialog_w, int dialo
     return 1;
   }
 
-  // 2. Web Modal Dialog positioning (alert, confirm, beforeunload, http auth, permissions - centered over tab content)
-  if (is_web_modal_dialog_window(dialog_hwnd, dialog_w, dialog_h, root_owner, win_ctx)) {
+  // 2. Web Modal Dialog & Permission Bubble positioning (alert, confirm, beforeunload, http auth, permissions - centered over tab content)
+  if (is_permission_bubble_window(dialog_hwnd, dialog_w, dialog_h, root_owner, win_ctx) ||
+      is_web_modal_dialog_window(dialog_hwnd, dialog_w, dialog_h, root_owner, win_ctx)) {
     HWND target_content_hwnd = NULL;
     if (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
       tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
@@ -271,6 +326,7 @@ static LRESULT CALLBACK ModalDialogSubclassProc(
     case WM_NCDESTROY:
       RemovePropA(hWnd, "LiteBrowser_IsBubble");
       RemovePropA(hWnd, "LiteBrowser_IsModal");
+      RemovePropA(hWnd, "LiteBrowser_IsPermission");
       RemoveWindowSubclass(hWnd, ModalDialogSubclassProc, uIdSubclass);
       break;
   }

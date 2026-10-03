@@ -2465,6 +2465,22 @@ int CEF_CALLBACK request_handler_on_before_browse(
               }
               free(decoded);
             }
+            if (win_ctx && win_ctx->ui_browser) {
+              size_t b64_len = strlen(data_base64);
+              char* js_call = (char*)malloc(b64_len + 128);
+              if (js_call) {
+                snprintf(js_call, b64_len + 128, "if (window.loadBookmarksDataB64) { window.loadBookmarksDataB64('%s'); }", data_base64);
+                cef_frame_t* ui_frame = win_ctx->ui_browser->get_main_frame(win_ctx->ui_browser);
+                if (ui_frame) {
+                  cef_string_t js_str = {};
+                  cef_string_from_utf8(js_call, strlen(js_call), &js_str);
+                  ui_frame->execute_java_script(ui_frame, &js_str, NULL, 0);
+                  cef_string_clear(&js_str);
+                  ui_frame->base.release(&ui_frame->base);
+                }
+                free(js_call);
+              }
+            }
             free(data_base64);
           }
         } else if (strcmp(action, "extract-and-save-bookmark") == 0) {

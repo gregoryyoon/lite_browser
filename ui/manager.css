@@ -643,6 +643,122 @@ body.manager-body {
   color: #ef4444;
 }
 
+.card-action-btn.btn-edit:hover {
+  background: var(--accent-focus-ring);
+  color: var(--accent-primary);
+}
+
+.card-action-btn.btn-save {
+  color: #10b981;
+}
+
+.card-action-btn.btn-save:hover {
+  background: rgba(16, 185, 129, 0.15);
+  color: #059669;
+}
+
+.card-action-btn.btn-cancel {
+  color: var(--text-muted);
+}
+
+.card-action-btn.btn-cancel:hover {
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+}
+
+/* Inline Bookmark Edit Mode */
+.bm-card.is-editing {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 1px var(--accent-primary);
+  cursor: default;
+}
+
+.bm-card.is-editing:hover {
+  transform: none;
+}
+
+.bm-inline-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 5px 9px;
+  background: var(--bg-app);
+  border: 1px solid var(--border-medium);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.bm-inline-input:focus {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 2px var(--accent-focus-ring);
+  background: var(--bg-card);
+}
+
+.bm-inline-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 9px;
+  background: var(--bg-app);
+  border: 1px solid var(--border-medium);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.45;
+  font-family: inherit;
+  resize: vertical;
+  min-height: 52px;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.bm-inline-textarea:focus {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 2px var(--accent-focus-ring);
+  background: var(--bg-card);
+}
+
+.edit-hint-text {
+  font-size: 11px;
+  color: var(--text-dimmed);
+}
+
+.list-row.is-editing {
+  height: auto;
+  min-height: 84px;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 8px 16px;
+  gap: 8px;
+  background: var(--bg-card-subtle);
+  border-color: var(--accent-primary);
+  cursor: default;
+  white-space: normal;
+}
+
+.list-row.is-editing:hover {
+  background: var(--bg-card-subtle);
+}
+
+.list-row-edit-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.list-row-edit-top .bm-inline-input {
+  flex: 1;
+}
+
+.list-row-edit-bottom {
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+}
+
 /* ==========================================================================
    List Table & Empty State
    ========================================================================== */
