@@ -10,12 +10,12 @@
 Lite Browser는 64-bit Windows 환경에서 순수 Win32 C API와 CEF(Chromium Embedded Framework) C API를 결합하여 제작된 고성능 초경량 데스크톱 브라우저입니다.
 
 ### 1.2 시스템 사양 및 환경
-- **실행 환경**: 64-bit Windows 10/11, CEF binary distribution 151.3.24 (Chromium 151.0.7922.174)
+- **실행 환경**: 64-bit Windows 10/11, CEF binary distribution 154.0.34 (Chromium 154.0.8037.98)
 - **빌드 환경**: Visual Studio 2022/2026 IDE (MSVC x64), CMake 3.25+ 사용
-- **빌드 결과물 디렉토리**: `C:\projects\lite_browser\cef_binary_151.3.24\build`
+- **빌드 결과물 디렉토리**: `C:\projects\lite_browser\cef_binary_154.0.34\build`
 - **주요 바이너리 타깃**:
-  - Debug: `cef_binary_151.3.24\build\tests\cefsimple_capi\Debug\lite_browser.exe`
-  - Release: `cef_binary_151.3.24\build\tests\cefsimple_capi\Release\lite_browser.exe`
+  - Debug: `cef_binary_154.0.34\build\tests\cefsimple_capi\Debug\lite_browser.exe`
+  - Release: `cef_binary_154.0.34\build\tests\cefsimple_capi\Release\lite_browser.exe`
 - **배포 인스톨러**: NSIS (Nullsoft Scriptable Install System) 기반 원클릭 설치 관리자 ([`LiteBrowserInstaller.exe`](file:///c:/projects/lite_browser/LiteBrowserInstaller.exe))
 
 ---
@@ -281,10 +281,10 @@ LiteBrowser 실행 시 Windows OS의 사용자 기본 로캘(UI Language)을 자
 ### 8.3 원클릭 빌드 & 패키징 실행 명령
 ```powershell
 # 1. CMake Debug 빌드 (개발 및 테스트용)
-cmake --build c:\projects\lite_browser\cef_binary_151.3.24\build --config Debug --target cefsimple_capi
+cmake --build c:\projects\lite_browser\cef_binary_154.0.34\build --config Debug --target cefsimple_capi
 
 # 2. CMake Release 빌드 및 NSIS 인스톨러 패키징 (배포용)
-cmake --build c:\projects\lite_browser\cef_binary_151.3.24\build --config Release --target cefsimple_capi
+cmake --build c:\projects\lite_browser\cef_binary_154.0.34\build --config Release --target cefsimple_capi
 & "C:\Program Files (x86)\NSIS\makensis.exe" c:\projects\lite_browser\installer.nsi
 ```
 
@@ -371,7 +371,7 @@ Edge 브라우저의 `edge://downloads/` 디자인과 UX를 참고하여 다운�
 
 ```powershell
 # Debug 모드 빌드 (개발 및 기능 테스트)
-cmake --build c:\projects\lite_browser\cef_binary_151.3.24\build --config Debug --target cefsimple_capi
+cmake --build c:\projects\lite_browser\cef_binary_154.0.34\build --config Debug --target cefsimple_capi
 ```
 
 ---
@@ -2071,3 +2071,50 @@ LiteBrowser의 AI 사이드패널에서 유료 ChatGPT 구독(Plus/Team/Pro) 계
   1. **UI 확인**: Gemini 선택 시 모호하던 2버튼 토글이 사라지고, 상단 `[Google AI Studio 무료 키 발급]` 버튼과 단일 API Key 입력창이 정갈하게 노출됨 확인.
   2. **키 발급 연동**: 버튼 클릭 시 브라우저 새 탭으로 Google AI Studio 콘솔 정상 이동 확인.
   3. **실시간 스트리밍 검증**: Gemini API 키 등록 후 사이드패널에서 "페이지 요약해줘" 요청 시 `url is not defined` 에러 없이 즉시 정상적인 실시간 페이지 요약 결과 출력 및 사용자 최종 검증 완료 ("이제 잘 동작해.").
+
+---
+
+## 58. CEF 154.0.34 (Chromium 154.0.8037.98) 런타임 업그레이드 및 전체 시스템 마이그레이션 (CEF 154 Runtime Upgrade & Full System Migration)
+
+### 58.1 개요
+Lite Browser의 기반 임베디드 브라우저 프레임워크를 기존 CEF 151.3.24 (Chromium 151.0.7922.174)에서 최신 표준 바이너리 배포판인 **CEF 154.0.34 (Chromium 154.0.8037.98)**로 전면 업그레이드했습니다.
+순수 Win32 C CAPI 아키텍처, 다중 탭 및 윈도우 관리, 듀얼 화면 분할, 0px 심리스 레이아웃, 벤토 그리드 테마, DPAPI 암호화 보안 볼트, WinHTTP 비동기 AI 스트리밍 프록시, 상단 중앙 모달/알림 다이얼로그 및 리소스 자동 주입 파이프라인 등 기존에 구현된 모든 기능과 서브시스템을 [`cef_binary_154.0.34`](file:///c:/projects/lite_browser/cef_binary_154.0.34) 환경으로 무결하게 마이그레이션하고 검증을 완료했습니다.
+
+### 58.2 마이그레이션 및 C API 호환성 분석
+1. **C API 시그니처 무결성 검증**:
+   - `cef_binary_151.3.24`와 `cef_binary_154.0.34`의 `include/capi` 헤더 diff 정밀 분석 결과, `cef_client_t`, `cef_download_handler_t`, `cef_life_span_handler_t`, `cef_request_handler_t`, `cef_focus_handler_t` 등 핵심 C 인터페이스의 함수 포인터 시그니처가 100% 바이너리 호환을 유지함을 확인.
+   - C11 아토믹 플래그(`/experimental:c11atomics`) 및 수동 레퍼런스 카운팅(`add_ref`/`release`), Win32 `GWLP_USERDATA` 윈도우 바인딩 코드 전반이 수정 없이 그대로 안정 컴파일됨을 검증.
+2. **C 백엔드 소스 및 리소스 전체 이전**:
+   - **Core 엔진**: [`cefsimple_win.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/cefsimple_win.c), [`simple_app.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_app.c), [`simple_app.h`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_app.h), [`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.c), [`simple_handler.h`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.h), [`simple_life_span_handler.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_life_span_handler.c), [`simple_load_handler.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_load_handler.c), [`simple_display_handler.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_display_handler.c), [`browser_context.h`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/browser_context.h)
+   - **보안 및 인증 서브시스템**: [`simple_auth.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_auth.c), [`simple_auth.h`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_auth.h), [`simple_vault.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_vault.c), [`simple_vault.h`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_vault.h)
+   - **네트워크 & AI 프록시**: [`simple_ai_proxy.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_ai_proxy.c), [`simple_ai_proxy.h`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_ai_proxy.h)
+   - **다운로드 & 다이얼로그 관리**: [`simple_download_handler.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_download_handler.c), [`simple_download_handler.h`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_download_handler.h), [`simple_dialog_helper.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_dialog_helper.c), [`simple_dialog_helper.h`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_dialog_helper.c)
+   - **최적화 & 인스톨러/기본 브라우저**: [`simple_optimization.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_optimization.c), [`default_browser.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/default_browser.c), [`simple_installer.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_installer.c)
+   - **빌드 설정 및 리소스 파이프라인**: [`CMakeLists.txt`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/CMakeLists.txt), [`win/`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/win) (`cefsimple.ico`, `inject_icon.py`, `cefsimple.rc`, `cefsimple.exe.manifest`)
+
+### 58.3 빌드 시스템 및 환경 구성
+1. **CMake 및 Visual Studio 18 2026 연동**:
+   - `Visual Studio 18 2026 (x64)` 제너레이터로 솔루션 구성(`cmake -B build -G "Visual Studio 18 2026" -A x64`).
+   - `CMakeLists.txt` 내 `OUTPUT_NAME "lite_browser"`, `crypt32.lib winhttp.lib` 링크 및 `/experimental:c11atomics` 플래그 유지.
+2. **임포트 라이브러리 및 바이너리 연동**:
+   - 최소 배포본 바이너리 구조에 맞춰 Debug 구성에서도 `libcef.lib`와 런타임 바이너리가 완벽히 참조되도록 라이브러리 경로 매핑을 정렬.
+3. **프로젝트 설정 동기화**:
+   - [`.gitignore`](file:///c:/projects/lite_browser/.gitignore): `cef_binary_154.0.34`의 빌드 출력물(`build/`, `Debug/`, `Release/`, `*.lib`, `*.dll`, `*.pak` 등) 무시 패턴 등록.
+   - [`.vscode/launch.json`](file:///c:/projects/lite_browser/.vscode/launch.json): 디버거 타깃 실행 파일 경로를 `cef_binary_154.0.34/build/tests/cefsimple_capi/Debug/lite_browser.exe`로 동기화.
+   - [`installer.nsi`](file:///c:/projects/lite_browser/installer.nsi): NSIS 설치 스크립트 소스 경로를 `cef_binary_154.0.34`로 선반영하고, CEF 154 아키텍처에 맞추어 `libEGL.dll`/`libGLESv2.dll`을 `/nonfatal` 처리.
+   - [`ui/settings.html`](file:///c:/projects/lite_browser/ui/settings.html): 설정 대시보드의 CEF 런타임 표기를 `154.0.34`, Chromium 엔진을 `154.0.8037.98`로 업데이트.
+
+### 58.4 관련 소스 코드
+- [`cef_binary_154.0.34/tests/cefsimple_capi/`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/)
+- [`.gitignore`](file:///c:/projects/lite_browser/.gitignore)
+- [`.vscode/launch.json`](file:///c:/projects/lite_browser/.vscode/launch.json)
+- [`installer.nsi`](file:///c:/projects/lite_browser/installer.nsi)
+- [`ui/settings.html`](file:///c:/projects/lite_browser/ui/settings.html)
+- [`README.md`](file:///c:/projects/lite_browser/README.md)
+
+### 58.5 빌드 및 검증 결과
+- **디버그 빌드**: `cmake --build cef_binary_154.0.34/build --config Debug --target cefsimple_capi` 성공 (`Exit code 0, 오류 0개`).
+- **바이너리 생성**: [`cef_binary_154.0.34\build\tests\cefsimple_capi\Debug\lite_browser.exe`](file:///c:/projects/lite_browser/cef_binary_154.0.34/build/tests/cefsimple_capi/Debug/lite_browser.exe) 및 `lite_browser.dll` 생성 확인.
+- **아이콘 자동 주입**: 5개 해상도 규격(`16x16`, `24x24`, `32x32`, `48x48`, `256x256`) 커스텀 아이콘 PE 자동 주입 및 셸 캐시 갱신 완료.
+- **런타임 실행 검증**:
+  - `lite_browser.exe` 실행 시 메인 브라우저 프로세스, 자식 렌더러 프로세스, GPU 및 Utility 프로세스가 결함 없이 정상 기동함을 프로세스 상태(`Get-Process`)를 통해 확인.

@@ -5,13 +5,13 @@
 </p>
 
 <p align="center">
-  <b>Chromium Embedded Framework (CEF 151.3.24 / Chromium 134.0.6998.36) 순수 Win32 C CAPI 기반의 초경량·고성능 하이브리드 웹 브라우저</b>
+  <b>Chromium Embedded Framework (CEF 154.0.34 / Chromium 154.0.8037.98) 순수 Win32 C CAPI 기반의 초경량·고성능 하이브리드 웹 브라우저</b>
 </p>
 
 <p align="center">
   <a href="https://github.com/gregoryyoon/lite_browser"><img src="https://img.shields.io/badge/Platform-Windows%2064--bit-0078D4.svg?logo=windows&logoColor=white" alt="Platform Windows 64-bit" /></a>
   <a href="https://github.com/gregoryyoon/lite_browser"><img src="https://img.shields.io/badge/Language-C11%20%2F%20Pure%20C%20API-00599C.svg?logo=c&logoColor=white" alt="Language C11 / Pure Win32 C CAPI" /></a>
-  <a href="https://github.com/gregoryyoon/lite_browser"><img src="https://img.shields.io/badge/CEF-151.3.24%20(Chromium%20134)-FF6F00.svg?logo=googlechrome&logoColor=white" alt="CEF 151.3.24 / Chromium 134" /></a>
+  <a href="https://github.com/gregoryyoon/lite_browser"><img src="https://img.shields.io/badge/CEF-154.0.34%20(Chromium%20154)-FF6F00.svg?logo=googlechrome&logoColor=white" alt="CEF 154.0.34 / Chromium 154" /></a>
   <a href="https://github.com/gregoryyoon/lite_browser"><img src="https://img.shields.io/badge/UI-Bento%20Grid%20%2F%20Lucide%20SVG-F7DF1E.svg?logo=javascript&logoColor=black" alt="Bento Grid & Lucide SVG" /></a>
   <a href="https://github.com/gregoryyoon/lite_browser"><img src="https://img.shields.io/badge/Optimization-ThinLTO%20%2F%20LTCG-orange.svg" alt="ThinLTO & LTCG Whole Program Optimization" /></a>
   <a href="https://github.com/gregoryyoon/lite_browser"><img src="https://img.shields.io/badge/Security-Authenticode%20SHA--256-success.svg" alt="Authenticode SHA-256 Code Signed" /></a>
@@ -63,7 +63,7 @@ HTML5/CSS3/JavaScript 기반의 현대적 **벤토 그리드(Bento Grid) 웹 UI*
   - Windows 레지스트리(`HKCU\Software\Classes\LiteBrowserHTML`, `StartMenuInternet`, `Capabilities`, `URLAssociations`, `FileAssociations`) 표준 등록 엔진(`default_browser.c`) 탑재.
   - 클릭 한 번으로 Windows 기본 앱 설정 창(`ms-settings:defaultapps`)을 자동 팝업.
   - Windows 설정에서 기본 브라우저를 변경하고 브라우저로 돌아오면(`focus`, `visibilitychange`), 새로고침 없이도 **실시간 상태 배지(`기본 브라우저로 설정됨` / `기본 브라우저 아님`)**가 즉시 자동 갱신(Auto-Refresh)됩니다.
-- **엔진 제원 명시**: 브라우저 버전(1.0.0 64-bit), CEF 런타임(151.3.24), Chromium 엔진(134.0.6998.36), 아키텍처(Pure Win32 C CAPI) 상세 표출.
+- **엔진 제원 명시**: 브라우저 버전(1.0.0 64-bit), CEF 런타임(154.0.34), Chromium 엔진(154.0.8037.98), 아키텍처(Pure Win32 C CAPI) 상세 표출.
 
 ### 6. 🚀 런타임 성능 모드 전환 & 빌드 타임 ThinLTO / LTCG 최적화
 - **사용자 맞춤 런타임 성능 모드 (`lite://settings`)**:
@@ -78,8 +78,8 @@ HTML5/CSS3/JavaScript 기반의 현대적 **벤토 그리드(Bento Grid) 웹 UI*
 
 ### 8. 🎨 리마스터 100% 알파 투명 HiDPI 아이콘 & 윈도우 셸 연동
 - 흰색 사각 배경을 제거한 **100% 알파 투명 배경** 및 부드러운 소프트 섀도우를 결합한 모던 둥근 타일(Squircle) 아이콘을 적용했습니다.
-- Windows 표준 5개 해상도(`16x16`, `24x24`, `32x32`, `48x48`, `256x256`)를 단일 ICO 파일([`cefsimple.ico`](cef_binary_151.3.24/tests/cefsimple_capi/win/cefsimple.ico))로 통합 번들링하고, 탐색기 소형 뷰(16x16, 24x24)를 픽셀 단위로 선명화(Pixel-fitted)했습니다.
-- PE 리소스 주입 스크립트([`inject_icon.py`](cef_binary_151.3.24/tests/cefsimple_capi/win/inject_icon.py))를 통해 바이너리 내 구형 더미 아이콘을 제거하고 3개 그룹(`120`, `121`, `32512`)에 정밀 주입합니다.
+- Windows 표준 5개 해상도(`16x16`, `24x24`, `32x32`, `48x48`, `256x256`)를 단일 ICO 파일([`cefsimple.ico`](cef_binary_154.0.34/tests/cefsimple_capi/win/cefsimple.ico))로 통합 번들링하고, 탐색기 소형 뷰(16x16, 24x24)를 픽셀 단위로 선명화(Pixel-fitted)했습니다.
+- PE 리소스 주입 스크립트([`inject_icon.py`](cef_binary_154.0.34/tests/cefsimple_capi/win/inject_icon.py))를 통해 바이너리 내 구형 더미 아이콘을 제거하고 3개 그룹(`120`, `121`, `32512`)에 정밀 주입합니다.
 - 빌드 후처리 및 인스톨러/언인스톨러 실행 시 `SHChangeNotify(SHCNE_ASSOCCHANGED, ...)`를 호출하여 재부팅 없이도 Windows 셸 아이콘 캐시를 즉시 갱신합니다.
 
 ### 9. 🔒 보안 메타데이터 및 Authenticode 전자서명 파이프라인 (Code Signing)
@@ -102,7 +102,7 @@ HTML5/CSS3/JavaScript 기반의 현대적 **벤토 그리드(Bento Grid) 웹 UI*
 - 탭 전환이나 새 탭 생성 시에도 대화 세션이 단절되지 않고 상시 도킹을 유지하는 독립 네이티브 자식 브라우저(`win_ctx->sidepanel_browser`).
 - **Chrome Gemini 스타일 5단계 본문 파싱**: YouTube 특화 초경량 Markdown 전처리(노이즈 및 댓글 원천 배제) 및 뷰포트 중심 본문 블록 추출.
 - **다형성 AI Provider & 429 내결함성**: Gemini 3.7 Flash 기본 탑재, CoT 사고 과정(Thinking) 아코디언 스트리밍, 429 Rate Limit 발생 시 지수 백오프 자동 재시도(1.5초, 3.0초, 6.0초).
-- **Windows DPAPI 보안 볼트 ([`simple_vault.c`](cef_binary_151.3.24/tests/cefsimple_capi/simple_vault.c))**: `CryptProtectData` 기반으로 `%USERPROFILE%\.lite-browser\vault.dat`에 사용자 자격증명을 OS 수준에서 안전하게 암호화 보관.
+- **Windows DPAPI 보안 볼트 ([`simple_vault.c`](cef_binary_154.0.34/tests/cefsimple_capi/simple_vault.c))**: `CryptProtectData` 기반으로 `%USERPROFILE%\.lite-browser\vault.dat`에 사용자 자격증명을 OS 수준에서 안전하게 암호화 보관.
 
 ---
 
@@ -136,7 +136,7 @@ HTML5/CSS3/JavaScript 기반의 현대적 **벤토 그리드(Bento Grid) 웹 UI*
 
 | 계층 (Layer) | 구성 요소 (Components) | 세부 기술 사양 (Specification) |
 | :--- | :--- | :--- |
-| **코어 브라우저 엔진** | CEF (Chromium Embedded Framework) | **CEF 151.3.24** (Chromium 134.0.6998.36), Pure C CAPI (`cefsimple_capi`) |
+| **코어 브라우저 엔진** | CEF (Chromium Embedded Framework) | **CEF 154.0.34** (Chromium 154.0.8037.98), Pure C CAPI (`cefsimple_capi`) |
 | **시스템 백엔드 언어** | C 언어 (MSVC Compiler) | **C11** (`/std:c11`, `/experimental:c11atomics`), Pure Win32 API, GDI, DWM |
 | **빌드 최적화 (LTO)** | MSVC Whole Program Optimization | `/GL`, `/LTCG`, `/O2`, `/Oi`, `/Ot`, `/Gy`, `/GF`, `/OPT:REF`, `/OPT:ICF` |
 | **보안 & 암호화** | Windows Security APIs | **Windows DPAPI** (`CryptProtectData`), Authenticode **SHA-256 + RFC 3161 Timestamp** |
@@ -165,15 +165,15 @@ PowerShell 터미널에서 프로젝트 루트 디렉터리를 기준으로 아�
 
 ```powershell
 # 1) Debug 모드 빌드 (개발 및 디버깅용 - 빠른 증분 컴파일)
-cmake --build cef_binary_151.3.24\build --config Debug --target cefsimple_capi
+cmake --build cef_binary_154.0.34\build --config Debug --target cefsimple_capi
 
 # 2) Release 모드 빌드 (배포용 - Whole Program Optimization / LTCG 적용)
-cmake --build cef_binary_151.3.24\build --config Release --target cefsimple_capi
+cmake --build cef_binary_154.0.34\build --config Release --target cefsimple_capi
 ```
 
 빌드가 성공하면 실행 파일 및 의존 리소스가 아래 경로에 자동 생성 및 아이콘 주입됩니다:
-- **Debug 바이너리**: `cef_binary_151.3.24\build\tests\cefsimple_capi\Debug\lite_browser.exe`
-- **Release 바이너리**: `cef_binary_151.3.24\build\tests\cefsimple_capi\Release\lite_browser.exe`
+- **Debug 바이너리**: `cef_binary_154.0.34\build\tests\cefsimple_capi\Debug\lite_browser.exe`
+- **Release 바이너리**: `cef_binary_154.0.34\build\tests\cefsimple_capi\Release\lite_browser.exe`
 
 ---
 
@@ -215,7 +215,7 @@ lite_browser\
 │   ├── ai_providers.js                        # 다형성 AI 어댑터 (Gemini 3.7 Flash, 429 지수 백오프)
 │   ├── agent_memory.js                        # AI 에이전트 세션 메모리 관리
 │   └── task_runtime.js                        # 자율 브라우저 동작 제어 런타임
-├── cef_binary_151.3.24\                       # CEF 151.3.24 바이너리 배포본 (Chromium 134.0.6998.36)
+├── cef_binary_154.0.34\                       # CEF 154.0.34 바이너리 배포본 (Chromium 154.0.8037.98)
 │   └── tests\cefsimple_capi\                  # 순수 C11 C API 메인 백엔드 소스 디렉터리
 │       ├── CMakeLists.txt                     # C11 타깃 빌드, LTCG 최적화 및 후처리 파이프라인
 │       ├── cefsimple_win.c                    # Win32 메인 진입점 (wWinMain), 로캘 감지, root_cache 격리
@@ -243,4 +243,4 @@ lite_browser\
 
 - **Chromium / CEF**: [BSD 3-Clause License](https://opensource.org/licenses/BSD-3-Clause)
 - **Lite Browser Source Code**: Copyright (C) 2026 Gregory Yoon. All rights reserved.
-- 자세한 라이선스 조항은 [`LICENSE`](LICENSE) 및 [`cef_binary_151.3.24/LICENSE.txt`](cef_binary_151.3.24/LICENSE.txt)를 참조하십시오.
+- 자세한 라이선스 조항은 [`LICENSE`](LICENSE) 및 [`cef_binary_154.0.34/LICENSE.txt`](cef_binary_154.0.34/LICENSE.txt)를 참조하십시오.

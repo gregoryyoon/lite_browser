@@ -37,6 +37,28 @@ cef_binary_151.3.24/*.dat
 cef_binary_151.3.24/locales/
 cef_binary_151.3.24/swiftshader/
 
+cef_binary_154.0.34/build/
+cef_binary_154.0.34/Debug/
+cef_binary_154.0.34/Release/
+cef_binary_154.0.34/Resources/
+cef_binary_154.0.34/include/
+cef_binary_154.0.34/libcef_dll/
+cef_binary_154.0.34/tests/cefclient/
+cef_binary_154.0.34/tests/cefsimple/
+cef_binary_154.0.34/tests/ceftests/
+cef_binary_154.0.34/tests/gmock/
+cef_binary_154.0.34/tests/gtest/
+cef_binary_154.0.34/tests/shared/
+cef_binary_154.0.34/bazel/
+cef_binary_154.0.34/*.lib
+cef_binary_154.0.34/*.dll
+cef_binary_154.0.34/*.exe
+cef_binary_154.0.34/*.pak
+cef_binary_154.0.34/*.bin
+cef_binary_154.0.34/*.dat
+cef_binary_154.0.34/locales/
+cef_binary_154.0.34/swiftshader/
+
 # Ignore temp debug log files
 debug_c.txt
 documents/
