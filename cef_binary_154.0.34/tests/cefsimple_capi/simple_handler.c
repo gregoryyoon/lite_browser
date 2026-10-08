@@ -2174,6 +2174,7 @@ int CEF_CALLBACK request_handler_on_before_browse(
             HMENU hMenu = CreatePopupMenu();
             AppendMenuW(hMenu, MF_STRING, 1001, L"새 탭");
             AppendMenuW(hMenu, MF_STRING, 1002, L"새 창");
+            AppendMenuW(hMenu, MF_STRING, 1012, L"북마크 관리자 (Ctrl+Shift+O)");
             AppendMenuW(hMenu, MF_STRING, 1008, L"다운로드 관리자 (Ctrl+J)");
             AppendMenuW(hMenu, MF_STRING, 1011, L"비밀번호 관리자");
             AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
@@ -2192,6 +2193,8 @@ int CEF_CALLBACK request_handler_on_before_browse(
               CreateNewTabEx(win_ctx, "lite://favorites", 1);
             } else if (cmd == 1002) {
               create_browser_window("lite://favorites");
+            } else if (cmd == 1012) {
+              CreateNewTabEx(win_ctx, "lite://favorites", 1);
             } else if (cmd == 1008) {
               CreateNewTabEx(win_ctx, "lite://downloads", 1);
             } else if (cmd == 1011) {

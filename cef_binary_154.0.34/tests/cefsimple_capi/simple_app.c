@@ -205,6 +205,41 @@ int CEF_CALLBACK simple_app_release(cef_base_ref_counted_t *self) {
   return 0;
 }
 
+static void append_disable_feature_if_missing(cef_command_line_t* cmd, const char* feature_name) {
+  if (!cmd || !feature_name) return;
+  cef_string_t n = {};
+  cef_string_from_ascii("disable-features", 16, &n);
+  if (cmd->has_switch(cmd, &n)) {
+    cef_string_userfree_t existing = cmd->get_switch_value(cmd, &n);
+    if (existing && existing->length > 0) {
+      cef_string_utf8_t u8 = {};
+      cef_string_to_utf8(existing->str, existing->length, &u8);
+      if (u8.str && strstr(u8.str, feature_name) == NULL) {
+        char buf[512];
+        snprintf(buf, sizeof(buf), "%s,%s", u8.str, feature_name);
+        cef_string_t new_val = {};
+        cef_string_from_utf8(buf, strlen(buf), &new_val);
+        cmd->append_switch_with_value(cmd, &n, &new_val);
+        cef_string_clear(&new_val);
+      }
+      cef_string_utf8_clear(&u8);
+      cef_string_userfree_free(existing);
+    } else {
+      if (existing) cef_string_userfree_free(existing);
+      cef_string_t v = {};
+      cef_string_from_ascii(feature_name, strlen(feature_name), &v);
+      cmd->append_switch_with_value(cmd, &n, &v);
+      cef_string_clear(&v);
+    }
+  } else {
+    cef_string_t v = {};
+    cef_string_from_ascii(feature_name, strlen(feature_name), &v);
+    cmd->append_switch_with_value(cmd, &n, &v);
+    cef_string_clear(&v);
+  }
+  cef_string_clear(&n);
+}
+
 void CEF_CALLBACK simple_app_on_before_command_line_processing(
     cef_app_t* self,
     const cef_string_t* process_type,
@@ -213,6 +248,11 @@ void CEF_CALLBACK simple_app_on_before_command_line_processing(
   cef_string_from_ascii("allow-file-access-from-files", 28, &switch2);
   command_line->append_switch(command_line, &switch2);
   cef_string_clear(&switch2);
+
+  // Disable automatic HTTP->HTTPS upgrades to prevent intranet HTTP sites (e.g. http://jackson.cnm.com)
+  // from being forced to HTTPS.
+  append_disable_feature_if_missing(command_line, "HttpsUpgrades");
+  append_disable_feature_if_missing(command_line, "HttpsFirstMode");
 
 #if defined(OS_WIN)
   cef_string_t lang_switch = {};
@@ -345,7 +385,16 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
   case WM_GETMINMAXINFO:
   {
     MINMAXINFO* mmi = (MINMAXINFO*)lParam;
-    HMONITOR hMonitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+    HMONITOR hMonitor = NULL;
+    if (IsIconic(hwnd)) {
+      WINDOWPLACEMENT wp = {sizeof(WINDOWPLACEMENT)};
+      if (GetWindowPlacement(hwnd, &wp)) {
+        hMonitor = MonitorFromRect(&wp.rcNormalPosition, MONITOR_DEFAULTTONEAREST);
+      }
+    }
+    if (!hMonitor) {
+      hMonitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+    }
     MONITORINFO mi = {0};
     mi.cbSize = sizeof(MONITORINFO);
     if (GetMonitorInfo(hMonitor, &mi)) {
@@ -392,7 +441,10 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
     if (wParam == TRUE) {
       if (IsZoomed(hwnd)) {
         NCCALCSIZE_PARAMS* params = (NCCALCSIZE_PARAMS*)lParam;
-        HMONITOR hMon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        HMONITOR hMon = MonitorFromRect(&params->rgrc[0], MONITOR_DEFAULTTONEAREST);
+        if (!hMon) {
+          hMon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        }
         MONITORINFO mi = { sizeof(MONITORINFO) };
         if (GetMonitorInfo(hMon, &mi)) {
           params->rgrc[0] = mi.rcWork;
@@ -929,7 +981,7 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
           int cur_w = cur_rc.right - cur_rc.left;
           int cur_h = cur_rc.bottom - cur_rc.top;
           if (pt.x != 0 || pt.y != 0 || cur_w != width || cur_h != target_ui_h) {
-            SetWindowPos(ui_hwnd, HWND_TOP, 0, 0, width, target_ui_h, SWP_NOACTIVATE);
+            SetWindowPos(ui_hwnd, HWND_TOP, 0, 0, width, target_ui_h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
             if (win_ctx->is_ui_expanded && win_ctx->ui_expanded_omni_x >= 0 && win_ctx->ui_expanded_omni_w > 0) {
               HRGN rgnTop = CreateRectRgn(0, 0, width, ui_height);
               int rgn_right = win_ctx->ui_expanded_omni_x + win_ctx->ui_expanded_omni_w + 1;
@@ -945,6 +997,11 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
             } else if (!win_ctx->is_ui_expanded) {
               SetWindowRgn(ui_hwnd, NULL, TRUE);
             }
+          } else {
+            SetWindowPos(ui_hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+          }
+          if (!IsWindowVisible(ui_hwnd)) {
+            ShowWindow(ui_hwnd, SW_SHOW);
           }
         }
         host->base.release(&host->base);
@@ -965,14 +1022,96 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
       }
     }
 
+    // Notify CEF browsers of screen / display change
+    if (win_ctx->ui_browser) {
+      cef_browser_host_t *h = win_ctx->ui_browser->get_host(win_ctx->ui_browser);
+      if (h) {
+        h->notify_screen_info_changed(h);
+        h->base.release(&h->base);
+      }
+    }
+    if (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+      tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
+      if (active_tab->browser) {
+        cef_browser_host_t *h = active_tab->browser->get_host(active_tab->browser);
+        if (h) {
+          h->notify_screen_info_changed(h);
+          h->base.release(&h->base);
+        }
+      }
+      if (active_tab->is_split && active_tab->right_browser) {
+        cef_browser_host_t *h = active_tab->right_browser->get_host(active_tab->right_browser);
+        if (h) {
+          h->notify_screen_info_changed(h);
+          h->base.release(&h->base);
+        }
+      }
+    }
+    if (win_ctx->sidepanel_browser && win_ctx->show_sidepanel) {
+      cef_browser_host_t *h = win_ctx->sidepanel_browser->get_host(win_ctx->sidepanel_browser);
+      if (h) {
+        h->notify_screen_info_changed(h);
+        h->base.release(&h->base);
+      }
+    }
+
     SubclassAllChildWindows(hwnd);
     simple_dialog_helper_reposition_open_dialogs(hwnd);
 
     return 0;
   }
   case WM_MOVE:
+  {
     simple_dialog_helper_reposition_open_dialogs(hwnd);
+    if (win_ctx) {
+      if (win_ctx->ui_browser) {
+        cef_browser_host_t* h = win_ctx->ui_browser->get_host(win_ctx->ui_browser);
+        if (h) {
+          h->notify_move_or_resize_started(h);
+          h->notify_screen_info_changed(h);
+          h->base.release(&h->base);
+        }
+      }
+      if (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+        tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
+        if (active_tab->browser) {
+          cef_browser_host_t* h = active_tab->browser->get_host(active_tab->browser);
+          if (h) {
+            h->notify_move_or_resize_started(h);
+            h->notify_screen_info_changed(h);
+            h->base.release(&h->base);
+          }
+        }
+        if (active_tab->is_split && active_tab->right_browser) {
+          cef_browser_host_t* h = active_tab->right_browser->get_host(active_tab->right_browser);
+          if (h) {
+            h->notify_move_or_resize_started(h);
+            h->notify_screen_info_changed(h);
+            h->base.release(&h->base);
+          }
+        }
+      }
+      if (win_ctx->sidepanel_browser && win_ctx->show_sidepanel) {
+        cef_browser_host_t* h = win_ctx->sidepanel_browser->get_host(win_ctx->sidepanel_browser);
+        if (h) {
+          h->notify_move_or_resize_started(h);
+          h->notify_screen_info_changed(h);
+          h->base.release(&h->base);
+        }
+      }
+    }
     break;
+  }
+  case WM_DPICHANGED:
+  {
+    RECT* const prcNewWindow = (RECT*)lParam;
+    SetWindowPos(hwnd, NULL,
+                 prcNewWindow->left, prcNewWindow->top,
+                 prcNewWindow->right - prcNewWindow->left,
+                 prcNewWindow->bottom - prcNewWindow->top,
+                 SWP_NOZORDER | SWP_NOACTIVATE);
+    return 0;
+  }
   case WM_CLOSE:
     LogMsg("WM_CLOSE: hwnd = %p, win_ctx = %p\n", hwnd, win_ctx);
     DestroyWindow(hwnd);

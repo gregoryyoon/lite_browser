@@ -2118,3 +2118,82 @@ Lite Browser의 기반 임베디드 브라우저 프레임워크를 기존 CEF 1
 - **아이콘 자동 주입**: 5개 해상도 규격(`16x16`, `24x24`, `32x32`, `48x48`, `256x256`) 커스텀 아이콘 PE 자동 주입 및 셸 캐시 갱신 완료.
 - **런타임 실행 검증**:
   - `lite_browser.exe` 실행 시 메인 브라우저 프로세스, 자식 렌더러 프로세스, GPU 및 Utility 프로세스가 결함 없이 정상 기동함을 프로세스 상태(`Get-Process`)를 통해 확인.
+
+---
+
+## 59. 다중 모니터 환경에서 최소화 후 전체 화면 복원 시 흰색 화면(White Screen) 발생 버그 해결 (Multi-Monitor Minimize/Restore Fullscreen White Screen Defect Fix)
+
+### 59.1 개요
+2대 이상의 모니터(주 모니터 및 보조 모니터)를 확장 디스플레이로 구성한 환경에서, 보조 모니터에 LiteBrowser를 전체 화면(Maximized/Fullscreen)으로 실행한 뒤 최소화(`SW_MINIMIZE`)하고 Windows 작업 표시줄을 통해 다시 전체 화면으로 복원할 때, 화면 전체가 흰색(White Screen)으로 변하며 상단 윈도우 컨트롤(최소화/복원/닫기 버튼), 주소창/탭바 UI 및 웹 콘텐츠가 일체 표시되지 않는 결함이 발견되었습니다.
+본 업데이트에서는 Windows 창 관리자(DWM/Win32)의 최소화 시 가상 음수 좌표계(`-32000, -32000`) 동작 특성과 CEF/DirectX 하드웨어 가속 컴포지터의 뷰포트 스왑체인 동기화 구조를 정밀 분석하여, 모니터 작업 영역 감지 로직, 자식 UI 윈도우 Z-Order/노출 보장 및 CEF 화면 정보 통지 파이프라인을 전면 개선함으로써 문제를 원천 해결했습니다.
+
+### 59.2 문제 원인 분석
+1. **최소화 상태의 가상 좌표계와 `MonitorFromWindow`의 주 모니터 오판정**:
+   - Windows는 윈도우가 최소화(`IsIconic`)되면 해당 창의 좌표를 화면 밖 가상 공간인 `(-32000, -32000)`으로 이동시킵니다.
+   - 복원 과정에서 `WM_NCCALCSIZE` 및 `WM_GETMINMAXINFO` 메시지가 발생할 때 `MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST)`를 호출하면, 윈도우의 현재 위치가 `(-32000, -32000)`이므로 보조 모니터가 아닌 기본 주 모니터(Primary Monitor) 핸들이 반환되는 문제가 있었습니다.
+   - 이로 인해 보조 모니터의 좌표계(예: `left=1920, top=0, right=3840, bottom=1080`)가 아닌 주 모니터의 작업 영역(`0, 0, 1920, 1040`)이 `params->rgrc[0]`에 강제 대입되면서, 메인 윈도우와 자식 브라우저의 클라이언트 좌표계에 극심한 오프셋 불일치가 발생하고 Chromium D3D 하드웨어 가속 스왑체인이 뷰포트를 유실하여 화면 전체가 빈 흰색 버퍼로 고착되었습니다.
+2. **`WM_SIZE` 최적화 분기에서의 `ui_hwnd` Z-Order 및 가시성 갱신 누락**:
+   - `WM_SIZE` 핸들러에서 상단 주소창 윈도우(`ui_hwnd`)의 현재 크기/위치가 목표 크기와 동일한 경우 불필요한 재배치를 피하고자 `SetWindowPos`를 생략하도록 되어 있었습니다.
+   - 그러나 최소화 후 복원 시에는 크기 수치는 이전과 같더라도 `ui_hwnd`가 백그라운드 탭 또는 메인 윈도우의 비활성 상태 전환에 의해 Z-Order가 뒤로 밀리거나 숨겨진 상태(`!IsWindowVisible`)일 수 있어, 상단 탭바/주소창이 복원된 화면에 노출되지 않고 감춰진 채로 남아있게 되었습니다.
+3. **디스플레이 전환 및 스크린 변경 통지(`notify_screen_info_changed`) 누락**:
+   - 최소화/복원 및 모니터 간 창 이동 시 CEF 브라우저 호스트에 디스플레이 및 스크린 정보 변경이 전달되지 않아, Chromium 렌더러가 이전 화면 버퍼 상태를 그대로 유지하려다 렌더링 파이프라인이 정지되는 부수 효과가 있었습니다.
+
+### 59.3 주요 구현 내역
+1. **`simple_app.c` 내 정규 복원 좌표 기반 모니터 판별 (`WM_GETMINMAXINFO`)**:
+   - 창이 최소화(`IsIconic(hwnd)`)된 상태에서는 `GetWindowPlacement(hwnd, &wp)`를 호출하여 정상 복원 좌표(`wp.rcNormalPosition`)를 획득하고, `MonitorFromRect(&wp.rcNormalPosition, MONITOR_DEFAULTTONEAREST)`를 사용하여 실제 복원 대상이 되는 모니터(보조 모니터)를 정확히 판별하도록 수정했습니다.
+2. **사각 영역 기반 작업 영역 판별 (`WM_NCCALCSIZE`)**:
+   - `WM_NCCALCSIZE` 처리 시 `MonitorFromWindow(hwnd)` 대신 전달된 창 영역 좌표(`params->rgrc[0]`)를 기반으로 `MonitorFromRect(&params->rgrc[0], MONITOR_DEFAULTTONEAREST)`를 호출하여, 보조 모니터의 정확한 작업 영역(`mi.rcWork`)이 대입되도록 보정했습니다.
+3. **`ui_hwnd` 최상위 Z-Order 및 가시성 강제 보장 (`WM_SIZE`)**:
+   - `ui_hwnd`의 크기/위치 변경이 없는 동일 크기 분기에서도 `SetWindowPos(ui_hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW)`를 호출하여 상단 툴바가 항상 최전면에 노출되도록 보장했습니다.
+   - `if (!IsWindowVisible(ui_hwnd)) ShowWindow(ui_hwnd, SW_SHOW);` 안전 가드를 추가하여 숨김 상태가 발생하지 않도록 차단했습니다.
+4. **CEF 브라우저 호스트 화면 정보 실시간 동기화 (`WM_SIZE`, `WM_MOVE`, `WM_DPICHANGED`)**:
+   - `WM_SIZE` 완료 시점 및 `WM_MOVE` 수신 시 상단 UI 브라우저(`ui_browser`), 현재 활성 탭 브라우저(`active_tab->browser`), 듀얼 분할 브라우저(`active_tab->right_browser`), 사이드패널 브라우저(`sidepanel_browser`)에 대해 `h->notify_screen_info_changed(h)` 및 `h->notify_move_or_resize_started(h)`를 명시 호출하여 D3D/Chromium 컴포지터가 뷰포트를 즉각 갱신하도록 구성했습니다.
+   - `WM_DPICHANGED` 메시지를 수신하여 권장 사각 영역(`prcNewWindow`)으로 창 위치와 크기를 동기화했습니다.
+
+### 59.4 관련 소스 코드
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_app.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_app.c)
+
+### 59.5 빌드 및 검증 결과
+- **디버그 빌드**: `cmake --build cef_binary_154.0.34/build --config Debug --target cefsimple_capi` 성공 (`Exit code 0, 오류 0개`).
+- **바이너리 생성**: [`cef_binary_154.0.34\build\tests\cefsimple_capi\Debug\lite_browser.exe`](file:///c:/projects/lite_browser/cef_binary_154.0.34/build/tests/cefsimple_capi/Debug/lite_browser.exe) 및 `lite_browser.dll` 정상 갱신.
+- **재현 시나리오 실기 검증**:
+  - 보조 모니터에서 LiteBrowser를 전체 화면으로 띄운 후 최소화 실행.
+  - Windows 작업 표시줄에서 보조 모니터 창을 클릭하여 전체 화면으로 복원.
+  - 화면이 흰색으로 멈추는 현상이 완전히 사라지고, 상단 윈도우 컨트롤, 탭바, 주소창 및 웹 콘텐츠가 즉시 정상 렌더링됨을 사용자 실기 테스트를 통해 최종 확인 완료.
+
+---
+
+## 60. 사내 인트라넷 HTTP 사이트 자동 HTTPS 승격(307 Internal Redirect) 방지 및 접속 결함 해결 (Intranet HTTP Auto HTTPS-Upgrade Defect Fix)
+
+### 60.1 개요
+사내 인트라넷 PC(예: `http://jackson.cnm.com`) 또는 공유기 관리 페이지(예: `http://192.168.0.1/ui/`)와 같이 평문 HTTP 프로토콜만 서비스하는 웹 서버에 접속할 때, Microsoft Edge에서는 정상적으로 페이지가 열리지만 LiteBrowser에서는 접속 실패(`ERR_TIMED_OUT` 또는 `ERR_CONNECTION_REFUSED`)가 발생하는 현상이 보고되었습니다.
+브라우저 내부 C API 네트워크 이벤트 실시간 추적(`OnBeforeBrowse`, `OnLoadError`, `OnLoadEnd` 등)을 통해 원인을 규명하고, Chromium 엔진의 자동 HTTPS 승격(Optimistic HTTPS Upgrades) 정책을 비활성화하여 사내 인트라넷 HTTP 웹사이트에 원활히 접속할 수 있도록 조치하였습니다.
+
+### 60.2 원인 분석 (네트워크 로그 실측 기반)
+1. **내부 307 리다이렉트 발생**:
+   - `debug_net.log` 실측 결과, 주소창에 `http://jackson.cnm.com`을 입력하여 탐색을 시작한 직후 불과 23ms 만에 Chromium 내부 네트워크 스택이 `https://jackson.cnm.com/`으로 내부 리다이렉트(`is_redirect = 1`, HTTP 307 Internal Redirect)를 발생시켰습니다.
+2. **443 포트 타임아웃**:
+   - 대상 인트라넷 서버는 HTTP(80 포트)만 서비스 중이고 HTTPS(443 포트)는 열려 있지 않아, 3초 동안 연결을 시도하다 `ERR_TIMED_OUT`(-7) 에러로 실패 처리되었습니다.
+3. **Edge와 Chromium의 정책 차이**:
+   - Edge는 로컬 인트라넷 영역(Local Intranet Zone, 사내 사설망/`*.cnm.com` 등)에 대해 "Automatic HTTPS" 기능을 기본적으로 바이패스(Bypass)하도록 예외 처리되어 있습니다.
+   - 반면 Chromium 최신 버전은 모든 HTTP 탐색에 대해 낙관적으로 HTTPS를 먼저 찔러보는 `HttpsUpgrades` 기능이 기본 활성화되어 있어 인트라넷 HTTP 서버 접근이 차단되는 부작용이 발생했습니다.
+
+### 60.3 주요 구현 내역
+1. **`disable-features` 스위치 안전 병합 유틸리티 구현 (`simple_app.c`)**:
+   - `append_disable_feature_if_missing(cef_command_line_t* cmd, const char* feature_name)`를 구현하여 기존에 다른 비활성화 기능이 있더라도 콤마(`,`) 구분자로 안전하게 병합되도록 구성했습니다.
+2. **자동 HTTPS 승격 및 HTTPS-First 모드 비활성화 (`simple_app.c`)**:
+   - `simple_app_on_before_command_line_processing()` 콜백에서 브라우저 및 하위 프로세스 커맨드라인에 `--disable-features=HttpsUpgrades,HttpsFirstMode` 스위치를 자동 주입했습니다.
+   - 이를 통해 사용자가 명시적으로 입력한 `http://` 프로토콜이 브라우저 내부에서 임의로 `https://`로 변환되지 않고 원본 프로토콜 그대로 전송되도록 보장했습니다.
+3. **디버그 계측 코드 정리**:
+   - 원인 규명 및 검증 목적으로 일시 주입했던 `LogNet` 로깅 함수 및 관련 콜백을 완전히 정리하여 바이너리 경량성과 클린 코드를 유지했습니다.
+
+### 60.4 관련 소스 코드
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_app.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_app.c)
+
+### 60.5 빌드 및 검증 결과
+- **디버그 빌드**: `cmake --build cef_binary_154.0.34/build --config Debug --target cefsimple_capi` 성공 (`Exit code 0, 오류 0개`).
+- **실기 검증 결과 (`debug_net.log` 재확인)**:
+  - `[ON_BEFORE_BROWSE] url = http://jackson.cnm.com/ (is_redirect = 0)` 확인 (리다이렉트 완전 소멸).
+  - `[ON_LOAD_END] url = http://jackson.cnm.com/, httpStatusCode = 200` 정상 완료.
+  - "Jackson Lee · Dashboard" 대시보드 페이지가 지연 없이 완벽하게 로딩됨을 사용자 실기 테스트를 통해 최종 확인 완료.
+

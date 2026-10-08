@@ -114,10 +114,33 @@ function renderSidebar() {
   if (tagsContainer) {
     tagsContainer.innerHTML = '';
     sortedTags.forEach(tag => {
-      const btn = document.createElement('button');
+      const btn = document.createElement('div');
       btn.className = 'tag-nav-btn' + (currentTag === tag ? ' active' : '');
       btn.onclick = () => selectTag(tag);
-      btn.innerHTML = `<span>#${tag}</span><span class="badge">${tagCounts[tag]}</span>`;
+
+      const label = document.createElement('span');
+      label.className = 'tag-label';
+      label.textContent = `#${tag}`;
+
+      const badgeWrap = document.createElement('span');
+      badgeWrap.className = 'tag-badge-wrap';
+
+      const countSpan = document.createElement('span');
+      countSpan.className = 'badge tag-count';
+      countSpan.textContent = tagCounts[tag];
+
+      const delBtn = document.createElement('button');
+      delBtn.className = 'tag-del-btn';
+      delBtn.title = `태그 #${tag} 삭제`;
+      delBtn.innerHTML = '<svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+      delBtn.onclick = (e) => deleteTag(tag, e);
+
+      badgeWrap.appendChild(countSpan);
+      badgeWrap.appendChild(delBtn);
+
+      btn.appendChild(label);
+      btn.appendChild(badgeWrap);
+
       tagsContainer.appendChild(btn);
     });
   }
@@ -137,6 +160,29 @@ function selectTag(tag) {
     currentTag = '';
   } else {
     currentTag = tag;
+  }
+  renderDashboard();
+}
+
+function deleteTag(tag, event) {
+  if (event) {
+    event.stopPropagation();
+    event.preventDefault();
+  }
+  let modified = false;
+  managerBookmarks.forEach(bm => {
+    if (Array.isArray(bm.extractedTags) && bm.extractedTags.includes(tag)) {
+      bm.extractedTags = bm.extractedTags.filter(t => t !== tag);
+      modified = true;
+    }
+  });
+
+  if (currentTag === tag) {
+    currentTag = '';
+  }
+
+  if (modified) {
+    saveBookmarksV2();
   }
   renderDashboard();
 }

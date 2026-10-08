@@ -155,6 +155,7 @@ body.manager-body {
   font-size: 12.5px;
   cursor: pointer;
   transition: background 0.12s ease;
+  user-select: none;
 }
 
 .tag-nav-btn:hover {
@@ -166,6 +167,69 @@ body.manager-body {
   background: var(--accent-mint-subtle, rgba(13, 148, 136, 0.15));
   color: var(--accent-mint);
   font-weight: 600;
+}
+
+.tag-nav-btn .tag-label {
+  flex: 1;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-badge-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  margin-left: 6px;
+  flex-shrink: 0;
+}
+
+.tag-badge-wrap .tag-count {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tag-del-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.tag-del-btn svg {
+  width: 12px;
+  height: 12px;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+}
+
+.tag-del-btn:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+/* Hover: replace count badge with delete button */
+.tag-nav-btn:hover .tag-badge-wrap .tag-count {
+  display: none;
+}
+
+.tag-nav-btn:hover .tag-badge-wrap .tag-del-btn {
+  display: flex;
 }
 
 /* ==========================================================================

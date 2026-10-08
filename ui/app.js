@@ -254,6 +254,23 @@ function updateStarIcon() {
   }
 }
 
+function formatDisplayUrl(url) {
+  if (!url) return '';
+  try {
+    return decodeURI(url);
+  } catch (e) {
+    try {
+      return url.replace(/%([0-9a-fA-F]{2})/g, (match, hex) => {
+        const code = parseInt(hex, 16);
+        if (code === 0x5F) return '_';
+        return match;
+      });
+    } catch (_) {
+      return url;
+    }
+  }
+}
+
 window.updateAddress = function(url) {
   currentUrl = url;
   const addressBar = document.getElementById('address-bar');
@@ -269,7 +286,7 @@ window.updateAddress = function(url) {
     } else if (url.indexOf('ui/sidepanel.html') !== -1 || url.indexOf('lite://sidepanel') !== -1) {
       addressBar.value = 'lite://sidepanel';
     } else {
-      addressBar.value = url;
+      addressBar.value = formatDisplayUrl(url);
     }
   }
   updateStarIcon();
@@ -591,6 +608,66 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     addressBar.addEventListener('blur', () => {
       isSelectAllOnFocus = false;
+    });
+
+    addressBar.addEventListener('paste', (e) => {
+      const pasteData = (e.clipboardData || window.clipboardData)?.getData('text');
+      if (pasteData) {
+        e.preventDefault();
+        const decoded = formatDisplayUrl(pasteData);
+        const start = addressBar.selectionStart;
+        const end = addressBar.selectionEnd;
+        const text = addressBar.value;
+        addressBar.value = text.slice(0, start) + decoded + text.slice(end);
+        addressBar.selectionStart = addressBar.selectionEnd = start + decoded.length;
+        addressBar.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    });
+
+    addressBar.addEventListener('copy', (e) => {
+      const start = addressBar.selectionStart;
+      const end = addressBar.selectionEnd;
+      if (start === end) return;
+      const selectedText = addressBar.value.substring(start, end);
+      let copyText = selectedText;
+      if (start === 0 && end === addressBar.value.length && currentUrl && !currentUrl.startsWith('ui/')) {
+        copyText = currentUrl;
+      } else {
+        try {
+          copyText = encodeURI(selectedText);
+        } catch (err) {
+          copyText = selectedText;
+        }
+      }
+      e.preventDefault();
+      if (e.clipboardData) {
+        e.clipboardData.setData('text/plain', copyText);
+      }
+    });
+
+    addressBar.addEventListener('cut', (e) => {
+      const start = addressBar.selectionStart;
+      const end = addressBar.selectionEnd;
+      if (start === end) return;
+      const selectedText = addressBar.value.substring(start, end);
+      let copyText = selectedText;
+      if (start === 0 && end === addressBar.value.length && currentUrl && !currentUrl.startsWith('ui/')) {
+        copyText = currentUrl;
+      } else {
+        try {
+          copyText = encodeURI(selectedText);
+        } catch (err) {
+          copyText = selectedText;
+        }
+      }
+      e.preventDefault();
+      if (e.clipboardData) {
+        e.clipboardData.setData('text/plain', copyText);
+      }
+      const text = addressBar.value;
+      addressBar.value = text.slice(0, start) + text.slice(end);
+      addressBar.selectionStart = addressBar.selectionEnd = start;
+      addressBar.dispatchEvent(new Event('input', { bubbles: true }));
     });
   }
 
@@ -1039,6 +1116,9 @@ document.addEventListener('DOMContentLoaded', () => {
     } else if (e.ctrlKey && e.shiftKey && (e.key === 'a' || e.key === 'A')) {
       e.preventDefault();
       toggleAiSidepanel();
+    } else if (e.ctrlKey && e.shiftKey && (e.key === 'o' || e.key === 'O')) {
+      e.preventDefault();
+      openBookmarkDashboard();
     }
   });
 
@@ -1232,7 +1312,7 @@ function navigateOmniboxUrl(url, isNewTab = false) {
   if (!url) return;
   const addressBar = document.getElementById('address-bar');
   if (addressBar) {
-    addressBar.value = url;
+    addressBar.value = formatDisplayUrl(url);
     addressBar.blur();
   }
   closeOmniboxDropdown();
