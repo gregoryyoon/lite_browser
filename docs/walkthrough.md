@@ -2197,3 +2197,71 @@ Lite Browser의 기반 임베디드 브라우저 프레임워크를 기존 CEF 1
   - `[ON_LOAD_END] url = http://jackson.cnm.com/, httpStatusCode = 200` 정상 완료.
   - "Jackson Lee · Dashboard" 대시보드 페이지가 지연 없이 완벽하게 로딩됨을 사용자 실기 테스트를 통해 최종 확인 완료.
 
+---
+
+## 61. 북마크 관리자 UI 고도화 및 세점 메뉴 연동 (Bookmark Manager UI Refinements & Menu Integration)
+
+### 61.1 개요
+북마크 관리 기능의 사용 편의성과 명칭 일관성을 제고하기 위해, 스마트 태그 목록에서 불필요한 태그를 직접 삭제할 수 있는 기능을 추가하고, 대시보드 내 "북마크 관리자 대시보드" 및 "북마크 자산" 등의 파편화된 UI 명칭을 "북마크 관리자"로 통일했습니다. 아울러 브라우저 우측 상단 세점 메뉴(···)에 "북마크 관리자 (Ctrl+Shift+O)" 메뉴 아이템을 신설하여 키보드 단축키 및 메뉴 클릭을 통해 언제든지 손쉽게 접근할 수 있도록 연동하였습니다.
+
+### 61.2 주요 구현 내역
+1. **스마트 태그 호버 삭제 UI 및 데이터 동기화 (`manager.html`, `manager.css`, `manager.js`)**:
+   - 사이드바 내 스마트 태그 항목에 마우스 호버 시 우측 끝에 인라인 SVG 기반 `x` 삭제 버튼이 노출되도록 CSS 스타일을 구성했습니다.
+   - `deleteTag(tagName, event)` 함수를 구현하여 태그 삭제 클릭 시 모든 북마크 데이터의 `context.tags` 배열에서 해당 태그를 제거하고, `saveBookmarksV2()`를 통해 백엔드 영구 저장소에 즉시 반영 후 UI를 갱신하도록 처리했습니다.
+2. **UI 명칭 간결화 및 통일 (`index.html`, `manager.html`)**:
+   - 브라우저 상단 툴바 북마크 버튼 툴팁 및 관리자 대시보드 타이틀을 "북마크 관리자 대시보드"에서 "북마크 관리자"로 수정했습니다.
+   - 관리자 페이지 좌측 사이드바 상단 헤더 텍스트를 "북마크 자산"에서 "북마크 관리자"로 통일하여 직관성을 높였습니다.
+3. **세점 메뉴 내 메뉴 아이템 추가 및 단축키 연동 (`simple_handler.c`, `app.js`)**:
+   - 세점 메뉴 네이티브 팝업 메뉴(`HMENU`)에 `북마크 관리자 (Ctrl+Shift+O)`(Command ID: 1012)를 추가하고, 선택 시 새 탭(`lite://favorites`)으로 열리도록 라우팅했습니다.
+   - 상단 UI 브라우저 전역 키다운 이벤트 리스너에 `Ctrl+Shift+O` 단축키 처리를 추가하여 즉시 북마크 관리자가 호출되도록 지원했습니다.
+
+### 61.3 관련 소스 코드
+- [`ui/index.html`](file:///c:/projects/lite_browser/ui/index.html)
+- [`ui/manager.html`](file:///c:/projects/lite_browser/ui/manager.html)
+- [`ui/manager.css`](file:///c:/projects/lite_browser/ui/manager.css)
+- [`ui/manager.js`](file:///c:/projects/lite_browser/ui/manager.js)
+- [`ui/app.js`](file:///c:/projects/lite_browser/ui/app.js)
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.c)
+
+### 61.4 빌드 및 검증 결과
+- **디버그 빌드**: `cmake --build cef_binary_154.0.34/build --config Debug --target cefsimple_capi` 성공.
+- **실기 검증**:
+  - 스마트 태그 목록 호버 시 `x` 버튼 노출 및 태그 정상 삭제 확인.
+  - 세점 메뉴 내 `북마크 관리자 (Ctrl+Shift+O)` 클릭 및 단축키 입력 시 북마크 관리자 페이지 정상 열림 확인.
+
+---
+
+## 62. 주소표시창 URL 디코딩(%5F ➔ _) 표시 및 클립보드 입출력 최적화 (Address Bar URL Decoding & Clipboard Handling)
+
+### 62.1 개요
+기존 주소표시창은 CEF 엔진으로부터 전달받은 퍼센트 인코딩된 URL(`%5F`, `%EB%...` 등)을 그대로 표시하여, 사용자가 URL 내 언더스코어(`_`)나 한글 등의 문자를 주소창에서 직관적으로 읽을 수 없던 가독성 문제가 있었습니다. 본 업데이트에서는 주소표시창 상시 디코딩 표시, 붙여넣기(`paste`) 시 자동 디코딩, 그리고 복사(`copy`/`cut`) 시 외부 호환용 표준 퍼센트 인코딩 유지를 구현하여 웹 표준 호환성과 사용자 가독성을 동시에 달성했습니다.
+
+### 62.2 문제 원인 분석
+1. **RFC 3986 및 CEF 정규화 URL 노출**:
+   - CEF/Chromium 엔진은 주소 변경 콜백(`on_address_change`) 시 항상 표준 퍼센트 인코딩된 정규화 URL을 전달합니다.
+   - 기존 LiteBrowser는 이를 그대로 `addressBar.value = url`로 주소창에 노출하여 `%5F`, 한글 등의 인코딩 문자열이 그대로 노출되었습니다.
+2. **복사 및 붙여넣기 시 인코딩 중첩/가독성 저하**:
+   - 주소창의 인코딩된 텍스트를 복사하여 다른 탭의 주소창에 붙여넣으면 사용자가 원래의 URL 형태를 눈으로 식별할 수 없는 불편이 발생했습니다.
+
+### 62.3 주요 구현 내역
+1. **안전한 URL 표시 디코딩 헬퍼 (`formatDisplayUrl`, `app.js`)**:
+   - `decodeURI()`를 적용하여 `%5F` ➔ `_`, `%EB%...` ➔ 한글 등 비예약 문자 및 유니코드를 디코딩하는 함수를 구현했습니다.
+   - 잘못된 형식의 퍼센트 문자열(`URIError`)이 포함된 경우에도 정규식을 통해 `%5F`를 `_`로 안전하게 치환하도록 예외 폴백을 구성했습니다.
+2. **주소창 상시 디코딩 표시 연동 (`app.js`)**:
+   - 페이지 로드(`updateAddress`) 및 옴니박스 자동완성 선택(`navigateOmniboxUrl`) 시 주소창에 항상 `formatDisplayUrl(url)`을 적용하여, 탭 전환 후에도 디코딩된 깔끔한 형태가 유지되도록 처리했습니다.
+3. **주소창 붙여넣기(`paste`) 즉시 디코딩 (`app.js`)**:
+   - `addressBar`에 `paste` 이벤트 리스너를 등록하여, 클립보드 텍스트(`%5F` 등)가 주소창에 붙여넣어질 때 즉시 디코딩된 형태(`_`)로 삽입되도록 구현했습니다.
+4. **외부 호환을 위한 복사(`copy`/`cut`) 표준 규격 유지 (`app.js`)**:
+   - `addressBar`에서 주소 전체를 복사할 때 외부 프로그램(메모장, 메신저, 터미널 등)과의 링크 호환성을 유지하기 위해 표준 퍼센트 인코딩 URL(`currentUrl`)을 클립보드에 기록하도록 구현했습니다.
+
+### 62.4 관련 소스 코드
+- [`ui/app.js`](file:///c:/projects/lite_browser/ui/app.js)
+
+### 62.5 빌드 및 검증 결과
+- **디버그 빌드**: `cmake --build cef_binary_154.0.34/build --config Debug --target cefsimple_capi` 성공.
+- **실기 검증**:
+  - `%5F`가 포함된 URL을 복사하여 주소창에 붙여넣었을 때 `_`로 즉시 치환되어 가독성이 확보됨을 확인.
+  - 페이지 이동 및 탭 전환 후에도 주소창에 `_`가 안정적으로 유지됨을 확인.
+  - 주소창에서 복사한 텍스트를 메모장에 붙여넣을 때 표준 퍼센트 인코딩 형태가 유지됨을 확인.
+
+
