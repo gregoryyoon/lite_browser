@@ -40,6 +40,17 @@ VIAddVersionKey "FileVersion" "1.0.0.0"
 VIAddVersionKey "ProductVersion" "1.0.0.0"
 
 Section "Install"
+  ; Use 64-bit registry view for 64-bit application
+  SetRegView 64
+
+  ; Clean up legacy 32-bit (WOW6432Node) registry entries if they exist
+  SetRegView 32
+  DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser"
+  DeleteRegKey HKLM "Software\Clients\StartMenuInternet\LiteBrowser"
+  DeleteRegValue HKLM "Software\RegisteredApplications" "LiteBrowser"
+  DeleteRegKey HKLM "Software\Classes\LiteBrowserHTML"
+  SetRegView 64
+
   SetOutPath "$INSTDIR"
   
   ; Executables and DLLs
@@ -85,6 +96,10 @@ Section "Install"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
                   "DisplayName" "Lite Browser"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
+                  "DisplayIcon" "$\"$INSTDIR\lite_browser.exe$\",0"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
+                  "DisplayVersion" "1.0.0"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
                   "UninstallString" "$\"$INSTDIR\uninstall.exe$\""
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
                   "QuietUninstallString" "$\"$INSTDIR\uninstall.exe$\" /S"
@@ -92,6 +107,12 @@ Section "Install"
                   "InstallLocation" "$\"$INSTDIR$\""
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
                   "Publisher" "Gregory Yoon"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
+                  "HelpLink" "https://github.com/gregoryyoon/lite_browser"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
+                  "URLInfoAbout" "https://github.com/gregoryyoon/lite_browser"
+  WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
+                  "EstimatedSize" 412589
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
                   "NoModify" 1
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
@@ -124,6 +145,8 @@ Section "Install"
 SectionEnd
 
 Section "Uninstall"
+  SetRegView 64
+
   Delete "$DESKTOP\Lite Browser.lnk"
   Delete "$SMPROGRAMS\Lite Browser.lnk"
   
@@ -154,6 +177,14 @@ Section "Uninstall"
   
   RMDir "$INSTDIR"
   
+  ; Remove 64-bit registry entries
+  DeleteRegKey HKLM "Software\Clients\StartMenuInternet\LiteBrowser"
+  DeleteRegValue HKLM "Software\RegisteredApplications" "LiteBrowser"
+  DeleteRegKey HKLM "Software\Classes\LiteBrowserHTML"
+  DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser"
+
+  ; Clean up legacy 32-bit registry entries if present
+  SetRegView 32
   DeleteRegKey HKLM "Software\Clients\StartMenuInternet\LiteBrowser"
   DeleteRegValue HKLM "Software\RegisteredApplications" "LiteBrowser"
   DeleteRegKey HKLM "Software\Classes\LiteBrowserHTML"

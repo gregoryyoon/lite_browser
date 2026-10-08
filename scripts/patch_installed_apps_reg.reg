@@ -1,0 +1,17 @@
+Windows Registry Editor Version 5.00
+
+[-HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser]
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser]
+"DisplayName"="Lite Browser"
+"DisplayIcon"="C:\\Program Files\\LiteBrowser\\lite_browser.exe,0"
+"DisplayVersion"="1.0.0"
+"Publisher"="Gregory Yoon"
+"InstallLocation"="C:\\Program Files\\LiteBrowser"
+"UninstallString"="\"C:\\Program Files\\LiteBrowser\\uninstall.exe\""
+"QuietUninstallString"="\"C:\\Program Files\\LiteBrowser\\uninstall.exe\" /S"
+"HelpLink"="https://github.com/gregoryyoon/lite_browser"
+"URLInfoAbout"="https://github.com/gregoryyoon/lite_browser"
+"EstimatedSize"=dword:00064bc5
+"NoModify"=dword:00000001
+"NoRepair"=dword:00000001
