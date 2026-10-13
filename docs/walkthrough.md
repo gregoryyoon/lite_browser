@@ -2317,3 +2317,40 @@ Lite Browser의 기반 임베디드 브라우저 프레임워크를 기존 CEF 1
   2. `Ctrl + Shift + 클릭` 시에는 크롬/엣지 표준 단축키 동작대로 새 탭으로 즉시 화면이 이동함을 확인.
   3. 백그라운드로 생성된 탭을 탭 바에서 마우스로 클릭하면 부드럽게 해당 탭으로 전환되며 화면 및 주소창이 정상 갱신됨을 확인.
   4. 우클릭 컨텍스트 메뉴의 "새 탭에서 열기" 및 상단 `+` 버튼은 기존과 같이 포그라운드로 즉시 열림을 확인.
+
+---
+
+## 64. 탭 드래그 앤 드롭 위치 변경 및 실시간 슬라이딩 애니메이션 구현 (Tab Drag & Drop Reordering with Real-Time Sliding Animation)
+
+### 64.1 개요
+마우스 드래그 앤 드롭으로 탭 바 내 탭들의 순서를 자유롭게 변경할 수 있는 기능을 추가했습니다. 마이크로소프트 엣지(Edge) 스타일의 실시간 형제 탭 슬라이딩 애니메이션(`translate3d` & `cubic-bezier(0.2, 0, 0, 1)`)을 도입하여 직관적인 조작감을 제공하며, 드롭 시 목표 위치로 부드럽게 안착한 뒤 시각적 깜빡임 없이 새로운 순서로 DOM 및 백엔드 탭 배열을 동기화합니다. 또한 탭이 1개만 열려 있는 경우에는 불필요한 드래그 제스처 및 애니메이션이 동작하지 않도록 최적화했습니다.
+
+### 64.2 주요 구현 내역
+1. **실시간 형제 탭 이동 애니메이션 ([`ui/app.js`](file:///c:/projects/lite_browser/ui/app.js), [`ui/style.css`](file:///c:/projects/lite_browser/ui/style.css))**:
+   - `pointerdown`, `pointermove`, `pointerup` 기반의 정밀 드래그 추적 및 포인터 캡처(`setPointerCapture`) 구현.
+   - 드래그 중인 탭의 중심 좌표(`currentCenter`)를 기준으로 목표 인덱스(`targetIndex`)를 실시간 계산하고, 형제 탭들이 자연스럽게 좌우로 비켜서는 슬라이딩 애니메이션 적용.
+   - `.tab.tab-dragging`: 드래그 중인 탭 최상단 배치(`z-index: 1000`), 부드러운 드롭 섀도우, 마우스 커서(`grabbing`), 즉각적인 실시간 추적(`transition: none`).
+   - `.tab.tab-shift-animate`: 비켜서는 형제 탭들을 위한 부드러운 전환 효과(`transition: transform 0.22s cubic-bezier(0.2, 0, 0, 1)`).
+2. **마우스 드롭 시 원자적 순서 확정 및 스냅백 방지 ([`ui/app.js`](file:///c:/projects/lite_browser/ui/app.js))**:
+   - 드롭 시 목표 슬롯으로 부드럽게 안착하는 슬라이딩 애니메이션(180ms) 완료 시점에 DOM 노드 재배치(`splice` & `appendChild`)와 트랜스폼 리셋(`cleanupDrag`), 백엔드 `reorder-tab` IPC 호출을 원자적(Atomic)으로 동기화.
+   - 백엔드의 빠른 `updateTabsList` 응답 타이밍과 드래그 완료 플래그(`g_isTabDragging`) 간의 경합을 차단하여, 드롭 시 원래 위치로 스냅백되는 문제 원천 해결.
+3. **단일 탭 드래그 비활성화 가드 ([`ui/app.js`](file:///c:/projects/lite_browser/ui/app.js))**:
+   - 현재 열려 있는 탭이 1개 이하일 경우(`tabElements.length <= 1`), 포인터 캡처를 건너뛰어 불필요한 드래그 제스처, 마우스 커서 변경, 슬라이딩 애니메이션이 작동하지 않도록 처리.
+4. **C 백엔드 탭 배열 순서 및 활성 인덱스 동기화 ([`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.c))**:
+   - `http://ui-action/reorder-tab?id=...&from=...&to=...` IPC 수신 시 `get_query_param`으로 안전하게 인자를 파싱.
+   - `win_ctx->tabs[]` 배열 내 탭 요소 이동 및 `win_ctx->active_tab_index` 갱신 후 `update_ui_tabs(win_ctx)`로 UI 브라우저와 상태 동기화.
+
+### 64.3 관련 소스 코드
+- [`ui/app.js`](file:///c:/projects/lite_browser/ui/app.js)
+- [`ui/style.css`](file:///c:/projects/lite_browser/ui/style.css)
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.c)
+
+### 64.4 빌드 및 검증 결과
+- **디버그 빌드**: `cmake --build cef_binary_154.0.34/build --config Debug --target cefsimple_capi` 성공 (`Exit code 0, 오류 0개`).
+- **바이너리 생성**: [`cef_binary_154.0.34\build\tests\cefsimple_capi\Debug\lite_browser.exe`](file:///c:/projects/lite_browser/cef_binary_154.0.34/build/tests/cefsimple_capi/Debug/lite_browser.exe) 및 `lite_browser.dll` 정상 갱신.
+- **실기 검증**:
+  1. 다중 탭 환경에서 탭을 드래그할 때 실시간으로 주변 탭들이 부드럽게 비켜서는 애니메이션 확인.
+  2. 마우스를 놓았을 때 드래그한 탭이 목표 슬롯에 정상 정착되고 탭 순서가 올바르게 유지됨을 확인.
+  3. 탭이 1개만 열려 있는 경우 드래그 및 애니메이션이 동작하지 않고 단순 클릭으로만 동작함을 확인.
+  4. 탭 바 바깥으로 탭을 드래그하여 분리 시 새 창으로 분리되는 기존 기능 정상 유지 확인.
+

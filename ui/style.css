@@ -148,6 +148,18 @@ body {
   box-shadow: var(--shadow-sm);
 }
 
+.tab.tab-dragging {
+  z-index: 1000 !important;
+  opacity: 0.96;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22), 0 2px 6px rgba(0, 0, 0, 0.12);
+  transition: none !important;
+  cursor: grabbing !important;
+}
+
+.tab.tab-shift-animate {
+  transition: transform 0.22s cubic-bezier(0.2, 0, 0, 1) !important;
+}
+
 
 .tab-favicon {
   width: 16px;

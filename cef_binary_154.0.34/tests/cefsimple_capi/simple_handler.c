@@ -3003,6 +3003,60 @@ int CEF_CALLBACK request_handler_on_before_browse(
               }
             }
           }
+        } else if (strncmp(action, "reorder-tab?", 12) == 0) {
+          int target_id = -1;
+          int from_idx = -1;
+          int to_idx = -1;
+
+          char* p_id = get_query_param(action + 12, "id");
+          if (p_id) { target_id = atoi(p_id); free(p_id); }
+
+          char* p_from = get_query_param(action + 12, "from");
+          if (p_from) { from_idx = atoi(p_from); free(p_from); }
+
+          char* p_to = get_query_param(action + 12, "to");
+          if (p_to) { to_idx = atoi(p_to); free(p_to); }
+
+          LogMsg("reorder-tab: id=%d, from=%d, to=%d\n", target_id, from_idx, to_idx);
+
+          if (win_ctx) {
+            if (from_idx < 0 || from_idx >= win_ctx->tab_count || win_ctx->tabs[from_idx].tab_id != target_id) {
+              from_idx = -1;
+              for (int i = 0; i < win_ctx->tab_count; i++) {
+                if (win_ctx->tabs[i].tab_id == target_id) {
+                  from_idx = i;
+                  break;
+                }
+              }
+            }
+
+            if (from_idx >= 0 && from_idx < win_ctx->tab_count &&
+                to_idx >= 0 && to_idx < win_ctx->tab_count && from_idx != to_idx) {
+              int active_id = (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) 
+                              ? win_ctx->tabs[win_ctx->active_tab_index].tab_id : -1;
+
+              tab_info_t moving_tab = win_ctx->tabs[from_idx];
+              if (from_idx < to_idx) {
+                for (int i = from_idx; i < to_idx; i++) {
+                  win_ctx->tabs[i] = win_ctx->tabs[i + 1];
+                }
+              } else {
+                for (int i = from_idx; i > to_idx; i--) {
+                  win_ctx->tabs[i] = win_ctx->tabs[i - 1];
+                }
+              }
+              win_ctx->tabs[to_idx] = moving_tab;
+
+              for (int i = 0; i < win_ctx->tab_count; i++) {
+                if (win_ctx->tabs[i].tab_id == active_id) {
+                  win_ctx->active_tab_index = i;
+                  break;
+                }
+              }
+
+              update_ui_tabs(win_ctx);
+            }
+          }
         }
       }
 

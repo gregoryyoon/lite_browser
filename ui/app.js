@@ -1,3 +1,7 @@
+let g_isTabDragging = false;
+let g_reorderTimer = null;
+let g_reorderCommit = null;
+
 function sendUiAction(url) {
   let bridge = document.getElementById('ui-action-bridge');
   if (bridge) {
@@ -400,55 +404,238 @@ function createTabDom(tab, isActive) {
   let isDragging = false;
   let startX = 0;
   let startY = 0;
+  let originalIndex = -1;
+  let targetIndex = -1;
+  let isOutside = false;
+  let tabElements = [];
+  let tabRects = [];
+  let stride = 180;
+
+  function cleanupDrag() {
+    isDragging = false;
+    g_isTabDragging = false;
+    document.body.style.cursor = '';
+    tabEl.style.cursor = '';
+    tabEl.classList.remove('tab-dragging');
+    tabEl.classList.remove('tab-shift-animate');
+    tabEl.style.transform = '';
+    tabEl.style.opacity = '';
+
+    const container = document.getElementById('tabs');
+    if (container) {
+      container.querySelectorAll('.tab').forEach(el => {
+        el.classList.remove('tab-shift-animate');
+        el.style.transform = '';
+      });
+    }
+  }
 
   tabEl.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    if (g_reorderTimer) {
+      clearTimeout(g_reorderTimer);
+      g_reorderTimer = null;
+      if (g_reorderCommit) {
+        const commit = g_reorderCommit;
+        g_reorderCommit = null;
+        commit();
+      }
+    }
     isDragging = false;
+    isOutside = false;
     startX = e.clientX;
     startY = e.clientY;
+
+    const container = document.getElementById('tabs');
+    if (!container) return;
+
+    tabElements = Array.from(container.querySelectorAll('.tab'));
+    originalIndex = tabElements.indexOf(tabEl);
+    targetIndex = originalIndex;
+
+    // Immediately switch tab on press as per standard UX
+    if (!tabEl.classList.contains('active')) {
+      switchTab(tab.id);
+    }
+
+    // 탭이 1개만 있는 경우 이동이 불필요하므로 드래그 및 애니메이션 비활성화
+    if (tabElements.length <= 1) {
+      return;
+    }
+
     tabEl.setPointerCapture(e.pointerId);
-    document.body.style.cursor = 'grabbing';
-    tabEl.style.cursor = 'grabbing';
   });
 
   tabEl.addEventListener('pointermove', (e) => {
-    if (tabEl.hasPointerCapture(e.pointerId)) {
-      const dx = e.clientX - startX;
-      const dy = e.clientY - startY;
-      if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+    if (!tabEl.hasPointerCapture(e.pointerId)) return;
+
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+
+    if (!isDragging) {
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
         isDragging = true;
+        g_isTabDragging = true;
+
+        const container = document.getElementById('tabs');
+        if (container) {
+          tabElements = Array.from(container.querySelectorAll('.tab'));
+          originalIndex = tabElements.indexOf(tabEl);
+          targetIndex = originalIndex;
+
+          tabRects = tabElements.map(el => el.getBoundingClientRect());
+          const draggedRect = tabRects[originalIndex];
+          const tabWidth = draggedRect ? draggedRect.width : 180;
+          const tabGap = tabElements.length > 1 && tabRects[1] && tabRects[0]
+            ? (tabRects[1].left - tabRects[0].right)
+            : 2;
+          stride = tabWidth + Math.max(0, tabGap);
+
+          tabEl.classList.add('tab-dragging');
+          tabElements.forEach(el => {
+            if (el !== tabEl) el.classList.add('tab-shift-animate');
+          });
+        }
       }
+    }
 
-      if (isDragging) {
-        const tabsBar = document.querySelector('.tabs-bar');
-        if (tabsBar) {
-          const rect = tabsBar.getBoundingClientRect();
-          const x = e.clientX;
-          const y = e.clientY;
+    if (isDragging) {
+      const tabsBar = document.querySelector('.tabs-bar');
+      const container = document.getElementById('tabs');
+      const barRect = tabsBar ? tabsBar.getBoundingClientRect() : (container ? container.getBoundingClientRect() : null);
 
-          if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
-            document.body.style.cursor = 'copy';
-            tabEl.style.cursor = 'copy';
-          } else {
-            document.body.style.cursor = 'grabbing';
-            tabEl.style.cursor = 'grabbing';
+      const isDetaching = barRect && (
+        e.clientY < barRect.top - 20 ||
+        e.clientY > barRect.bottom + 20 ||
+        e.clientX < barRect.left - 40 ||
+        e.clientX > barRect.right + 40
+      );
+
+      if (isDetaching) {
+        isOutside = true;
+        document.body.style.cursor = 'copy';
+        tabEl.style.cursor = 'copy';
+        tabEl.style.opacity = '0.75';
+        tabEl.style.transform = `translate3d(${dx}px, ${dy}px, 0)`;
+
+        tabElements.forEach(el => {
+          if (el !== tabEl) el.style.transform = 'translate3d(0, 0, 0)';
+        });
+      } else {
+        isOutside = false;
+        document.body.style.cursor = 'grabbing';
+        tabEl.style.cursor = 'grabbing';
+        tabEl.style.opacity = '';
+        tabEl.style.transform = `translate3d(${dx}px, 0, 0)`;
+
+        if (tabRects[originalIndex]) {
+          const currentCenter = tabRects[originalIndex].left + tabRects[originalIndex].width / 2 + dx;
+          let newTarget = 0;
+
+          for (let i = 0; i < tabElements.length; i++) {
+            if (i === originalIndex) continue;
+            const siblingCenter = tabRects[i].left + tabRects[i].width / 2;
+            if (currentCenter > siblingCenter) {
+              newTarget = (i >= originalIndex) ? i : i + 1;
+            }
           }
+          newTarget = Math.max(0, Math.min(tabElements.length - 1, newTarget));
+          targetIndex = newTarget;
+
+          // Animate sibling tabs shifting left or right
+          tabElements.forEach((el, i) => {
+            if (el === tabEl) return;
+            let shift = 0;
+            if (targetIndex > originalIndex) {
+              if (i > originalIndex && i <= targetIndex) {
+                shift = -stride;
+              }
+            } else if (targetIndex < originalIndex) {
+              if (i >= targetIndex && i < originalIndex) {
+                shift = stride;
+              }
+            }
+            el.style.transform = shift !== 0 ? `translate3d(${shift}px, 0, 0)` : 'translate3d(0, 0, 0)';
+          });
         }
       }
     }
   });
 
   tabEl.addEventListener('pointerup', (e) => {
-    if (tabEl.hasPointerCapture(e.pointerId)) {
-      tabEl.releasePointerCapture(e.pointerId);
-      document.body.style.cursor = '';
-      tabEl.style.cursor = '';
+    if (!tabEl.hasPointerCapture(e.pointerId)) return;
+    tabEl.releasePointerCapture(e.pointerId);
 
-      if (isDragging) {
+    const wasDragging = isDragging;
+    const wasOutside = isOutside;
+    const fromIdx = originalIndex;
+    const toIdx = targetIndex;
+
+    if (wasDragging) {
+      if (wasOutside) {
+        cleanupDrag();
         sendUiAction('http://ui-action/drag-end?id=' + tab.id);
       } else {
-        switchTab(tab.id);
+        if (toIdx !== fromIdx && toIdx >= 0) {
+          const finalShift = (toIdx - fromIdx) * stride;
+          tabEl.classList.remove('tab-dragging');
+          tabEl.classList.add('tab-shift-animate');
+          tabEl.style.transform = `translate3d(${finalShift}px, 0, 0)`;
+
+          g_reorderCommit = () => {
+            const container = document.getElementById('tabs');
+            if (container) {
+              const currentTabs = Array.from(container.children).filter(el => el.classList.contains('tab'));
+              if (fromIdx >= 0 && fromIdx < currentTabs.length && toIdx >= 0 && toIdx < currentTabs.length) {
+                const [moved] = currentTabs.splice(fromIdx, 1);
+                currentTabs.splice(toIdx, 0, moved);
+                currentTabs.forEach(el => container.appendChild(el));
+              }
+            }
+            cleanupDrag();
+            sendUiAction(`http://ui-action/reorder-tab?id=${tab.id}&from=${fromIdx}&to=${toIdx}`);
+          };
+
+          g_reorderTimer = setTimeout(() => {
+            g_reorderTimer = null;
+            if (g_reorderCommit) {
+              const commit = g_reorderCommit;
+              g_reorderCommit = null;
+              commit();
+            }
+          }, 180);
+        } else {
+          tabEl.classList.remove('tab-dragging');
+          tabEl.classList.add('tab-shift-animate');
+          tabEl.style.transform = 'translate3d(0, 0, 0)';
+          g_reorderCommit = () => {
+            cleanupDrag();
+          };
+          g_reorderTimer = setTimeout(() => {
+            g_reorderTimer = null;
+            if (g_reorderCommit) {
+              const commit = g_reorderCommit;
+              g_reorderCommit = null;
+              commit();
+            }
+          }, 180);
+        }
       }
+    } else {
+      cleanupDrag();
     }
+  });
+
+  tabEl.addEventListener('pointercancel', (e) => {
+    if (tabEl.hasPointerCapture(e.pointerId)) {
+      tabEl.releasePointerCapture(e.pointerId);
+    }
+    if (g_reorderTimer) {
+      clearTimeout(g_reorderTimer);
+      g_reorderTimer = null;
+      g_reorderCommit = null;
+    }
+    cleanupDrag();
   });
 
   return tabEl;
@@ -554,16 +741,22 @@ window.updateTabsList = function(tabs, activeId) {
       currentTabMap.set(tid, tabEl);
     }
 
-    // Ensure correct DOM order
-    const childAtIndex = container.children[index];
-    if (childAtIndex !== tabEl) {
-      container.insertBefore(tabEl, childAtIndex || null);
+    // Ensure correct DOM order (skip during drag so transforms are not interrupted)
+    if (!g_isTabDragging) {
+      if (tabEl.style.transform) tabEl.style.transform = '';
+      tabEl.classList.remove('tab-dragging', 'tab-shift-animate');
+      const childAtIndex = container.children[index];
+      if (childAtIndex !== tabEl) {
+        container.insertBefore(tabEl, childAtIndex || null);
+      }
     }
   });
 
-  const activeTabEl = container.querySelector('.tab.active');
-  if (activeTabEl) {
-    activeTabEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+  if (!g_isTabDragging) {
+    const activeTabEl = container.querySelector('.tab.active');
+    if (activeTabEl) {
+      activeTabEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+    }
   }
 };
 
