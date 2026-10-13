@@ -120,6 +120,7 @@ display_handler_on_address_change(cef_display_handler_t* self,
                              win_ctx->ui_browser->get_identifier(win_ctx->ui_browser));
 
     if (!is_ui_browser) {
+      int matching_tab_idx = -1;
       for (int i = 0; i < win_ctx->tab_count; i++) {
         int is_right = 0;
         if (win_ctx->tabs[i].browser &&
@@ -134,6 +135,7 @@ display_handler_on_address_change(cef_display_handler_t* self,
           continue;
         }
 
+        matching_tab_idx = i;
         if (url_utf8.str) {
           if (is_right) {
             strncpy(win_ctx->tabs[i].right_url, url_utf8.str, sizeof(win_ctx->tabs[i].right_url) - 1);
@@ -146,7 +148,9 @@ display_handler_on_address_change(cef_display_handler_t* self,
         break;
       }
       update_ui_tabs(win_ctx);
-      update_ui_nav_state(win_ctx);
+      if (matching_tab_idx == win_ctx->active_tab_index) {
+        update_ui_nav_state(win_ctx);
+      }
     }
   }
 

@@ -189,14 +189,13 @@ void CEF_CALLBACK life_span_handler_on_after_created(
           browser->base.add_ref(&browser->base);
           win_ctx->tabs[i].hwnd = hwnd;
 
-          if (win_ctx->tabs[i].is_loaded) {
+          if (i == win_ctx->active_tab_index) {
             for (int k = 0; k < win_ctx->tab_count; k++) {
               if (k != i) {
                 if (win_ctx->tabs[k].hwnd) ShowWindow(win_ctx->tabs[k].hwnd, SW_HIDE);
                 if (win_ctx->tabs[k].right_hwnd) ShowWindow(win_ctx->tabs[k].right_hwnd, SW_HIDE);
               }
             }
-            win_ctx->active_tab_index = i;
             HWND insert_after = (win_ctx->ui_hwnd && IsWindow(win_ctx->ui_hwnd)) ? win_ctx->ui_hwnd : HWND_TOP;
             SetWindowPos(hwnd, insert_after, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
 
@@ -209,7 +208,12 @@ void CEF_CALLBACK life_span_handler_on_after_created(
             SetFocus(hwnd);
           } else {
             ShowWindow(hwnd, SW_HIDE);
-            LogMsg("Defer showing tab %d (HWND %p) until loaded\n", win_ctx->tabs[i].tab_id, hwnd);
+            cef_browser_host_t* new_host = browser->get_host(browser);
+            if (new_host) {
+              new_host->was_resized(new_host);
+              new_host->base.release(&new_host->base);
+            }
+            LogMsg("Background tab %d (HWND %p) initialized hidden\n", win_ctx->tabs[i].tab_id, hwnd);
           }
         }
       }
@@ -461,7 +465,8 @@ int CEF_CALLBACK life_span_handler_on_before_popup(
         return 1;
       }
 
-      CreateNewTab(win_ctx, target_url_str);
+      int in_background = (target_disposition == CEF_WOD_NEW_BACKGROUND_TAB);
+      CreateNewTabEx2(win_ctx, target_url_str, 0, in_background);
       return 1;
     }
     cef_string_utf8_clear(&url_utf8);

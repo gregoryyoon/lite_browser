@@ -186,9 +186,57 @@ document.addEventListener('DOMContentLoaded', () => {
     return null;
   }
 
+  function fetchViaWinHttpProxy(url, headers, body) {
+    return new Promise((resolve, reject) => {
+      let rawResponse = '';
+      if (typeof runAIProxyStream !== 'function') {
+        return reject(new Error('runAIProxyStream 함수를 찾을 수 없습니다.'));
+      }
+      runAIProxyStream({
+        url,
+        headers,
+        body,
+        onRawLine: (line) => {
+          rawResponse += line + '\n';
+        },
+        onComplete: () => {
+          try {
+            const trimmed = rawResponse.trim();
+            const data = JSON.parse(trimmed);
+            resolve(data);
+          } catch (e) {
+            const match = rawResponse.match(/\{[\s\S]*\}/);
+            if (match) {
+              try {
+                return resolve(JSON.parse(match[0]));
+              } catch (e2) {}
+            }
+            reject(new Error('응답 JSON 파싱 실패: ' + rawResponse.slice(0, 200)));
+          }
+        },
+        onError: (err) => {
+          reject(err);
+        }
+      });
+    });
+  }
+
+  function logOAuthDebug(provider, step, detail) {
+    const box = document.getElementById(`${provider}-oauth-debug`);
+    const pre = document.getElementById(`${provider}-oauth-debug-content`);
+    const timestamp = new Date().toLocaleTimeString();
+    const str = typeof detail === 'object' ? JSON.stringify(detail, null, 2) : String(detail);
+    const line = `[${timestamp}] [${step}] ${str}\n`;
+    console.log(`[OAuth Debug ${provider}]`, step, detail);
+    if (pre) pre.textContent += line;
+    if (box) box.classList.remove('hidden');
+  }
+
   async function startOAuthPKCEFlow(provider) {
     const oauthBox = document.getElementById(`${provider}-oauth-box`);
     const oauthStatus = document.getElementById(`${provider}-oauth-status`);
+    const debugPre = document.getElementById(`${provider}-oauth-debug-content`);
+    if (debugPre) debugPre.textContent = '';
     if (oauthBox) oauthBox.classList.remove('hidden');
     if (oauthStatus) oauthStatus.textContent = '새 탭에서 로그인 및 승인을 대기하고 있습니다...';
 
@@ -205,9 +253,16 @@ document.addEventListener('DOMContentLoaded', () => {
       const scope = encodeURIComponent('openid profile email offline_access api.connectors.read api.connectors.invoke');
       authUrl = `https://auth.openai.com/oauth/authorize?response_type=code&client_id=app_EMoamEEZ73f0CkXaXp7hrann&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}&code_challenge=${challenge}&code_challenge_method=S256&state=${state}&id_token_add_organizations=true&codex_cli_simplified_flow=true&originator=codex_cli_rs`;
     } else if (provider === 'anthropic') {
-      const redirectUri = 'https://platform.claude.com/oauth/code/callback';
+      const redirectUri = 'https://console.anthropic.com/oauth/code/callback';
+      sessionStorage.setItem('anthropic_pkce_redirect_uri', redirectUri);
       authUrl = `https://claude.ai/oauth/authorize?response_type=code&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e&redirect_uri=${encodeURIComponent(redirectUri)}&scope=org%3Acreate_api_key%20user%3Aprofile&code_challenge=${challenge}&code_challenge_method=S256&state=${state}`;
     }
+
+    logOAuthDebug(provider, 'Flow Started', {
+      redirect_uri: provider === 'openai' ? 'http://localhost:1455/auth/callback' : 'https://console.anthropic.com/oauth/code/callback',
+      challenge: challenge.slice(0, 10) + '...',
+      state: state.slice(0, 8) + '...'
+    });
 
     if (authUrl) {
       const urlB64 = btoa(unescape(encodeURIComponent(authUrl)));
@@ -219,17 +274,27 @@ document.addEventListener('DOMContentLoaded', () => {
     const oauthBox = document.getElementById(`${provider}-oauth-box`);
     const oauthStatus = document.getElementById(`${provider}-oauth-status`);
 
+    logOAuthDebug(provider, 'Callback Received', {
+      has_code: !!code,
+      code_preview: code ? (code.slice(0, 8) + '...') : null,
+      error: error || null,
+      state: state ? (state.slice(0, 8) + '...') : null
+    });
+
     if (error) {
+      logOAuthDebug(provider, 'Callback Error', error);
       if (oauthStatus) oauthStatus.textContent = `인증 오류: ${error}`;
       return;
     }
     if (!code) {
+      logOAuthDebug(provider, 'No Code', '승인 코드를 수신하지 못했습니다.');
       if (oauthStatus) oauthStatus.textContent = '승인 코드를 수신하지 못했습니다.';
       return;
     }
 
     const expectedState = sessionStorage.getItem(`${provider}_pkce_state`);
     if (expectedState && state && state !== expectedState) {
+      logOAuthDebug(provider, 'State Mismatch', { expectedState, receivedState: state });
       console.warn('OAuth state mismatch:', { expectedState, state });
       if (oauthStatus) oauthStatus.textContent = '보안 경고: 인증 State 불일치(CSRF 위험). 다시 시도해주세요.';
       return;
@@ -240,6 +305,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     try {
       if (provider === 'openai') {
+        logOAuthDebug('openai', 'Requesting Token Exchange', { endpoint: 'https://auth.openai.com/oauth/token' });
         const tokenParams = new URLSearchParams();
         tokenParams.append('grant_type', 'authorization_code');
         tokenParams.append('client_id', 'app_EMoamEEZ73f0CkXaXp7hrann');
@@ -257,6 +323,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         const tokenData = await tokenResp.json().catch(() => ({}));
+        logOAuthDebug('openai', 'Token Response', { ok: tokenResp.ok, status: tokenResp.status, tokenData });
         if (tokenResp.ok && (tokenData.access_token || tokenData.id_token)) {
           if (oauthBox) oauthBox.classList.add('hidden');
           let accessToken = tokenData.access_token;
@@ -304,35 +371,103 @@ document.addEventListener('DOMContentLoaded', () => {
           if (oauthStatus) oauthStatus.textContent = `토큰 발급 실패: ${tokenData.error_description || tokenData.error || '알 수 없는 오류'}`;
         }
       } else if (provider === 'anthropic') {
-        const tokenParams = new URLSearchParams();
-        tokenParams.append('grant_type', 'authorization_code');
-        tokenParams.append('client_id', '9d1c250a-e61b-44d9-88ed-5944d1962f5e');
-        tokenParams.append('code', code);
-        tokenParams.append('code_verifier', verifier);
-        tokenParams.append('redirect_uri', 'https://platform.claude.com/oauth/code/callback');
+        const redirectUri = sessionStorage.getItem('anthropic_pkce_redirect_uri') || 'https://console.anthropic.com/oauth/code/callback';
+        const tokenPayload = {
+          grant_type: 'authorization_code',
+          client_id: '9d1c250a-e61b-44d9-88ed-5944d1962f5e',
+          code: code,
+          code_verifier: verifier,
+          redirect_uri: redirectUri
+        };
+        const tokenJsonStr = JSON.stringify(tokenPayload);
+        const reqHeaders = {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json, text/plain, */*',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36'
+        };
 
-        const tokenResp = await fetch('https://platform.claude.com/v1/oauth/token', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded'
-          },
-          body: tokenParams.toString()
+        logOAuthDebug('anthropic', 'Requesting Token Exchange', {
+          endpoint: 'https://console.anthropic.com/v1/oauth/token',
+          payload: {
+            grant_type: tokenPayload.grant_type,
+            client_id: tokenPayload.client_id,
+            redirect_uri: tokenPayload.redirect_uri,
+            code_preview: code.slice(0, 8) + '...'
+          }
         });
 
-        const tokenData = await tokenResp.json().catch(() => ({}));
-        if (tokenResp.ok && tokenData.access_token) {
+        let tokenData = null;
+        try {
+          tokenData = await fetchViaWinHttpProxy(
+            'https://console.anthropic.com/v1/oauth/token',
+            reqHeaders,
+            tokenJsonStr
+          );
+          logOAuthDebug('anthropic', 'Token Response (console.anthropic.com)', tokenData);
+        } catch (proxyErr) {
+          logOAuthDebug('anthropic', 'console.anthropic.com Error', proxyErr.message || String(proxyErr));
+          console.warn('WinHTTP token exchange on console.anthropic.com failed, trying platform.claude.com fallback...', proxyErr);
+          try {
+            tokenData = await fetchViaWinHttpProxy(
+              'https://platform.claude.com/v1/oauth/token',
+              reqHeaders,
+              tokenJsonStr
+            );
+            logOAuthDebug('anthropic', 'Token Response (platform.claude.com)', tokenData);
+          } catch (fallbackErr) {
+            logOAuthDebug('anthropic', 'platform.claude.com Error', fallbackErr.message || String(fallbackErr));
+            let readableMsg = proxyErr.message || fallbackErr.message || '토큰 교환 실패';
+            try {
+              const match = readableMsg.match(/\{[\s\S]*\}/);
+              if (match) {
+                const parsed = JSON.parse(match[0]);
+                if (parsed.error?.message) {
+                  readableMsg = parsed.error.message;
+                } else if (parsed.message) {
+                  readableMsg = parsed.message;
+                }
+              }
+            } catch (e) {}
+            throw new Error(readableMsg);
+          }
+        }
+
+        if (tokenData && (tokenData.access_token || tokenData.id_token)) {
           if (oauthBox) oauthBox.classList.add('hidden');
-          const accessToken = tokenData.access_token;
+          const accessToken = tokenData.access_token || tokenData.id_token;
           const refreshToken = tokenData.refresh_token || '';
           const expAt = Math.floor(Date.now() / 1000) + (tokenData.expires_in || 864000);
 
-          window.location.href = `http://ui-action/auth-save-session?provider=anthropic&email=Claude%20Pro&tier=Claude%20Pro&access_token=${encodeURIComponent(accessToken)}&refresh_token=${encodeURIComponent(refreshToken)}&expires_at=${expAt}`;
+          let userEmail = 'Claude Pro';
+          if (tokenData.email) userEmail = tokenData.email;
+          else if (tokenData.id_token) {
+            const jwt = parseJwtPayload(tokenData.id_token);
+            if (jwt?.email) userEmail = jwt.email;
+          }
+
+          logOAuthDebug('anthropic', 'Success - Saving Session', { userEmail, expAt });
+          window.location.href = `http://ui-action/auth-save-session?provider=anthropic&email=${encodeURIComponent(userEmail)}&tier=Claude%20Pro&access_token=${encodeURIComponent(accessToken)}&refresh_token=${encodeURIComponent(refreshToken)}&expires_at=${expAt}`;
         } else {
-          if (oauthStatus) oauthStatus.textContent = `토큰 교환 안내: 공식 API Key 또는 claude setup-token 등록을 권장합니다. (${tokenData.error_description || tokenData.error || ''})`;
+          const errDetail = tokenData?.error_description || tokenData?.error?.message || tokenData?.error || '알 수 없는 오류';
+          logOAuthDebug('anthropic', 'Token Issue Failed', errDetail);
+          if (oauthStatus) oauthStatus.textContent = `토큰 발급 실패: ${errDetail}`;
         }
       }
     } catch (err) {
-      if (oauthStatus) oauthStatus.textContent = `오류: ${err.message}`;
+      logOAuthDebug(provider, 'Catch Error', err.message || String(err));
+      let displayMsg = err.message || '알 수 없는 오류';
+      try {
+        const match = displayMsg.match(/\{[\s\S]*\}/);
+        if (match) {
+          const parsed = JSON.parse(match[0]);
+          if (parsed.error?.message) {
+            displayMsg = parsed.error.message;
+          } else if (parsed.message) {
+            displayMsg = parsed.message;
+          }
+        }
+      } catch (e) {}
+      if (oauthStatus) oauthStatus.textContent = `오류: ${displayMsg}`;
     }
   };
 
@@ -393,25 +528,6 @@ document.addEventListener('DOMContentLoaded', () => {
       const oauthBox = document.getElementById(`${prov}-oauth-box`);
       if (oauthBox) oauthBox.classList.add('hidden');
       window.location.href = `http://ui-action/auth-delete-session?provider=${prov}`;
-    });
-  });
-
-  document.querySelectorAll('.auth-save-token-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const prov = btn.getAttribute('data-provider');
-      const tokenInput = document.getElementById(`${prov}-sub-token`);
-      const token = tokenInput ? tokenInput.value.trim() : '';
-      if (!token) {
-        alert('키 또는 토큰을 입력해주세요.');
-        return;
-      }
-      let tier = 'Subscription';
-      if (prov === 'gemini') tier = 'Google AI Studio (무료)';
-      else if (prov === 'anthropic') tier = 'Claude Pro';
-      else if (prov === 'openai') tier = 'ChatGPT Plus';
-
-      window.location.href = `http://ui-action/auth-save-session?provider=${prov}&email=${encodeURIComponent(tier)}&tier=${encodeURIComponent(tier)}&access_token=${encodeURIComponent(token)}`;
-      tokenInput.value = '';
     });
   });
 

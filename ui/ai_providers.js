@@ -708,8 +708,8 @@ class AnthropicProvider extends AIProviderInterface {
       };
 
       if (this.authType === 'subscription') {
-        if (!this.subscriptionToken) throw new Error('Anthropic Claude 구독 계정이 연결되지 않았습니다. 설정(⚙️)에서 로그인해주세요.');
-        if (this.subscriptionToken.startsWith('sk-ant-')) {
+        if (!this.subscriptionToken) throw new Error('Anthropic Claude 구독 계정이 연결되지 않았습니다. 설정(⚙️)에서 구독 연결을 진행해주세요.');
+        if (this.subscriptionToken.startsWith('sk-ant-api') || this.subscriptionToken.startsWith('sk-ant-live')) {
           headers['x-api-key'] = this.subscriptionToken;
         } else {
           headers['Authorization'] = `Bearer ${this.subscriptionToken}`;

@@ -144,7 +144,12 @@ static DWORD WINAPI AIProxyWorkerThread(LPVOID param) {
   INTERNET_PORT port = urlComp.nPort;
   BOOL is_https = (urlComp.nScheme == INTERNET_SCHEME_HTTPS);
 
-  HINTERNET hSession = WinHttpOpen(L"codex-cli/1.0",
+  LPCWSTR agentW = L"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36";
+  if (wcsstr(hostW, L"chatgpt.com") || wcsstr(hostW, L"openai.com")) {
+    agentW = L"codex-cli/1.0";
+  }
+
+  HINTERNET hSession = WinHttpOpen(agentW,
                                    WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
                                    WINHTTP_NO_PROXY_NAME,
                                    WINHTTP_NO_PROXY_BYPASS,

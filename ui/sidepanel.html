@@ -134,6 +134,10 @@
                   <p class="auth-hint" style="margin-top: 4px; font-size: 11px;">
                     브라우저에 열린 승인 페이지에서 <strong>[승인(Authorize)]</strong>을 클릭하면 자동으로 연동이 완료됩니다.
                   </p>
+                  <details id="openai-oauth-debug" class="oauth-debug-box hidden" style="margin-top: 8px;">
+                    <summary style="font-size: 11px; color: var(--text-muted); cursor: pointer; user-select: none;">상세 디버그 로그 보기</summary>
+                    <pre id="openai-oauth-debug-content" style="font-size: 10px; background: var(--bg-tertiary); padding: 6px; border-radius: 4px; max-height: 120px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; margin-top: 4px;"></pre>
+                  </details>
                 </div>
               </div>
 
@@ -200,17 +204,10 @@
                   <p class="auth-hint" style="margin-top: 4px; font-size: 11px;">
                     브라우저에 열린 승인 페이지에서 <strong>[승인]</strong>을 클릭하면 자동으로 연동이 완료됩니다.
                   </p>
-                </div>
-
-                <div class="auth-token-input-group" style="margin-top: 10px;">
-                  <label for="anthropic-sub-token" style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px;">Claude Code 토큰 (claude setup-token) 또는 API Key:</label>
-                  <div style="display: flex; gap: 6px;">
-                    <input type="password" id="anthropic-sub-token" placeholder="OAuth Token 또는 API Key (DPAPI 암호화)" style="flex: 1; font-size: 12px; padding: 6px 10px;">
-                    <button type="button" class="btn btn-secondary btn-sm auth-save-token-btn" data-provider="anthropic">
-                      <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
-                      <span>저장</span>
-                    </button>
-                  </div>
+                  <details id="anthropic-oauth-debug" class="oauth-debug-box hidden" style="margin-top: 8px;">
+                    <summary style="font-size: 11px; color: var(--text-muted); cursor: pointer; user-select: none;">상세 디버그 로그 보기</summary>
+                    <pre id="anthropic-oauth-debug-content" style="font-size: 10px; background: var(--bg-tertiary); padding: 6px; border-radius: 4px; max-height: 120px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; margin-top: 4px;"></pre>
+                  </details>
                 </div>
               </div>
 

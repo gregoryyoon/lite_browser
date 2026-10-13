@@ -2265,3 +2265,55 @@ Lite Browser의 기반 임베디드 브라우저 프레임워크를 기존 CEF 1
   - 주소창에서 복사한 텍스트를 메모장에 붙여넣을 때 표준 퍼센트 인코딩 형태가 유지됨을 확인.
 
 
+
+---
+
+## 63. 링크 Ctrl + 클릭 및 마우스 휠 클릭 시 백그라운드 새 탭 생성 및 현재 탭 유지 구현 (Background Tab Creation on Ctrl+Click & Middle Click While Preserving Active Tab)
+
+### 63.1 개요
+크롬(Chrome), 엣지(Edge) 등 표준 웹 브라우저에서는 웹페이지 내 링크를 `Ctrl + 클릭`하거나 `마우스 휠(가운데 버튼) 클릭`할 경우, 현재 보고 있는 탭의 화면과 포커스를 그대로 유지하면서 새로운 탭을 백그라운드로 열어두는 UX를 기본 제공합니다.
+기존 LiteBrowser는 사용자가 `Ctrl + 클릭` 또는 마우스 휠로 링크를 열더라도 무조건 새로 생성된 탭으로 즉시 화면이 전환(`SW_SHOW`, `set_focus(1)`)되어 현재 작업 흐름이 끊기는 불편이 있었습니다.
+본 업데이트에서는 CEF C API의 창 열기 의도 플래그(`cef_window_open_disposition_t`)를 정밀 판별하여, `CEF_WOD_NEW_BACKGROUND_TAB`인 경우 현재 활성 탭의 가시성과 포커스를 방해하지 않고 백그라운드에서 새 탭을 숨김 상태로 생성·로딩하도록 아키텍처를 전면 개선했습니다.
+
+### 63.2 문제 원인 분석
+1. **창 열기 의도(`target_disposition`) 무시 및 일괄 포그라운드 탭 생성**:
+   - `request_handler_on_open_urlfrom_tab` 및 `life_span_handler_on_before_popup` 콜백에서 CEF로부터 `target_disposition` 인자를 수신하고 있었으나, 새 탭 생성 시 무조건 `CreateNewTab(win_ctx, url)`을 호출하여 포그라운드 탭으로만 처리하고 있었습니다.
+2. **`CreateNewTabEx`의 무조건적 포커스 해제 및 활성 탭 인덱스 갱신**:
+   - `CreateNewTabEx` 내부에서 기존의 모든 탭에 대해 `set_focus(0)`를 호출하고 `win_ctx->active_tab_index = insert_idx`로 강제 변경하며, 자식 브라우저 윈도우 스타일을 `WS_VISIBLE`로 지정하여 무조건 최전면에 렌더링하도록 구성되어 있었습니다.
+3. **`life_span_handler_on_after_created`의 비동기 포커스 탈취**:
+   - CEF 브라우저 인스턴스가 비동기로 생성 완료되는 시점에 `is_loaded` 플래그만 보고 다른 모든 탭을 숨긴(`SW_HIDE`) 뒤 신규 탭의 핸들을 표시하고 `SetFocus(hwnd)`를 강제 호출하여 화면을 탈취하는 구조였습니다.
+4. **백그라운드 탭 탐색 시 주소창(Omnibox) 네비게이션 상태 간섭**:
+   - `display_handler_on_address_change`에서 탭의 URL이 변경될 때마다 활성 탭 여부와 무관하게 `update_ui_nav_state(win_ctx)`를 호출하여 주소창 UI에 불필요한 이벤트가 전달되는 문제가 있었습니다.
+
+### 63.3 주요 구현 내역
+1. **백그라운드 탭 생성 플래그 지원 (`CreateNewTabEx2`, `simple_handler.h`, `simple_handler.c`)**:
+   - `CreateNewTabEx2(browser_window_t* win_ctx, const char* url, int insert_at_end, int in_background)`를 구현:
+     - `in_background == 1`일 때 기존 탭의 `set_focus(0)` 해제를 건너뛰어 현재 활성 탭의 포커스와 키보드 입력을 온전히 보존.
+     - `content_window_info.style`에서 `WS_VISIBLE`을 제외하여 숨김(`SW_HIDE`) 상태로 자식 브라우저를 생성.
+     - `win_ctx->active_tab_index`를 변경하지 않고 현재 탭의 인덱스를 유지한 상태에서 탭 목록(`update_ui_tabs`)만 동기화하여 상단 탭 바에 로딩 상태를 표시.
+   - 기존의 `CreateNewTab` 및 `CreateNewTabEx`는 `in_background = 0`으로 `CreateNewTabEx2`를 호출하도록 래핑하여 기존 호출처와의 100% 하위 호환성 유지.
+2. **CEF 창 열기 의도(`target_disposition`) 연동 (`simple_handler.c`, `simple_life_span_handler.c`)**:
+   - `request_handler_on_open_urlfrom_tab` 및 `life_span_handler_on_before_popup`에서 `int in_background = (target_disposition == CEF_WOD_NEW_BACKGROUND_TAB);`를 판별하여 `CreateNewTabEx2`에 전달.
+   - 이를 통해:
+     - `Ctrl + 클릭` 및 `마우스 휠(가운데 버튼) 클릭`: 현재 탭을 그대로 유지하면서 백그라운드로 새 탭 오픈 (`CEF_WOD_NEW_BACKGROUND_TAB`).
+     - `Ctrl + Shift + 클릭`, `target="_blank"` 일반 클릭, 컨텍스트 메뉴 "새 탭에서 열기", 탭 바 `+` 버튼: 기존과 동일하게 새 탭으로 즉시 화면 전환 (`CEF_WOD_NEW_FOREGROUND_TAB`).
+3. **비동기 생성 시 포커스 탈취 방지 및 가시성 제어 (`simple_life_span_handler.c`)**:
+   - `life_span_handler_on_after_created`에서 `i == win_ctx->active_tab_index`인 경우에만 윈도우 노출 및 포커스 부여(`ShowWindow(hwnd, SW_SHOW)`, `new_host->set_focus(1)`).
+   - 백그라운드 탭(`i != win_ctx->active_tab_index`)인 경우 창을 숨김(`SW_HIDE`) 상태로 유지하고 렌더러 크기 동기화(`new_host->was_resized`)만 수행하여 포커스 가로채기를 완전 차단.
+4. **주소창(Omnibox) 네비게이션 상태 간섭 방지 (`simple_display_handler.c`)**:
+   - `display_handler_on_address_change`에서 URL 변경 이벤트가 발생한 탭이 현재 활성 탭(`matching_tab_idx == win_ctx->active_tab_index`)일 때만 `update_ui_nav_state(win_ctx)`를 호출하도록 가드 추가.
+
+### 63.4 관련 소스 코드
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.h`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.h)
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.c)
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_life_span_handler.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_life_span_handler.c)
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_display_handler.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_display_handler.c)
+
+### 63.5 빌드 및 검증 결과
+- **디버그 빌드**: `cmake --build cef_binary_154.0.34/build --config Debug --target cefsimple_capi` 성공 (`Exit code 0, 오류 0개`).
+- **바이너리 생성**: [`cef_binary_154.0.34\build\tests\cefsimple_capi\Debug\lite_browser.exe`](file:///c:/projects/lite_browser/cef_binary_154.0.34/build/tests/cefsimple_capi/Debug/lite_browser.exe) 및 `lite_browser.dll` 정상 갱신.
+- **실기 검증**:
+  1. 웹페이지 내 링크를 `Ctrl + 클릭`하거나 `마우스 휠 클릭` 시, 화면이 새 탭으로 이동하지 않고 현재 탭과 포커스가 그대로 유지되며 우측에 새 탭이 정상 생성됨을 확인.
+  2. `Ctrl + Shift + 클릭` 시에는 크롬/엣지 표준 단축키 동작대로 새 탭으로 즉시 화면이 이동함을 확인.
+  3. 백그라운드로 생성된 탭을 탭 바에서 마우스로 클릭하면 부드럽게 해당 탭으로 전환되며 화면 및 주소창이 정상 갱신됨을 확인.
+  4. 우클릭 컨텍스트 메뉴의 "새 탭에서 열기" 및 상단 `+` 버튼은 기존과 같이 포그라운드로 즉시 열림을 확인.

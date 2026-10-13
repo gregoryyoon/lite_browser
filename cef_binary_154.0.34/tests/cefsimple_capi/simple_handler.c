@@ -3069,13 +3069,14 @@ int CEF_CALLBACK request_handler_on_open_urlfrom_tab(
     }
 
     if (win_ctx->tab_count < MAX_TABS) {
+      int in_background = (target_disposition == CEF_WOD_NEW_BACKGROUND_TAB);
       if (strstr(target_url_str, "password-manager") != NULL ||
           strncmp(target_url_str, "lite://passwords", 16) == 0 ||
           strncmp(target_url_str, "chrome://passwords", 18) == 0 ||
           strncmp(target_url_str, "edge://passwords", 16) == 0) {
-        CreateNewTab(win_ctx, "chrome://password-manager/passwords");
+        CreateNewTabEx2(win_ctx, "chrome://password-manager/passwords", 0, in_background);
       } else {
-        CreateNewTab(win_ctx, target_url_str);
+        CreateNewTabEx2(win_ctx, target_url_str, 0, in_background);
       }
     }
   }
@@ -3433,28 +3434,29 @@ simple_context_menu_handler_t *context_menu_handler_create(simple_handler_t *par
   return handler;
 }
 
-void CreateNewTabEx(browser_window_t* win_ctx, const char* url, int insert_at_end) {
+void CreateNewTabEx2(browser_window_t* win_ctx, const char* url, int insert_at_end, int in_background) {
   if (!win_ctx) return;
   if (win_ctx->tab_count >= MAX_TABS) return;
 
-  // 1. 모든 기존 탭의 포커스 해제 및 창 숨김 처리 (switch-tab과 동일하게 TSF 세션 및 마우스 이벤트 고착 방지)
-  for (int k = 0; k < win_ctx->tab_count; k++) {
-    if (win_ctx->tabs[k].browser) {
-      cef_browser_host_t* prev_h = win_ctx->tabs[k].browser->get_host(win_ctx->tabs[k].browser);
-      if (prev_h) {
-        prev_h->set_focus(prev_h, 0);
-        prev_h->base.release(&prev_h->base);
+  // 1. 기존 탭의 포커스 해제 및 창 숨김 처리 (단, 백그라운드 탭 생성 시에는 현재 활성 탭의 포커스/가시성을 그대로 유지)
+  if (!in_background) {
+    for (int k = 0; k < win_ctx->tab_count; k++) {
+      if (win_ctx->tabs[k].browser) {
+        cef_browser_host_t* prev_h = win_ctx->tabs[k].browser->get_host(win_ctx->tabs[k].browser);
+        if (prev_h) {
+          prev_h->set_focus(prev_h, 0);
+          prev_h->base.release(&prev_h->base);
+        }
       }
-    }
-    if (win_ctx->tabs[k].right_browser) {
-      cef_browser_host_t* prev_rh = win_ctx->tabs[k].right_browser->get_host(win_ctx->tabs[k].right_browser);
-      if (prev_rh) {
-        prev_rh->set_focus(prev_rh, 0);
-        prev_rh->base.release(&prev_rh->base);
+      if (win_ctx->tabs[k].right_browser) {
+        cef_browser_host_t* prev_rh = win_ctx->tabs[k].right_browser->get_host(win_ctx->tabs[k].right_browser);
+        if (prev_rh) {
+          prev_rh->set_focus(prev_rh, 0);
+          prev_rh->base.release(&prev_rh->base);
+        }
       }
     }
   }
-
 
   RECT rect;
   GetClientRect(win_ctx->main_hwnd, &rect);
@@ -3471,7 +3473,7 @@ void CreateNewTabEx(browser_window_t* win_ctx, const char* url, int insert_at_en
 
   cef_window_info_t content_window_info = {};
   content_window_info.size = sizeof(cef_window_info_t);
-  content_window_info.style = WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
+  content_window_info.style = WS_CHILD | (in_background ? 0 : WS_VISIBLE) | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
   content_window_info.parent_window = win_ctx->main_hwnd;
   content_window_info.bounds.x = 0;
   content_window_info.bounds.y = content_y;
@@ -3515,7 +3517,10 @@ void CreateNewTabEx(browser_window_t* win_ctx, const char* url, int insert_at_en
   }
   win_ctx->tabs[insert_idx].is_loaded = 1;
   win_ctx->tabs[insert_idx].tab_handler = content_handler;
-  win_ctx->active_tab_index = insert_idx;
+
+  if (!in_background || win_ctx->active_tab_index < 0) {
+    win_ctx->active_tab_index = insert_idx;
+  }
   win_ctx->tab_count++;
   update_ui_tabs(win_ctx);
 
@@ -3525,8 +3530,12 @@ void CreateNewTabEx(browser_window_t* win_ctx, const char* url, int insert_at_en
   cef_string_clear(&content_url);
 }
 
+void CreateNewTabEx(browser_window_t* win_ctx, const char* url, int insert_at_end) {
+  CreateNewTabEx2(win_ctx, url, insert_at_end, 0);
+}
+
 void CreateNewTab(browser_window_t* win_ctx, const char* url) {
-  CreateNewTabEx(win_ctx, url, 0);
+  CreateNewTabEx2(win_ctx, url, 0, 0);
 }
 
 void CreateRightSplitBrowser(browser_window_t* win_ctx, tab_info_t* tab, const char* initial_url) {
