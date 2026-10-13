@@ -163,9 +163,12 @@ void CEF_CALLBACK load_handler_on_load_end(cef_load_handler_t* self,
   // 2. Ignore server error codes (>= 400)
   if (httpStatusCode >= 400) return;
 
-  // 3. Ignore if this browser is the UI toolbar browser itself
-  if (win_ctx->ui_browser &&
-      browser->get_identifier(browser) == win_ctx->ui_browser->get_identifier(win_ctx->ui_browser)) {
+  // 3. If this browser is the UI toolbar browser itself, synchronize tabs and nav state now that UI DOM is ready
+  if (handler->parent->type == BROWSER_TYPE_UI ||
+      (win_ctx->ui_browser &&
+       browser->get_identifier(browser) == win_ctx->ui_browser->get_identifier(win_ctx->ui_browser))) {
+    update_ui_tabs(win_ctx);
+    update_ui_nav_state(win_ctx);
     return;
   }
 

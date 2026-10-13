@@ -830,6 +830,29 @@ void update_ui_nav_state(browser_window_t* win_ctx) {
 
   if (!cb || !win_ctx->ui_browser) return;
 
+  if ((!active_url || active_url[0] == '\0') && cb) {
+    cef_frame_t* mf = cb->get_main_frame(cb);
+    if (mf) {
+      cef_string_userfree_t u = mf->get_url(mf);
+      if (u && u->length > 0) {
+        cef_string_utf8_t u8 = {};
+        cef_string_to_utf8(u->str, u->length, &u8);
+        if (u8.str && u8.length > 0) {
+          if (active_tab->is_split && active_tab->active_split == 1 && active_tab->right_browser) {
+            strncpy(active_tab->right_url, u8.str, sizeof(active_tab->right_url) - 1);
+            active_url = active_tab->right_url;
+          } else {
+            strncpy(active_tab->url, u8.str, sizeof(active_tab->url) - 1);
+            active_url = active_tab->url;
+          }
+        }
+        cef_string_utf8_clear(&u8);
+        cef_string_userfree_free(u);
+      }
+      mf->base.release(&mf->base);
+    }
+  }
+
   int can_go_back = cb->can_go_back(cb);
   int can_go_forward = cb->can_go_forward(cb);
   int is_loading = cb->is_loading(cb);
@@ -2950,8 +2973,26 @@ int CEF_CALLBACK request_handler_on_before_browse(
             strcpy(target_url, win_ctx->tabs[found_idx].url);
             strcpy(target_title, win_ctx->tabs[found_idx].title);
 
+            if (target_url[0] == '\0' && detached_browser) {
+              cef_frame_t* mf = detached_browser->get_main_frame(detached_browser);
+              if (mf) {
+                cef_string_userfree_t cur_u = mf->get_url(mf);
+                if (cur_u && cur_u->length > 0) {
+                  cef_string_utf8_t u8 = {};
+                  cef_string_to_utf8(cur_u->str, cur_u->length, &u8);
+                  if (u8.str && u8.length > 0) {
+                    strncpy(target_url, u8.str, sizeof(target_url) - 1);
+                    target_url[sizeof(target_url) - 1] = '\0';
+                  }
+                  cef_string_utf8_clear(&u8);
+                  cef_string_userfree_free(cur_u);
+                }
+                mf->base.release(&mf->base);
+              }
+            }
+
             browser_window_t* new_win = create_browser_window_for_detached(
-                detached_browser, detached_hwnd, target_url, target_title, CW_USEDEFAULT, CW_USEDEFAULT);
+                detached_browser, detached_hwnd, target_url, target_title, CW_USEDEFAULT, CW_USEDEFAULT, win_ctx ? win_ctx->main_hwnd : NULL);
 
             if (new_win) {
               RemoveTabAt(win_ctx, found_idx, 0);
@@ -2961,6 +3002,7 @@ int CEF_CALLBACK request_handler_on_before_browse(
               if (client) {
                 simple_handler_t* detached_handler = (simple_handler_t*)client;
                 detached_handler->window_ctx = new_win;
+                new_win->tabs[0].tab_handler = detached_handler;
               }
               host->base.release(&host->base);
             }
@@ -2987,8 +3029,26 @@ int CEF_CALLBACK request_handler_on_before_browse(
               strcpy(target_url, win_ctx->tabs[found_idx].url);
               strcpy(target_title, win_ctx->tabs[found_idx].title);
 
+              if (target_url[0] == '\0' && detached_browser) {
+                cef_frame_t* mf = detached_browser->get_main_frame(detached_browser);
+                if (mf) {
+                  cef_string_userfree_t cur_u = mf->get_url(mf);
+                  if (cur_u && cur_u->length > 0) {
+                    cef_string_utf8_t u8 = {};
+                    cef_string_to_utf8(cur_u->str, cur_u->length, &u8);
+                    if (u8.str && u8.length > 0) {
+                      strncpy(target_url, u8.str, sizeof(target_url) - 1);
+                      target_url[sizeof(target_url) - 1] = '\0';
+                    }
+                    cef_string_utf8_clear(&u8);
+                    cef_string_userfree_free(cur_u);
+                  }
+                  mf->base.release(&mf->base);
+                }
+              }
+
               browser_window_t* new_win = create_browser_window_for_detached(
-                  detached_browser, detached_hwnd, target_url, target_title, pt.x - 100, pt.y - 10);
+                  detached_browser, detached_hwnd, target_url, target_title, pt.x - 100, pt.y - 10, win_ctx ? win_ctx->main_hwnd : NULL);
 
               if (new_win) {
                 RemoveTabAt(win_ctx, found_idx, 0);
@@ -2998,6 +3058,7 @@ int CEF_CALLBACK request_handler_on_before_browse(
                 if (client) {
                   simple_handler_t* detached_handler = (simple_handler_t*)client;
                   detached_handler->window_ctx = new_win;
+                  new_win->tabs[0].tab_handler = detached_handler;
                 }
                 host->base.release(&host->base);
               }

@@ -38,6 +38,27 @@ int GetUIHeightForWindow(HWND hwnd) {
   double scale = (double)dpi / 96.0;
   return (int)(76.0 * scale);
 }
+
+static void GetDefaultWindowRectForMonitor(HMONITOR hMon, RECT* out_rect) {
+  if (!out_rect) return;
+  MONITORINFO mi = { sizeof(MONITORINFO) };
+  if (!hMon) {
+    POINT pt;
+    GetCursorPos(&pt);
+    hMon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+  }
+  GetMonitorInfo(hMon, &mi);
+  int mon_w = mi.rcMonitor.right - mi.rcMonitor.left;
+  int mon_h = mi.rcMonitor.bottom - mi.rcMonitor.top;
+  int w = (mon_w * 4) / 5;
+  int h = (mon_h * 4) / 5;
+  int x = mi.rcMonitor.left + (mon_w - w) / 2;
+  int y = mi.rcMonitor.top + (mon_h - h) / 2;
+  out_rect->left = x;
+  out_rect->top = y;
+  out_rect->right = x + w;
+  out_rect->bottom = y + h;
+}
 #endif
 
 #include "include/capi/cef_browser_capi.h"
@@ -1277,10 +1298,20 @@ browser_window_t* create_browser_window(const char* startup_url) {
   browser_window_t* win_ctx = (browser_window_t*)calloc(1, sizeof(browser_window_t));
   if (!win_ctx) return NULL;
 
+  POINT cur_pt;
+  GetCursorPos(&cur_pt);
+  HMONITOR hMon = MonitorFromPoint(cur_pt, MONITOR_DEFAULTTONEAREST);
+  RECT def_r;
+  GetDefaultWindowRectForMonitor(hMon, &def_r);
+  int init_w = def_r.right - def_r.left;
+  int init_h = def_r.bottom - def_r.top;
+  int init_x = def_r.left;
+  int init_y = def_r.top;
+
   HWND main_hwnd = CreateWindowEx(
       0, L"LiteBrowserMainWindowClass", L"Lite Browser",
       WS_POPUP | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
-      CW_USEDEFAULT, CW_USEDEFAULT, 1024, 768, NULL, NULL, hInstance, NULL);
+      init_x, init_y, init_w, init_h, NULL, NULL, hInstance, NULL);
 
   if (!main_hwnd) {
     free(win_ctx);
@@ -1296,31 +1327,60 @@ browser_window_t* create_browser_window(const char* startup_url) {
   win_ctx->main_hwnd = main_hwnd;
   SetWindowLongPtr(main_hwnd, GWLP_USERDATA, (LONG_PTR)win_ctx);
 
-  // Load and apply window placement
-  int loaded = 0;
-  WINDOWPLACEMENT wp = {0};
-  wp.length = sizeof(WINDOWPLACEMENT);
-
-  char config_path[MAX_PATH];
-  GetConfigFilePath(config_path, sizeof(config_path));
-  FILE* f = fopen(config_path, "r");
-  if (f) {
-    int left = 0, top = 0, right = 0, bottom = 0, showCmd = 0;
-    if (fscanf(f, "%d %d %d %d %d", &left, &top, &right, &bottom, &showCmd) == 5) {
-      wp.showCmd = showCmd;
-      wp.rcNormalPosition.left = left;
-      wp.rcNormalPosition.top = top;
-      wp.rcNormalPosition.right = right;
-      wp.rcNormalPosition.bottom = bottom;
-      loaded = 1;
+  // If this is a secondary window (g_window_count > 0, e.g. '새 창'):
+  browser_window_t* active_parent = NULL;
+  if (g_window_count > 0) {
+    HWND fg = GetForegroundWindow();
+    for (int i = 0; i < MAX_WINDOWS; i++) {
+      if (g_windows[i] && g_windows[i]->main_hwnd) {
+        if (g_windows[i]->main_hwnd == fg || !active_parent) {
+          active_parent = g_windows[i];
+        }
+      }
     }
-    fclose(f);
   }
 
-  if (loaded) {
-    SetWindowPlacement(main_hwnd, &wp);
+  if (active_parent && active_parent->main_hwnd) {
+    if (IsZoomed(active_parent->main_hwnd)) {
+      ShowWindow(main_hwnd, SW_SHOWMAXIMIZED);
+    } else {
+      RECT pr;
+      GetWindowRect(active_parent->main_hwnd, &pr);
+      int pw = pr.right - pr.left;
+      int ph = pr.bottom - pr.top;
+      SetWindowPos(main_hwnd, NULL, pr.left + 30, pr.top + 30, pw, ph,
+                   SWP_NOZORDER | SWP_FRAMECHANGED);
+      ShowWindow(main_hwnd, SW_SHOWNORMAL);
+    }
   } else {
-    ShowWindow(main_hwnd, SW_SHOWMAXIMIZED);
+    // Primary launch
+    int loaded = 0;
+    WINDOWPLACEMENT wp = {0};
+    wp.length = sizeof(WINDOWPLACEMENT);
+
+    char config_path[MAX_PATH];
+    GetConfigFilePath(config_path, sizeof(config_path));
+    FILE* f = fopen(config_path, "r");
+    if (f) {
+      int left = 0, top = 0, right = 0, bottom = 0, showCmd = 0;
+      if (fscanf(f, "%d %d %d %d %d", &left, &top, &right, &bottom, &showCmd) == 5) {
+        wp.showCmd = showCmd;
+        wp.rcNormalPosition.left = left;
+        wp.rcNormalPosition.top = top;
+        wp.rcNormalPosition.right = right;
+        wp.rcNormalPosition.bottom = bottom;
+        loaded = 1;
+      }
+      fclose(f);
+    }
+
+    if (loaded) {
+      SetWindowPlacement(main_hwnd, &wp);
+    } else {
+      SetWindowPos(main_hwnd, NULL, init_x, init_y, init_w, init_h,
+                   SWP_NOZORDER | SWP_FRAMECHANGED);
+      ShowWindow(main_hwnd, SW_SHOWNORMAL);
+    }
   }
   UpdateWindow(main_hwnd);
 
@@ -1430,16 +1490,52 @@ browser_window_t* create_browser_window(const char* startup_url) {
   return win_ctx;
 }
 
-browser_window_t* create_browser_window_for_detached(cef_browser_t* detached_browser, HWND detached_hwnd, const char* url, const char* title, int x, int y) {
+browser_window_t* create_browser_window_for_detached(cef_browser_t* detached_browser, HWND detached_hwnd, const char* url, const char* title, int x, int y, HWND parent_hwnd) {
   HINSTANCE hInstance = GetModuleHandle(NULL);
 
   browser_window_t* win_ctx = (browser_window_t*)calloc(1, sizeof(browser_window_t));
   if (!win_ctx) return NULL;
 
+  POINT pt = { (x != CW_USEDEFAULT ? x : 0), (y != CW_USEDEFAULT ? y : 0) };
+  if (x == CW_USEDEFAULT) GetCursorPos(&pt);
+  HMONITOR hMon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+  RECT def_r;
+  GetDefaultWindowRectForMonitor(hMon, &def_r);
+
+  int init_w = def_r.right - def_r.left;
+  int init_h = def_r.bottom - def_r.top;
+
+  if (parent_hwnd && IsWindow(parent_hwnd)) {
+    if (IsZoomed(parent_hwnd)) {
+      // 탭을 분리한 기존 부모창이 전체 화면인 경우는 화면의 4/5 크기로 생성
+      init_w = def_r.right - def_r.left;
+      init_h = def_r.bottom - def_r.top;
+      if (x == CW_USEDEFAULT) {
+        x = def_r.left;
+        y = def_r.top;
+      }
+    } else {
+      // 탭을 분리한 기존 부모창이 전체 화면이 아닌 경우는 기존 부모창과 동일한 크기로 생성
+      RECT pr;
+      GetWindowRect(parent_hwnd, &pr);
+      init_w = pr.right - pr.left;
+      init_h = pr.bottom - pr.top;
+      if (x == CW_USEDEFAULT) {
+        x = pr.left + 30;
+        y = pr.top + 30;
+      }
+    }
+  } else {
+    if (x == CW_USEDEFAULT) {
+      x = def_r.left;
+      y = def_r.top;
+    }
+  }
+
   HWND main_hwnd = CreateWindowEx(
       0, L"LiteBrowserMainWindowClass", L"Lite Browser",
       WS_POPUP | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
-      x, y, 1024, 768, NULL, NULL, hInstance, NULL);
+      x, y, init_w, init_h, NULL, NULL, hInstance, NULL);
 
   if (!main_hwnd) {
     free(win_ctx);
@@ -1520,8 +1616,8 @@ browser_window_t* create_browser_window_for_detached(cef_browser_t* detached_bro
   win_ctx->tabs[0].tab_id = 1;
   win_ctx->tabs[0].browser = detached_browser;
   win_ctx->tabs[0].hwnd = detached_hwnd;
-  strncpy(win_ctx->tabs[0].url, url, sizeof(win_ctx->tabs[0].url) - 1);
-  strncpy(win_ctx->tabs[0].title, title, sizeof(win_ctx->tabs[0].title) - 1);
+  strncpy(win_ctx->tabs[0].url, url ? url : "", sizeof(win_ctx->tabs[0].url) - 1);
+  strncpy(win_ctx->tabs[0].title, title ? title : "", sizeof(win_ctx->tabs[0].title) - 1);
   win_ctx->tabs[0].is_loaded = 1;
   win_ctx->active_tab_index = 0;
   win_ctx->tab_count = 1;
@@ -1529,6 +1625,12 @@ browser_window_t* create_browser_window_for_detached(cef_browser_t* detached_bro
   // Let the browser host know it has been resized and focus it
   cef_browser_host_t* host = detached_browser->get_host(detached_browser);
   if (host) {
+    cef_client_t* client = host->get_client(host);
+    if (client) {
+      simple_handler_t* detached_handler = (simple_handler_t*)client;
+      detached_handler->window_ctx = win_ctx;
+      win_ctx->tabs[0].tab_handler = detached_handler;
+    }
     host->was_resized(host);
     host->set_focus(host, 1);
     host->base.release(&host->base);
