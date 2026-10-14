@@ -380,6 +380,10 @@ static char* get_query_param(const char* query, const char* param_name) {
     if (strncmp(p, param_name, name_len) == 0 && p[name_len] == '=') {
       const char* val_start = p + name_len + 1;
       const char* val_end = strchr(val_start, '&');
+      const char* hash_pos = strchr(val_start, '#');
+      if (hash_pos && (!val_end || hash_pos < val_end)) {
+        val_end = hash_pos;
+      }
       size_t val_len = val_end ? (size_t)(val_end - val_start) : strlen(val_start);
 
       char* decoded = (char*)malloc(val_len + 1);
@@ -1137,16 +1141,20 @@ int CEF_CALLBACK request_handler_on_before_browse(
     if (url_utf8.str) {
       const char* nav_url = url_utf8.str;
       const char* oauth_prov = NULL;
-      if (strncmp(nav_url, "http://localhost:1455/auth/callback", 35) == 0) {
+      if (strstr(nav_url, "localhost:1455/auth/callback") != NULL ||
+          strstr(nav_url, "127.0.0.1:1455/auth/callback") != NULL) {
         oauth_prov = "openai";
-      } else if (strncmp(nav_url, "https://platform.claude.com/oauth/code/callback", 48) == 0 ||
-                 strncmp(nav_url, "https://console.anthropic.com/oauth/code/callback", 47) == 0 ||
-                 strncmp(nav_url, "https://claude.ai/oauth/code/callback", 37) == 0) {
+      } else if (strstr(nav_url, "localhost:54545/callback") != NULL ||
+                 strstr(nav_url, "127.0.0.1:54545/callback") != NULL ||
+                 strstr(nav_url, "platform.claude.com/oauth/code/callback") != NULL ||
+                 strstr(nav_url, "console.anthropic.com/oauth/code/callback") != NULL ||
+                 strstr(nav_url, "claude.ai/oauth/code/callback") != NULL) {
         oauth_prov = "anthropic";
       }
 
       if (oauth_prov) {
         const char* q = strchr(nav_url, '?');
+        if (!q) q = strchr(nav_url, '#');
         char* code_val = q ? get_query_param(q + 1, "code") : NULL;
         char* err_val = q ? get_query_param(q + 1, "error") : NULL;
         char* err_desc = q ? get_query_param(q + 1, "error_description") : NULL;
@@ -1157,25 +1165,15 @@ int CEF_CALLBACK request_handler_on_before_browse(
         browser_window_t *w_ctx = p_h ? p_h->window_ctx : NULL;
 
         if (w_ctx) {
-          // If this browser is a tab in w_ctx, close the auth tab
-          for (int t = 0; t < w_ctx->tab_count; ++t) {
-            if (w_ctx->tabs[t].browser &&
-                browser->get_identifier(browser) == w_ctx->tabs[t].browser->get_identifier(w_ctx->tabs[t].browser)) {
-              if (w_ctx->tab_count > 1) {
-                RemoveTabAt(w_ctx, t, 1);
-              }
-              break;
-            }
-          }
-
-          // Forward OAuth code or error to sidepanel browser
+          // Forward OAuth code or error to sidepanel browser FIRST
           cef_browser_t* sb = w_ctx->sidepanel_browser;
           if (sb) {
             cef_frame_t* sf = sb->get_main_frame(sb);
             if (sf) {
-              if (err_desc) { for (char* p = err_desc; *p; p++) { if (*p == '\'' || *p == '\"' || *p == '\n' || *p == '\r') *p = ' '; } }
-              if (err_val) { for (char* p = err_val; *p; p++) { if (*p == '\'' || *p == '\"' || *p == '\n' || *p == '\r') *p = ' '; } }
-              if (state_val) { for (char* p = state_val; *p; p++) { if (*p == '\'' || *p == '\"' || *p == '\n' || *p == '\r') *p = ' '; } }
+              if (code_val) { for (char* p = code_val; *p; p++) { if (*p == '\'' || *p == '\"' || *p == '\n' || *p == '\r' || *p == '\\') *p = ' '; } }
+              if (err_desc) { for (char* p = err_desc; *p; p++) { if (*p == '\'' || *p == '\"' || *p == '\n' || *p == '\r' || *p == '\\') *p = ' '; } }
+              if (err_val) { for (char* p = err_val; *p; p++) { if (*p == '\'' || *p == '\"' || *p == '\n' || *p == '\r' || *p == '\\') *p = ' '; } }
+              if (state_val) { for (char* p = state_val; *p; p++) { if (*p == '\'' || *p == '\"' || *p == '\n' || *p == '\r' || *p == '\\') *p = ' '; } }
               char js_call[4096];
               snprintf(js_call, sizeof(js_call),
                 "if (window.onOAuthCallback) { window.onOAuthCallback('%s', '%s', '%s', '%s'); }",
@@ -1188,6 +1186,17 @@ int CEF_CALLBACK request_handler_on_before_browse(
               sf->execute_java_script(sf, &js_str, NULL, 0);
               cef_string_clear(&js_str);
               sf->base.release(&sf->base);
+            }
+          }
+
+          // If this browser is an auth tab in w_ctx, close the auth tab
+          for (int t = 0; t < w_ctx->tab_count; ++t) {
+            if (w_ctx->tabs[t].browser &&
+                browser->get_identifier(browser) == w_ctx->tabs[t].browser->get_identifier(w_ctx->tabs[t].browser)) {
+              if (w_ctx->tab_count > 1) {
+                RemoveTabAt(w_ctx, t, 1);
+              }
+              break;
             }
           }
         }

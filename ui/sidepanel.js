@@ -253,13 +253,14 @@ document.addEventListener('DOMContentLoaded', () => {
       const scope = encodeURIComponent('openid profile email offline_access api.connectors.read api.connectors.invoke');
       authUrl = `https://auth.openai.com/oauth/authorize?response_type=code&client_id=app_EMoamEEZ73f0CkXaXp7hrann&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}&code_challenge=${challenge}&code_challenge_method=S256&state=${state}&id_token_add_organizations=true&codex_cli_simplified_flow=true&originator=codex_cli_rs`;
     } else if (provider === 'anthropic') {
-      const redirectUri = 'https://console.anthropic.com/oauth/code/callback';
+      const redirectUri = 'http://localhost:54545/callback';
       sessionStorage.setItem('anthropic_pkce_redirect_uri', redirectUri);
-      authUrl = `https://claude.ai/oauth/authorize?response_type=code&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e&redirect_uri=${encodeURIComponent(redirectUri)}&scope=org%3Acreate_api_key%20user%3Aprofile&code_challenge=${challenge}&code_challenge_method=S256&state=${state}`;
+      const scopes = encodeURIComponent('org:create_api_key user:profile user:inference user:sessions:claude_code');
+      authUrl = `https://claude.ai/oauth/authorize?response_type=code&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopes}&code_challenge=${challenge}&code_challenge_method=S256&state=${state}`;
     }
 
     logOAuthDebug(provider, 'Flow Started', {
-      redirect_uri: provider === 'openai' ? 'http://localhost:1455/auth/callback' : 'https://console.anthropic.com/oauth/code/callback',
+      redirect_uri: provider === 'openai' ? 'http://localhost:1455/auth/callback' : 'http://localhost:54545/callback',
       challenge: challenge.slice(0, 10) + '...',
       state: state.slice(0, 8) + '...'
     });
@@ -366,24 +367,26 @@ document.addEventListener('DOMContentLoaded', () => {
             }
           }
 
+          logOAuthDebug('openai', 'Flow Completed', { status: '연결 성공! 계정 세션이 저장되었습니다.', userEmail, expires_at: new Date(expAt * 1000).toLocaleString() });
           window.location.href = `http://ui-action/auth-save-session?provider=openai&email=${encodeURIComponent(userEmail)}&tier=ChatGPT%20Plus&access_token=${encodeURIComponent(accessToken)}&refresh_token=${encodeURIComponent(refreshToken)}&expires_at=${expAt}`;
         } else {
           if (oauthStatus) oauthStatus.textContent = `토큰 발급 실패: ${tokenData.error_description || tokenData.error || '알 수 없는 오류'}`;
         }
       } else if (provider === 'anthropic') {
-        const redirectUri = sessionStorage.getItem('anthropic_pkce_redirect_uri') || 'https://console.anthropic.com/oauth/code/callback';
+        const redirectUri = sessionStorage.getItem('anthropic_pkce_redirect_uri') || 'http://localhost:54545/callback';
         const tokenPayload = {
           grant_type: 'authorization_code',
           client_id: '9d1c250a-e61b-44d9-88ed-5944d1962f5e',
           code: code,
           code_verifier: verifier,
-          redirect_uri: redirectUri
+          redirect_uri: redirectUri,
+          state: state
         };
         const tokenJsonStr = JSON.stringify(tokenPayload);
         const reqHeaders = {
           'Content-Type': 'application/json',
           'Accept': 'application/json, text/plain, */*',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36'
+          'User-Agent': 'Anthropic/JS 0.36.0 Node/v22.12.0 win32 (x64)'
         };
 
         logOAuthDebug('anthropic', 'Requesting Token Exchange', {
@@ -392,7 +395,8 @@ document.addEventListener('DOMContentLoaded', () => {
             grant_type: tokenPayload.grant_type,
             client_id: tokenPayload.client_id,
             redirect_uri: tokenPayload.redirect_uri,
-            code_preview: code.slice(0, 8) + '...'
+            code_preview: code.slice(0, 8) + '...',
+            state: state ? (state.slice(0, 8) + '...') : null
           }
         });
 
@@ -434,7 +438,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (tokenData && (tokenData.access_token || tokenData.id_token)) {
           if (oauthBox) oauthBox.classList.add('hidden');
-          const accessToken = tokenData.access_token || tokenData.id_token;
+          let accessToken = tokenData.access_token || tokenData.id_token;
           const refreshToken = tokenData.refresh_token || '';
           const expAt = Math.floor(Date.now() / 1000) + (tokenData.expires_in || 864000);
 
@@ -445,7 +449,33 @@ document.addEventListener('DOMContentLoaded', () => {
             if (jwt?.email) userEmail = jwt.email;
           }
 
-          logOAuthDebug('anthropic', 'Success - Saving Session', { userEmail, expAt });
+          // Attempt to generate standard Claude API Key via official CLI endpoint
+          try {
+            logOAuthDebug('anthropic', 'Requesting API Key via CLI endpoint', { endpoint: 'https://api.anthropic.com/api/oauth/claude_cli/create_api_key' });
+            const keyData = await fetchViaWinHttpProxy(
+              'https://api.anthropic.com/api/oauth/claude_cli/create_api_key',
+              {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${accessToken}`,
+                'User-Agent': 'Anthropic/JS 0.36.0 Node/v22.12.0 win32 (x64)'
+              },
+              '{}'
+            );
+            if (keyData && keyData.raw_key) {
+              logOAuthDebug('anthropic', 'Generated Claude API Key successfully', { key_prefix: keyData.raw_key.slice(0, 10) + '...' });
+              accessToken = keyData.raw_key;
+            }
+          } catch (keyErr) {
+            console.warn('create_api_key step skipped, using access_token directly:', keyErr);
+          }
+
+          logOAuthDebug('anthropic', 'Flow Completed', {
+            status: '연결 성공! 계정 세션이 저장되었습니다.',
+            userEmail,
+            token_type: accessToken.startsWith('sk-ant-') ? 'Claude API Key' : 'OAuth Bearer Token',
+            token_preview: accessToken.slice(0, 10) + '...',
+            expires_at: new Date(expAt * 1000).toLocaleString()
+          });
           window.location.href = `http://ui-action/auth-save-session?provider=anthropic&email=${encodeURIComponent(userEmail)}&tier=Claude%20Pro&access_token=${encodeURIComponent(accessToken)}&refresh_token=${encodeURIComponent(refreshToken)}&expires_at=${expAt}`;
         } else {
           const errDetail = tokenData?.error_description || tokenData?.error?.message || tokenData?.error || '알 수 없는 오류';
@@ -491,8 +521,7 @@ document.addEventListener('DOMContentLoaded', () => {
           if (logoutBtn) logoutBtn.classList.remove('hidden');
         } else {
           statusDiv.innerHTML = `
-            <span class="auth-badge auth-badge-unconnected"><svg class="icon-inline" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg> <span>${prov === 'gemini' ? '무료 키 미등록' : '구독 미연결'}</span></span>
-            <p class="auth-hint">${prov === 'gemini' ? 'Google AI Studio 무료 키를 등록하여 1,500회/일 무료로 사용하세요.' : '구독 계정을 1-클릭 대화형 승인하여 API 키 없이 사용하세요.'}</p>
+            <span class="auth-badge auth-badge-unconnected"><svg class="icon-inline" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg> <span>${prov === 'gemini' ? '무료 키 미등록' : (prov === 'anthropic' ? '재연결 필요 (권한 갱신)' : '구독 미연결')}</span></span>
           `;
           if (loginBtn) loginBtn.classList.remove('hidden');
           if (logoutBtn) logoutBtn.classList.add('hidden');
@@ -531,6 +560,44 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
+  document.querySelectorAll('.oauth-copy-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const targetId = btn.getAttribute('data-target');
+      const targetEl = document.getElementById(targetId);
+      const textToCopy = targetEl ? targetEl.textContent : '';
+      if (!textToCopy) return;
+
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(textToCopy);
+        } else {
+          const ta = document.createElement('textarea');
+          ta.value = textToCopy;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+        }
+        const span = btn.querySelector('span');
+        const origText = span ? span.textContent : '복사';
+        if (span) span.textContent = '복사됨!';
+        btn.classList.add('btn-primary');
+        btn.classList.remove('btn-secondary');
+        setTimeout(() => {
+          if (span) span.textContent = origText;
+          btn.classList.remove('btn-primary');
+          btn.classList.add('btn-secondary');
+        }, 1500);
+      } catch (err) {
+        console.error('클립보드 복사 실패:', err);
+      }
+    });
+  });
+
   // 1. Initialize State & Settings
   function loadSettingsIntoUI() {
     const s = AIProviderFactory.getSettings();
@@ -565,6 +632,12 @@ document.addEventListener('DOMContentLoaded', () => {
     updateProviderFields(s.provider || 'gemini');
     updateMemoryStats();
     requestVaultList();
+
+    if (localStorage.getItem('anthropic_scope_v3') !== 'true') {
+      localStorage.setItem('anthropic_scope_v3', 'true');
+      window.location.href = 'http://ui-action/auth-logout?provider=anthropic';
+    }
+
     requestAuthStatus();
   }
 

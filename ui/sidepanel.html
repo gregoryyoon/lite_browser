@@ -109,7 +109,6 @@
                     <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>
                     <span>구독 미연결</span>
                   </span>
-                  <p class="auth-hint">ChatGPT Plus/Team/Pro 구독 계정을 1-클릭 대화형 승인하여 추가 API 요금 없이 사용하세요.</p>
                 </div>
                 <div class="auth-sub-actions">
                   <button type="button" class="btn btn-primary btn-sm auth-login-btn" data-provider="openai">
@@ -134,11 +133,17 @@
                   <p class="auth-hint" style="margin-top: 4px; font-size: 11px;">
                     브라우저에 열린 승인 페이지에서 <strong>[승인(Authorize)]</strong>을 클릭하면 자동으로 연동이 완료됩니다.
                   </p>
-                  <details id="openai-oauth-debug" class="oauth-debug-box hidden" style="margin-top: 8px;">
-                    <summary style="font-size: 11px; color: var(--text-muted); cursor: pointer; user-select: none;">상세 디버그 로그 보기</summary>
-                    <pre id="openai-oauth-debug-content" style="font-size: 10px; background: var(--bg-tertiary); padding: 6px; border-radius: 4px; max-height: 120px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; margin-top: 4px;"></pre>
-                  </details>
                 </div>
+                <details id="openai-oauth-debug" class="oauth-debug-box hidden" style="margin-top: 8px;">
+                  <summary style="font-size: 11px; color: var(--text-muted); cursor: pointer; user-select: none;">상세 디버그 로그 보기</summary>
+                  <div style="position: relative; margin-top: 4px;">
+                    <button type="button" class="btn btn-secondary btn-xs oauth-copy-btn" data-target="openai-oauth-debug-content" style="position: absolute; top: 4px; right: 4px; z-index: 2;">
+                      <svg viewBox="0 0 24 24" style="width: 11px; height: 11px;"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+                      <span>복사</span>
+                    </button>
+                    <pre id="openai-oauth-debug-content" style="font-size: 10px; background: var(--bg-tertiary); padding: 8px; padding-top: 26px; border-radius: 4px; max-height: 140px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; margin: 0; user-select: text; -webkit-user-select: text; cursor: text;"></pre>
+                  </div>
+                </details>
               </div>
 
               <div id="openai-apikey-box" class="hidden">
@@ -179,7 +184,6 @@
                     <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>
                     <span>Claude Pro 미연결</span>
                   </span>
-                  <p class="auth-hint">Claude Pro/Max 계정을 1-클릭 대화형 승인하여 추가 API 요금 없이 사용하세요.</p>
                 </div>
                 <div class="auth-sub-actions">
                   <button type="button" class="btn btn-primary btn-sm auth-login-btn" data-provider="anthropic">
@@ -204,11 +208,17 @@
                   <p class="auth-hint" style="margin-top: 4px; font-size: 11px;">
                     브라우저에 열린 승인 페이지에서 <strong>[승인]</strong>을 클릭하면 자동으로 연동이 완료됩니다.
                   </p>
-                  <details id="anthropic-oauth-debug" class="oauth-debug-box hidden" style="margin-top: 8px;">
-                    <summary style="font-size: 11px; color: var(--text-muted); cursor: pointer; user-select: none;">상세 디버그 로그 보기</summary>
-                    <pre id="anthropic-oauth-debug-content" style="font-size: 10px; background: var(--bg-tertiary); padding: 6px; border-radius: 4px; max-height: 120px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; margin-top: 4px;"></pre>
-                  </details>
                 </div>
+                <details id="anthropic-oauth-debug" class="oauth-debug-box hidden" style="margin-top: 8px;">
+                  <summary style="font-size: 11px; color: var(--text-muted); cursor: pointer; user-select: none;">상세 디버그 로그 보기</summary>
+                  <div style="position: relative; margin-top: 4px;">
+                    <button type="button" class="btn btn-secondary btn-xs oauth-copy-btn" data-target="anthropic-oauth-debug-content" style="position: absolute; top: 4px; right: 4px; z-index: 2;">
+                      <svg viewBox="0 0 24 24" style="width: 11px; height: 11px;"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+                      <span>복사</span>
+                    </button>
+                    <pre id="anthropic-oauth-debug-content" style="font-size: 10px; background: var(--bg-tertiary); padding: 8px; padding-top: 26px; border-radius: 4px; max-height: 140px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; margin: 0; user-select: text; -webkit-user-select: text; cursor: text;"></pre>
+                  </div>
+                </details>
               </div>
 
               <div id="anthropic-apikey-box" class="hidden">
@@ -221,10 +231,9 @@
               <div class="form-group">
                 <label for="anthropic-model">모델:</label>
                 <select id="anthropic-model">
-                  <option value="claude-opus-4-7" selected>claude-opus-4-7 (기본 권장)</option>
+                  <option value="claude-opus-4-7" selected>claude-opus-4-7 (최신 플래그십 권장)</option>
+                  <option value="claude-sonnet-4-6">claude-sonnet-4-6 (최신 고속/에이전트 권장)</option>
                   <option value="claude-opus-4-6">claude-opus-4-6</option>
-                  <option value="claude-sonnet-4-6">claude-sonnet-4-6</option>
-                  <option value="claude-opus-4-5-20251101">claude-opus-4-5-20251101</option>
                 </select>
               </div>
             </div>

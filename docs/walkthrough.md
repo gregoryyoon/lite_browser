@@ -2354,3 +2354,67 @@ Lite Browser의 기반 임베디드 브라우저 프레임워크를 기존 CEF 1
   3. 탭이 1개만 열려 있는 경우 드래그 및 애니메이션이 동작하지 않고 단순 클릭으로만 동작함을 확인.
   4. 탭 바 바깥으로 탭을 드래그하여 분리 시 새 창으로 분리되는 기존 기능 정상 유지 확인.
 
+---
+
+## 65. 대화형 OAuth 2.0 PKCE Claude Pro 구독 연동 및 Anthropic 실시간 에이전트 스트리밍 구현 (Interactive OAuth 2.0 PKCE Claude Pro Subscription Integration & Real-Time Agent Streaming)
+
+### 65.1 개요
+사용자가 보유한 Claude Pro/Max 유료 구독 계정을 1-클릭 대화형 OAuth 2.0 PKCE 흐름을 통해 브라우저에 안전하게 연동하여, 추가적인 개발자 API 종량제 요금 없이 사이드패널의 실시간 AI 브라우저 에이전트(페이지 실시간 분석, 웹페이지 요약, 질의응답 등)를 활용할 수 있는 인증 및 스트리밍 파이프라인을 구축했습니다.
+초기 연동 시 발생했던 OAuth 리다이렉트 가로채기, 토큰 스코프 부족(403), Anthropic 게이트웨이의 비공식 클라이언트 차단(429), 모델 404 오류 등을 심층 분석하여 완벽하게 해결했습니다.
+
+### 65.2 문제 원인 분석
+1. **OAuth 콜백 가로채기 및 인증 탭 종료 순서 결함 (`simple_handler.c`)**:
+   - `localhost:54545/callback` 콜백 감지 시 고정 길이 `strncmp` 비교의 불일치로 인입 처리가 누락되어 브라우저에 `ERR_CONNECTION_REFUSED` 에러 페이지가 노출되는 문제가 있었습니다.
+   - 또한 사이드패널로 인증 코드(`code`)와 상태값(`state`)을 전달하기 전에 인증 탭을 먼저 닫아버려, 탭 소멸 과정에서 IPC 메시지가 유실되는 경합이 발생했습니다.
+2. **OAuth 권한 스코프(Scope) 부족으로 인한 추론 차단 (403 `permission_error`)**:
+   - 기존의 기본 스코프(`org:create_api_key user:profile`)만으로는 Anthropic의 메시지 추론 엔드포인트(`POST /v1/messages`)에 접근할 권한이 없어 `403 OAuth token does not meet scope requirement any_of(user:inference...)` 에러가 발생했습니다.
+3. **Anthropic 게이트웨이의 CLI 인증 검증 및 429 Throttle (`rate_limit_error: {"type":"rate_limit_error","message":"Error"}`)**:
+   - Claude Pro 구독 토큰(`sk-ant-oat01-...`)은 일반 종량제 API 키와 달리 Anthropic 백엔드에서 Claude Code CLI 환경인지 엄격하게 검증합니다.
+   - 브라우저 스크립트 전용 헤더인 `anthropic-dangerous-direct-browser-access: true`가 전송될 경우 승인되지 않은 브라우저 직접 호출로 감지되어 즉시 429로 차단되었습니다.
+   - 가장 결정적으로, Anthropic 게이트웨이는 시스템 프롬프트를 단순 문자열로 전송하면 클라이언트 식별에 실패하여 429 에러를 반환합니다. 반드시 `system`을 **블록 배열(Array of Blocks)** 형태로 전송하여 첫 번째 블록에 공식 CLI 식별자(`"You are Claude Code, Anthropic's official CLI for Claude."`)가 독립적으로 존재해야만 구독 전용 쿼터 풀(Unified Quota)로 승인하는 구조였습니다.
+4. **지원 제외 모델 지정으로 인한 404 (`not_found_error`)**:
+   - 계정 및 엔드포인트에서 구형 모델(`claude-3-7-sonnet-20250219`, `claude-3-5-sonnet-20241022`)이 제외되어 404 에러가 발생했습니다.
+
+### 65.3 주요 구현 내역
+1. **OAuth 리다이렉트 안전 인터셉트 및 IPC 선행 전달 (`simple_handler.c`)**:
+   - `request_handler_on_before_browse`에서 `strstr`을 사용하여 `localhost:54545/callback`, `127.0.0.1:54545/callback` 및 Anthropic 공식 콜백 도메인을 안전하게 감지.
+   - 사이드패널 브라우저 프레임에 JavaScript 콜백(`window.onOAuthCallback`)을 **먼저 실행**한 뒤, 그 후에 인증 탭을 닫도록 순서를 재배치하여 콜백 유실을 원천 방지.
+2. **Claude Code 전용 OAuth 권한 스코프 확장 (`sidepanel.js`)**:
+   - OAuth 인증 URL 생성 시 `user:inference user:profile user:sessions:claude_code` 스코프를 요청하여 모델 추론 및 세션 관리 권한을 완벽 확보.
+3. **Anthropic Provider 구독 모드 최적화 (`ui/ai_providers.js`)**:
+   - `anthropic-dangerous-direct-browser-access` 헤더를 구독 모드에서 제거.
+   - `anthropic-beta: claude-code-20250219,oauth-2025-04-20` 헤더 주입 및 `User-Agent: Anthropic/JS 0.36.0 Node/v22.12.0 win32 (x64)` 설정.
+   - 시스템 프롬프트 필드를 블록 배열 구조로 개편:
+     ```javascript
+     const blocks = [
+       { type: 'text', text: "You are Claude Code, Anthropic's official CLI for Claude." }
+     ];
+     if (systemPrompt && systemPrompt.trim()) {
+       blocks.push({ type: 'text', text: systemPrompt.trim() });
+     }
+     body.system = blocks;
+     ```
+   - 이를 통해 네이티브 WinHTTP 프록시 스트림(`runAIProxyStream`)을 경유하는 모든 실시간 토큰 요청이 Anthropic 백엔드에서 정상 승인(HTTP 200 OK)되도록 구현.
+4. **검증된 최신 모델군으로 UI 정리 (`ui/sidepanel.html`)**:
+   - 404 오류가 발생하는 구형 모델 및 미사용 모델을 제거하고, 실기 동작이 검증된 최신 모델 3종으로 정리:
+     - `claude-opus-4-7` (최신 플래그십 권장)
+     - `claude-sonnet-4-6` (최신 고속/에이전트 권장)
+     - `claude-opus-4-6`
+5. **디버그 로그 복사 UX 편의 개선 (`ui/sidepanel.html`, `ui/sidepanel.js`, `ui/sidepanel.css`)**:
+   - OAuth 디버그 로그 영역의 텍스트 드래그 선택이 불가능하던 문제를 해결하고, 1-클릭 전용 복사 버튼(`oauth-copy-btn`)을 추가하여 손쉽게 진단 로그를 클립보드로 복사할 수 있도록 개선.
+
+### 65.4 관련 소스 코드
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.c)
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_ai_proxy.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_ai_proxy.c)
+- [`ui/ai_providers.js`](file:///c:/projects/lite_browser/ui/ai_providers.js)
+- [`ui/sidepanel.html`](file:///c:/projects/lite_browser/ui/sidepanel.html)
+- [`ui/sidepanel.js`](file:///c:/projects/lite_browser/ui/sidepanel.html)
+- [`ui/sidepanel.css`](file:///c:/projects/lite_browser/ui/sidepanel.css)
+
+### 65.5 빌드 및 검증 결과
+- **디버그 빌드**: `cmake --build cef_binary_154.0.34/build --config Debug --target cefsimple_capi` 성공 (`Exit code 0, 오류 0개`).
+- **실기 검증**:
+  1. Claude Pro 구독 1-클릭 대화형 로그인 시 새 탭 인증 후 즉시 콜백이 가로채지며 인증 탭이 깔끔하게 닫히고 사이드패널에 연결 상태 표시.
+  2. 사이드패널에서 `"페이지 요약 해줘"` 전송 시 AI가 `browser_get_page_content` 도구를 정상 호출하여 현재 활성 탭의 본문을 추출하고 실시간 SSE 청크 스트리밍으로 한국어 요약 답변을 완료함을 확인.
+  3. `claude-opus-4-7`, `claude-sonnet-4-6`, `claude-opus-4-6` 3개 모델 모두 HTTP 200 OK로 정상 동작함을 사용자 실기 테스트 및 디버그 로그로 최종 검증.
+

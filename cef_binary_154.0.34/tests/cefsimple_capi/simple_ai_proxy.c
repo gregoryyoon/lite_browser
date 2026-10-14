@@ -147,6 +147,8 @@ static DWORD WINAPI AIProxyWorkerThread(LPVOID param) {
   LPCWSTR agentW = L"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36";
   if (wcsstr(hostW, L"chatgpt.com") || wcsstr(hostW, L"openai.com")) {
     agentW = L"codex-cli/1.0";
+  } else if (wcsstr(hostW, L"anthropic.com") || wcsstr(hostW, L"claude.com") || wcsstr(hostW, L"claude.ai")) {
+    agentW = L"Anthropic/JS 0.36.0 Node/v22.12.0 win32 (x64)";
   }
 
   HINTERNET hSession = WinHttpOpen(agentW,

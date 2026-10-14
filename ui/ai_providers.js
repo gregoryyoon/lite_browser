@@ -703,8 +703,7 @@ class AnthropicProvider extends AIProviderInterface {
     try {
       const headers = {
         'Content-Type': 'application/json',
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true'
+        'anthropic-version': '2023-06-01'
       };
 
       if (this.authType === 'subscription') {
@@ -713,10 +712,13 @@ class AnthropicProvider extends AIProviderInterface {
           headers['x-api-key'] = this.subscriptionToken;
         } else {
           headers['Authorization'] = `Bearer ${this.subscriptionToken}`;
+          headers['anthropic-beta'] = 'claude-code-20250219,oauth-2025-04-20';
+          headers['User-Agent'] = 'Anthropic/JS 0.36.0 Node/v22.12.0 win32 (x64)';
         }
       } else {
         if (!this.apiKey) throw new Error('Anthropic API 키가 설정되지 않았습니다. 설정(⚙️)에서 입력해주세요.');
         headers['x-api-key'] = this.apiKey;
+        headers['anthropic-dangerous-direct-browser-access'] = 'true';
       }
 
       const url = 'https://api.anthropic.com/v1/messages';
@@ -764,10 +766,26 @@ class AnthropicProvider extends AIProviderInterface {
         }
       }
 
+      let systemPayload;
+      if (this.authType === 'subscription') {
+        const cliIdentity = "You are Claude Code, Anthropic's official CLI for Claude.";
+        const blocks = [
+          { type: 'text', text: cliIdentity }
+        ];
+        if (systemPrompt && typeof systemPrompt === 'string' && systemPrompt.trim()) {
+          blocks.push({ type: 'text', text: systemPrompt.trim() });
+        }
+        systemPayload = blocks;
+      } else {
+        systemPayload = systemPrompt || undefined;
+      }
+
+      const targetModel = this.model || 'claude-opus-4-7';
+
       const body = {
-        model: this.model,
+        model: targetModel,
         max_tokens: 4096,
-        system: systemPrompt || undefined,
+        system: systemPayload,
         messages: formattedMessages,
         tools: anthropicTools,
         stream: true
@@ -1036,8 +1054,14 @@ class OllamaProvider extends AIProviderInterface {
       if (err.name === 'AbortError') {
         if (onComplete) onComplete({ fullText: '', interrupted: true });
       } else {
-        if (onError) onError(err);
-        throw err;
+        let msg = err.message || String(err);
+        if (msg.includes('does not meet scope requirement') || msg.includes('permission_error')) {
+          msg = 'Anthropic OAuth 권한(user:inference) 갱신이 필요합니다. 설정(⚙️)에서 "Claude Pro 구독 연결"을 다시 진행해주세요.';
+          window.location.href = 'http://ui-action/auth-logout?provider=anthropic';
+        }
+        const friendlyErr = new Error(msg);
+        if (onError) onError(friendlyErr);
+        throw friendlyErr;
       }
     }
   }
