@@ -94,7 +94,10 @@ static LRESULT CALLBACK LiteBrowserPopupWndProc(HWND hwnd, UINT message, WPARAM 
   case WM_NCDESTROY: {
     LogMsg("LiteBrowserPopupWndProc: WM_NCDESTROY received for hwnd=%p\n", hwnd);
     if (ctx) {
-      ctx->browser = NULL;
+      if (ctx->browser) {
+        ctx->browser->base.release(&ctx->browser->base);
+        ctx->browser = NULL;
+      }
       free(ctx);
       SetWindowLongPtr(hwnd, GWLP_USERDATA, (LONG_PTR)NULL);
     }
@@ -155,18 +158,23 @@ void CEF_CALLBACK life_span_handler_on_after_created(
       LogMsg("Set win_ctx->sidepanel_browser = %p, hwnd = %p\n", browser, hwnd);
     } else if (handler->parent->type == BROWSER_TYPE_POPUP) {
       LogMsg("Created BROWSER_TYPE_POPUP browser=%p, hwnd=%p\n", browser, hwnd);
-      if (hwnd) {
-        HWND parent_wnd = GetParent(hwnd);
-        if (parent_wnd) {
-          popup_window_ctx_t* pctx = (popup_window_ctx_t*)GetWindowLongPtr(parent_wnd, GWLP_USERDATA);
-          if (pctx) {
-            pctx->browser_hwnd = hwnd;
+      HWND parent_wnd = handler->parent->popup_hwnd;
+      if (!parent_wnd && hwnd) parent_wnd = GetParent(hwnd);
+      if (parent_wnd) {
+        popup_window_ctx_t* pctx = (popup_window_ctx_t*)GetWindowLongPtr(parent_wnd, GWLP_USERDATA);
+        if (pctx) {
+          pctx->browser_hwnd = hwnd;
+          if (pctx->browser != browser) {
+            if (pctx->browser) {
+              pctx->browser->base.release(&pctx->browser->base);
+            }
             pctx->browser = browser;
-
-            RECT rc;
-            GetClientRect(parent_wnd, &rc);
-            SetWindowPos(hwnd, NULL, 0, 0, rc.right, rc.bottom, SWP_NOZORDER | SWP_SHOWWINDOW);
+            browser->base.add_ref(&browser->base);
           }
+
+          RECT rc;
+          GetClientRect(parent_wnd, &rc);
+          SetWindowPos(hwnd, NULL, 0, 0, rc.right, rc.bottom, SWP_NOZORDER | SWP_SHOWWINDOW);
         }
       }
     } else {
@@ -445,6 +453,7 @@ int CEF_CALLBACK life_span_handler_on_before_popup(
     simple_handler_t* popup_handler = simple_handler_create(0);
     popup_handler->type = BROWSER_TYPE_POPUP;
     popup_handler->window_ctx = win_ctx;
+    popup_handler->popup_hwnd = popup_hwnd;
     *client = &popup_handler->client;
 
     if (windowInfo) {
@@ -512,17 +521,24 @@ void CEF_CALLBACK life_span_handler_on_before_close(
 
   if (handler->parent && handler->parent->type == BROWSER_TYPE_POPUP) {
     LogMsg("on_before_close: popup browser %p closed\n", browser);
-    cef_browser_host_t* host = browser->get_host(browser);
-    if (host) {
-      HWND browser_hwnd = host->get_window_handle(host);
-      host->base.release(&host->base);
-      if (browser_hwnd) {
-        HWND parent_wnd = GetParent(browser_hwnd);
-        if (parent_wnd && IsWindow(parent_wnd)) {
-          LogMsg("on_before_close: posting WM_USER_CLOSE_POPUP to parent_wnd=%p\n", parent_wnd);
-          PostMessage(parent_wnd, WM_USER_CLOSE_POPUP, 0, 0);
-        }
+    browser_list_remove(&handler->parent->browser_list, browser);
+    HWND parent_wnd = handler->parent->popup_hwnd;
+    if (!parent_wnd) {
+      cef_browser_host_t* host = browser->get_host(browser);
+      if (host) {
+        HWND browser_hwnd = host->get_window_handle(host);
+        host->base.release(&host->base);
+        if (browser_hwnd) parent_wnd = GetParent(browser_hwnd);
       }
+    }
+    if (parent_wnd && IsWindow(parent_wnd)) {
+      popup_window_ctx_t* pctx = (popup_window_ctx_t*)GetWindowLongPtr(parent_wnd, GWLP_USERDATA);
+      if (pctx && pctx->browser) {
+        pctx->browser->base.release(&pctx->browser->base);
+        pctx->browser = NULL;
+      }
+      LogMsg("on_before_close: posting WM_USER_CLOSE_POPUP to parent_wnd=%p\n", parent_wnd);
+      PostMessage(parent_wnd, WM_USER_CLOSE_POPUP, 0, 0);
     }
     return;
   }

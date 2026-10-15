@@ -160,6 +160,11 @@ static int calculate_dialog_target_pos(HWND dialog_hwnd, int dialog_w, int dialo
   }
   if (!root_owner || !IsWindow(root_owner)) return 0;
 
+  WCHAR owner_cls[64] = {0};
+  if (GetClassNameW(root_owner, owner_cls, 64) <= 0 || wcscmp(owner_cls, L"LiteBrowserMainWindowClass") != 0) {
+    return 0;
+  }
+
   browser_window_t* win_ctx = (browser_window_t*)GetWindowLongPtr(root_owner, GWLP_USERDATA);
   if (!win_ctx || win_ctx->main_hwnd != root_owner) return 0;
 
@@ -271,6 +276,11 @@ static BOOL is_candidate_dialog_window(HWND hwnd) {
   }
   if (!root_owner || root_owner == hwnd) return FALSE;
 
+  WCHAR owner_cls[64] = {0};
+  if (GetClassNameW(root_owner, owner_cls, 64) <= 0 || wcscmp(owner_cls, L"LiteBrowserMainWindowClass") != 0) {
+    return FALSE;
+  }
+
   browser_window_t* win_ctx = (browser_window_t*)GetWindowLongPtr(root_owner, GWLP_USERDATA);
   if (!win_ctx || win_ctx->main_hwnd != root_owner) return FALSE;
 
@@ -350,7 +360,15 @@ static LRESULT CALLBACK CBTProc(int nCode, WPARAM wParam, LPARAM lParam) {
           }
         }
         if (is_chrome) {
-          SetWindowSubclass(hwnd, ModalDialogSubclassProc, SUBCLASS_ID_MODAL_DIALOG, 0);
+          HWND owner = cw->lpcs->hwndParent;
+          HWND root_owner = owner ? GetAncestor(owner, GA_ROOTOWNER) : NULL;
+          if (!root_owner && owner) root_owner = owner;
+          if (root_owner) {
+            WCHAR owner_cls[64] = {0};
+            if (GetClassNameW(root_owner, owner_cls, 64) > 0 && wcscmp(owner_cls, L"LiteBrowserMainWindowClass") == 0) {
+              SetWindowSubclass(hwnd, ModalDialogSubclassProc, SUBCLASS_ID_MODAL_DIALOG, 0);
+            }
+          }
         }
       }
     }

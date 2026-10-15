@@ -53,6 +53,9 @@ typedef struct _simple_handler_t {
   // Browser role/type.
   browser_type_t type;
 
+  // Dedicated native popup window handle (when type == BROWSER_TYPE_POPUP)
+  HWND popup_hwnd;
+
   // True if this client is Alloy style, otherwise Chrome style.
   int is_alloy_style;
 

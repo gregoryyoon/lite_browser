@@ -1148,6 +1148,23 @@ static void CloseTabsToRight(browser_window_t* win_ctx, int target_id) {
 //
 //
 
+static void OpenBookmarkManagerInCurrentTab(browser_window_t* win_ctx, cef_browser_t* cb) {
+  if (cb) {
+    char mgr_url_buf[MAX_PATH + 32];
+    ResolveUIFilePath("ui/manager.html", NULL, 0, mgr_url_buf, sizeof(mgr_url_buf));
+    cef_string_t mgr_url = {};
+    cef_string_from_utf8(mgr_url_buf, strlen(mgr_url_buf), &mgr_url);
+    cef_frame_t *main_frame = cb->get_main_frame(cb);
+    if (main_frame) {
+      main_frame->load_url(main_frame, &mgr_url);
+      main_frame->base.release(&main_frame->base);
+    }
+    cef_string_clear(&mgr_url);
+  } else if (win_ctx) {
+    CreateNewTabEx(win_ctx, "lite://favorites", 1);
+  }
+}
+
 IMPLEMENT_REFCOUNTING_SIMPLE(simple_request_handler_t, request_handler,
                              ref_count)
 
@@ -2314,7 +2331,7 @@ int CEF_CALLBACK request_handler_on_before_browse(
             } else if (cmd == 1002) {
               create_browser_window("lite://favorites");
             } else if (cmd == 1012) {
-              CreateNewTabEx(win_ctx, "lite://favorites", 1);
+              OpenBookmarkManagerInCurrentTab(win_ctx, cb);
             } else if (cmd == 1008) {
               CreateNewTabEx(win_ctx, "lite://downloads", 1);
             } else if (cmd == 1011) {
@@ -2742,9 +2759,7 @@ int CEF_CALLBACK request_handler_on_before_browse(
             free(data_b64);
           }
         } else if (strcmp(action, "open-bookmark-manager") == 0) {
-          if (win_ctx) {
-            CreateNewTabEx(win_ctx, "lite://favorites", 1);
-          }
+          OpenBookmarkManagerInCurrentTab(win_ctx, cb);
         } else if (strcmp(action, "open-download-manager") == 0) {
           if (win_ctx) {
             CreateNewTabEx(win_ctx, "lite://downloads", 1);
@@ -3899,6 +3914,9 @@ int CEF_CALLBACK focus_handler_on_set_focus(cef_focus_handler_t* self,
                                              cef_browser_t* browser,
                                              cef_focus_source_t source) {
   simple_focus_handler_t* handler = (simple_focus_handler_t*)self;
+  if (handler && handler->parent && handler->parent->type == BROWSER_TYPE_POPUP) {
+    return 0;
+  }
   browser_window_t *win_ctx = (handler && handler->parent) ? handler->parent->window_ctx : NULL;
 
   if (win_ctx && win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
@@ -3925,6 +3943,9 @@ int CEF_CALLBACK focus_handler_on_set_focus(cef_focus_handler_t* self,
 void CEF_CALLBACK focus_handler_on_got_focus(cef_focus_handler_t* self,
                                              cef_browser_t* browser) {
   simple_focus_handler_t* handler = (simple_focus_handler_t*)self;
+  if (handler && handler->parent && handler->parent->type == BROWSER_TYPE_POPUP) {
+    return;
+  }
   browser_window_t *win_ctx = (handler && handler->parent) ? handler->parent->window_ctx : NULL;
 
   if (win_ctx && win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
