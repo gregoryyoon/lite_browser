@@ -912,13 +912,29 @@ void RemoveTabAt(browser_window_t* win_ctx, int remove_idx, int close_cef_browse
     return;
   }
 
+  tab_info_t removed_tab = win_ctx->tabs[remove_idx];
+
+  // Immediately hide the removed tab's windows so they vanish from the screen
+  if (removed_tab.hwnd && IsWindow(removed_tab.hwnd)) {
+    ShowWindow(removed_tab.hwnd, SW_HIDE);
+  }
+  if (removed_tab.right_hwnd && IsWindow(removed_tab.right_hwnd)) {
+    ShowWindow(removed_tab.right_hwnd, SW_HIDE);
+  }
+
   if (close_cef_browser) {
-    cef_browser_t* target_browser = win_ctx->tabs[remove_idx].browser;
-    if (target_browser) {
-      cef_browser_host_t* host = target_browser->get_host(target_browser);
+    if (removed_tab.browser) {
+      cef_browser_host_t* host = removed_tab.browser->get_host(removed_tab.browser);
       if (host) {
         host->close_browser(host, 1);
         host->base.release(&host->base);
+      }
+    }
+    if (removed_tab.right_browser) {
+      cef_browser_host_t* r_host = removed_tab.right_browser->get_host(removed_tab.right_browser);
+      if (r_host) {
+        r_host->close_browser(r_host, 1);
+        r_host->base.release(&r_host->base);
       }
     }
   }
@@ -947,10 +963,19 @@ void RemoveTabAt(browser_window_t* win_ctx, int remove_idx, int close_cef_browse
 
   win_ctx->tabs[new_active].is_loaded = 1;
   if (win_ctx->tabs[new_active].hwnd) {
-    ShowWindow(win_ctx->tabs[new_active].hwnd, SW_SHOW);
+    HWND insert_after = (win_ctx->ui_hwnd && IsWindow(win_ctx->ui_hwnd)) ? win_ctx->ui_hwnd : HWND_TOP;
+    SetWindowPos(win_ctx->tabs[new_active].hwnd, insert_after, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+    if (win_ctx->tabs[new_active].is_split && win_ctx->tabs[new_active].right_hwnd) {
+      SetWindowPos(win_ctx->tabs[new_active].right_hwnd, win_ctx->tabs[new_active].hwnd, 0, 0, 0, 0,
+                   SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+    }
+
     RECT rect;
     GetClientRect(win_ctx->main_hwnd, &rect);
     SendMessage(win_ctx->main_hwnd, WM_SIZE, 0, MAKELPARAM(rect.right, rect.bottom));
+    InvalidateRect(win_ctx->main_hwnd, NULL, TRUE);
+
     if (win_ctx->tabs[new_active].browser) {
       cef_browser_host_t* host = win_ctx->tabs[new_active].browser->get_host(win_ctx->tabs[new_active].browser);
       if (host) {
@@ -1005,12 +1030,25 @@ static void CloseOtherTabs(browser_window_t* win_ctx, int keep_id) {
 
   for (int i = 0; i < win_ctx->tab_count; i++) {
     if (i != keep_idx) {
+      if (win_ctx->tabs[i].hwnd && IsWindow(win_ctx->tabs[i].hwnd)) {
+        ShowWindow(win_ctx->tabs[i].hwnd, SW_HIDE);
+      }
+      if (win_ctx->tabs[i].right_hwnd && IsWindow(win_ctx->tabs[i].right_hwnd)) {
+        ShowWindow(win_ctx->tabs[i].right_hwnd, SW_HIDE);
+      }
       cef_browser_t* target_browser = win_ctx->tabs[i].browser;
       if (target_browser) {
         cef_browser_host_t* host = target_browser->get_host(target_browser);
         if (host) {
           host->close_browser(host, 1);
           host->base.release(&host->base);
+        }
+      }
+      if (win_ctx->tabs[i].right_browser) {
+        cef_browser_host_t* r_host = win_ctx->tabs[i].right_browser->get_host(win_ctx->tabs[i].right_browser);
+        if (r_host) {
+          r_host->close_browser(r_host, 1);
+          r_host->base.release(&r_host->base);
         }
       }
     }
@@ -1023,9 +1061,13 @@ static void CloseOtherTabs(browser_window_t* win_ctx, int keep_id) {
 
   if (win_ctx->tabs[0].hwnd) {
     ShowWindow(win_ctx->tabs[0].hwnd, SW_SHOW);
+    if (win_ctx->tabs[0].is_split && win_ctx->tabs[0].right_hwnd) {
+      ShowWindow(win_ctx->tabs[0].right_hwnd, SW_SHOW);
+    }
     RECT rect;
     GetClientRect(win_ctx->main_hwnd, &rect);
-    PostMessage(win_ctx->main_hwnd, WM_SIZE, 0, MAKELPARAM(rect.right, rect.bottom));
+    SendMessage(win_ctx->main_hwnd, WM_SIZE, 0, MAKELPARAM(rect.right, rect.bottom));
+    InvalidateRect(win_ctx->main_hwnd, NULL, TRUE);
     cef_browser_host_t* host = win_ctx->tabs[0].browser->get_host(win_ctx->tabs[0].browser);
     if (host) {
       host->was_resized(host);
@@ -1049,12 +1091,25 @@ static void CloseTabsToRight(browser_window_t* win_ctx, int target_id) {
   if (target_idx == -1 || target_idx >= win_ctx->tab_count - 1) return;
 
   for (int i = target_idx + 1; i < win_ctx->tab_count; i++) {
+    if (win_ctx->tabs[i].hwnd && IsWindow(win_ctx->tabs[i].hwnd)) {
+      ShowWindow(win_ctx->tabs[i].hwnd, SW_HIDE);
+    }
+    if (win_ctx->tabs[i].right_hwnd && IsWindow(win_ctx->tabs[i].right_hwnd)) {
+      ShowWindow(win_ctx->tabs[i].right_hwnd, SW_HIDE);
+    }
     cef_browser_t* target_browser = win_ctx->tabs[i].browser;
     if (target_browser) {
       cef_browser_host_t* host = target_browser->get_host(target_browser);
       if (host) {
         host->close_browser(host, 1);
         host->base.release(&host->base);
+      }
+    }
+    if (win_ctx->tabs[i].right_browser) {
+      cef_browser_host_t* r_host = win_ctx->tabs[i].right_browser->get_host(win_ctx->tabs[i].right_browser);
+      if (r_host) {
+        r_host->close_browser(r_host, 1);
+        r_host->base.release(&r_host->base);
       }
     }
   }
@@ -1065,9 +1120,13 @@ static void CloseTabsToRight(browser_window_t* win_ctx, int target_id) {
     new_active = target_idx;
     if (win_ctx->tabs[new_active].hwnd) {
       ShowWindow(win_ctx->tabs[new_active].hwnd, SW_SHOW);
+      if (win_ctx->tabs[new_active].is_split && win_ctx->tabs[new_active].right_hwnd) {
+        ShowWindow(win_ctx->tabs[new_active].right_hwnd, SW_SHOW);
+      }
       RECT rect;
       GetClientRect(win_ctx->main_hwnd, &rect);
-      PostMessage(win_ctx->main_hwnd, WM_SIZE, 0, MAKELPARAM(rect.right, rect.bottom));
+      SendMessage(win_ctx->main_hwnd, WM_SIZE, 0, MAKELPARAM(rect.right, rect.bottom));
+      InvalidateRect(win_ctx->main_hwnd, NULL, TRUE);
       cef_browser_host_t* host = win_ctx->tabs[new_active].browser->get_host(win_ctx->tabs[new_active].browser);
       if (host) {
         host->was_resized(host);

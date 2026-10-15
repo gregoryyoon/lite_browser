@@ -1045,7 +1045,7 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
               int cur_w = cur_rc.right - cur_rc.left;
               int cur_h = cur_rc.bottom - cur_rc.top;
               if (pt.x != 0 || pt.y != content_y || cur_w != main_area_w || cur_h != content_h) {
-                MoveWindow(content_hwnd, 0, content_y, main_area_w, content_h, FALSE);
+                MoveWindow(content_hwnd, 0, content_y, main_area_w, content_h, TRUE);
               }
               if (!IsWindowVisible(content_hwnd)) {
                 ShowWindow(content_hwnd, SW_SHOW);
