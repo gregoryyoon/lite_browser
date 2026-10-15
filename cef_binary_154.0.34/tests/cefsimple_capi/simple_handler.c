@@ -302,25 +302,7 @@ static void scan_directory_recursive(const char* dir_path, char** json_ptr, size
 #endif
 
 void LogMsg(const char *format, ...) {
-  char buffer[4096];
-  va_list args;
-  va_start(args, format);
-  vsnprintf(buffer, sizeof(buffer), format, args);
-  va_end(args);
-
-  OutputDebugStringA(buffer);
-
-  FILE* fp = fopen("C:\\projects\\lite_browser\\debug.log", "a");
-  if (!fp) {
-    fp = fopen("debug.log", "a");
-  }
-  if (fp) {
-    SYSTEMTIME st;
-    GetLocalTime(&st);
-    fprintf(fp, "[%02d:%02d:%02d.%03d] %s", st.wHour, st.wMinute, st.wSecond, st.wMilliseconds, buffer);
-    fflush(fp);
-    fclose(fp);
-  }
+  (void)format;
 }
 
 static const char base64_table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";

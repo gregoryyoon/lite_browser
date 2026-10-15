@@ -13,26 +13,10 @@
 #include "tests/cefsimple_capi/simple_handler.h"
 #include "tests/cefsimple_capi/simple_ai_proxy.h"
 
-static LONG WINAPI LiteBrowserCrashFilter(EXCEPTION_POINTERS* ep) {
-  char buf[512];
-  snprintf(buf, sizeof(buf), "\n[CRASH] Unhandled Exception! Code=0x%08lX, Address=%p\n",
-           ep->ExceptionRecord->ExceptionCode, ep->ExceptionRecord->ExceptionAddress);
-  LogMsg("%s", buf);
-  OutputDebugStringA(buf);
-  FILE* fp = fopen("C:\\projects\\lite_browser\\debug.log", "a");
-  if (fp) {
-    fprintf(fp, "%s", buf);
-    fflush(fp);
-    fclose(fp);
-  }
-  return EXCEPTION_CONTINUE_SEARCH;
-}
-
 static int RunMain(HINSTANCE hInstance,
                    LPTSTR lpCmdLine,
                    int nCmdShow,
                    void* sandbox_info) {
-  SetUnhandledExceptionFilter(LiteBrowserCrashFilter);
   int exit_code;
 
   // Configure the CEF API version. This must be called before any other CEF

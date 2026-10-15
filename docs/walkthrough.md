@@ -2469,13 +2469,8 @@ Lite Browser의 탭 드래그 앤 드롭 시스템을 최신 Chromium/Edge 브�
    - `browser_context.h`에 **`is_window_destroyed`** 플래그를 추가하고, `WM_DESTROY` / `WM_NCDESTROY`와 `life_span_handler_on_before_close` 양방향에서 상태를 동기화.
    - CEF의 브라우저 소멸 콜백(`!any_active`)과 Win32 윈도우 파괴(`is_window_destroyed == 1`)가 둘 다 완료된 시점에만 컨텍스트 메모리(`free(win_ctx)`)를 해제하도록 격리하여 Use-After-Free 크래시를 원천 방지.
 
-6. **크래시 필터 및 타임스탬프 로깅 인프라 (`cefsimple_win.c`, `simple_handler.c`)**:
-   - `SetUnhandledExceptionFilter`를 등록하여 예기치 못한 예외 발생 시 예외 코드와 메모리 주소를 `debug.log` 파일에 영속화하도록 안전장치 구축.
-   - `LogMsg` 함수를 통해 `[HH:MM:SS.mmm]` 형식의 밀리초 정밀 타임스탬프와 함께 콘솔 및 `debug.log` 파일로 수명 주기 이벤트를 추적할 수 있도록 개선.
-
 ### 66.4 관련 소스 코드
 - [`cef_binary_154.0.34/tests/cefsimple_capi/browser_context.h`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/browser_context.h)
-- [`cef_binary_154.0.34/tests/cefsimple_capi/cefsimple_win.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/cefsimple_win.c)
 - [`cef_binary_154.0.34/tests/cefsimple_capi/simple_app.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_app.c)
 - [`cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.c)
 - [`cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.h`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.h)

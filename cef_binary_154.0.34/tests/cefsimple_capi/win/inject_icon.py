@@ -197,7 +197,7 @@ def inject_ico_to_exe(exe_path, ico_path, primary_group_id=120):
         ret = kernel32.EndUpdateResourceW(hUpdate, False)
         if not ret:
             err = kernel32.GetLastError()
-            print(f"Error: EndUpdateResourceW failed. Error: {err}")
+            print(f"Notice: EndUpdateResourceW failed. Code: {err}")
             return False
             
         print("Successfully injected icon into executable.")
