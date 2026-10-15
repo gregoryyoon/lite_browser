@@ -192,7 +192,8 @@ function runAIProxyStream({ url, headers = {}, body, signal, onRawLine, onStatus
 class GeminiProvider extends AIProviderInterface {
   constructor(config = {}) {
     super(config);
-    this.model = config.model || 'gemini-3.8-flash';
+    const validModels = ['gemini-3.8-flash', 'gemini-4-argon'];
+    this.model = validModels.includes(config.model) ? config.model : 'gemini-3.8-flash';
   }
 
   async chatStream({ messages, tools, systemPrompt, onChunk, onThinking, onToolCall, onStatus, onComplete, onError, signal }) {

@@ -2557,4 +2557,75 @@ Win32 윈도우 클래스 레벨, 윈도우 인스턴스 레벨, 메시지 디�
   1. **Windows 11 작업 전환기(Alt+Tab)**: Lite Browser 창의 썸네일 미리보기 좌측 상단에 Lite Browser 고유 아이콘 배지가 선명하고 일관되게 표시됨을 실기 확인.
   2. **작업 보기(Task View, Win+Tab)**: 전체 가상 데스크톱 및 창 미리보기 창 상단에 프로그램 아이콘이 안정적으로 렌더링됨을 검증.
 
+---
+
+## 68. 분할 탭(Split View) 닫기 시 우측 보조 브라우저 및 윈도우 리소스 완전 해제 및 화면 갱신 보정 (Right Split Window & Browser Resource Cleanup on Tab Close, GitHub Issue #85)
+
+### 68.1 개요 (GitHub Issue #85)
+화면 분할(Dual Tab / Split View) 모드가 활성화된 탭을 닫거나, "다른 탭 닫기" / "오른쪽 탭 닫기" 등의 일괄 닫기 작업을 수행할 때, 좌측 메인 브라우저만 정리되고 우측 보조 브라우저(`right_browser`, `right_hwnd`)가 해제되지 않고 화면에 잔상이 남거나 리소스가 누수되던 결함([GitHub Issue #85](https://github.com/gregoryyoon/lite_browser/issues/85))을 해결했습니다.
+
+### 68.2 주요 구현 내역
+1. **분할 브라우저 윈도우 즉시 숨김 및 CEF 브라우저 종료 (`simple_handler.c`)**:
+   - `RemoveTabAt`, `CloseOtherTabs`, `CloseTabsToRight`에서 탭 제거 시 메인 윈도우뿐만 아니라 보조 윈도우(`right_hwnd`)에 대해서도 `ShowWindow(SW_HIDE)`를 즉각 호출하여 화면 잔상을 원천 차단.
+   - `close_cef_browser` 플래그가 활성화된 경우 `right_browser`의 `cef_browser_host_t`를 획득하여 `close_browser(host, 1)`를 명시적으로 호출함으로써 CEF 프로세스 및 렌더러 리소스를 안전하게 회수.
+2. **신규 활성 탭 전환 시 Z-order 및 화면 재배치 동기화 (`simple_handler.c`, `simple_app.c`)**:
+   - 탭 삭제 후 새로운 활성 탭으로 전환될 때, 해당 탭이 분할 모드(`is_split == 1`)인 경우 우측 보조 윈도우(`right_hwnd`)도 `SetWindowPos`와 `SWP_SHOWWINDOW`를 통해 올바른 Z-order로 최전면 표시.
+   - `SendMessage(win_ctx->main_hwnd, WM_SIZE)` 및 `InvalidateRect(win_ctx->main_hwnd, NULL, TRUE)`를 동기 호출하여 탭 전환 즉시 깜빡임이나 잔상 없이 전체 클라이언트 뷰포트를 온전하게 다시 그리도록 처리.
+
+### 68.3 관련 소스 코드
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.c)
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_app.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_app.c)
+
+---
+
+## 69. 본인인증/결제 팝업 윈도우 생명주기 안정화 및 포커스/소멸 크래시 해결 (Identity Verification & Payment Popup Lifecycle Stabilization and Crash Prevention)
+
+### 69.1 개요
+웹 사이트의 휴대폰 본인확인, 전자결제(PG사), 소셜 로그인 등에서 호출되는 모달 팝업 창(`window.open`)이 열리거나 닫힐 때 발생하던 비정상 종료(Crash) 및 포커스 루프 간섭 결함을 해결했습니다. 팝업 브라우저 전용 윈도우 핸들 관리 및 2단계 소멸 라이프사이클을 확립하여 안정성을 대폭 강화했습니다.
+
+### 69.2 주요 구현 내역
+1. **팝업 전용 네이티브 윈도우 핸들 바인딩 (`popup_hwnd`, `simple_handler.h`, `simple_life_span_handler.c`)**:
+   - `simple_handler_t` 구조체에 `HWND popup_hwnd` 필드를 추가하여, 팝업 창 생성(`life_span_handler_on_before_popup`) 시점에 최상위 윈도우 핸들을 정확히 바인딩.
+   - `life_span_handler_on_after_created`에서 `GetParent(hwnd)` 실패 위험을 제거하고, `popup_hwnd`를 통해 항상 100% 안전하게 `popup_window_ctx_t`와 브라우저 인스턴스를 동기화.
+2. **팝업 브라우저 참조 카운트 가드 및 메모리 해제 순서 보장 (`simple_life_span_handler.c`)**:
+   - 팝업 컨텍스트(`popup_window_ctx_t`)에 브라우저 포인터를 설정할 때 `add_ref`를 호출하고, 창 소멸(`WM_NCDESTROY`) 및 `on_before_close` 시 `release`를 호출하여 댕글링 포인터 및 Use-After-Free를 방지.
+   - 팝업 닫기 시 즉각적인 윈도우 파괴 대신 `PostMessage(parent_wnd, WM_USER_CLOSE_POPUP, 0, 0)`를 통해 비동기로 창을 닫도록 생명주기 분리.
+3. **팝업 브라우저의 메인 창 포커스 간섭 방지 (`focus_handler_on_set_focus`, `focus_handler_on_got_focus`, `simple_handler.c`)**:
+   - 팝업 브라우저(`type == BROWSER_TYPE_POPUP`)에서 발생하는 포커스 이벤트가 상위 메인 브라우저 윈도우 컨텍스트(`win_ctx`)의 활성 탭 인덱스나 주소창 상태를 오염시키지 않도록 가드를 추가하여 즉시 반환(`return 0 / return`).
+
+### 69.3 관련 소스 코드
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.h`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.h)
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.c)
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_life_span_handler.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_life_span_handler.c)
+
+---
+
+## 70. Google Gemini 공식 최신 모델 개편 및 무료/유료 티어 쿼터 정책 반영 (Google Gemini Model Lineup Optimization & Free/Paid Tier Quota Policy Integration)
+
+### 70.1 개요
+Google AI Studio의 최신 Gemini API 정책에 맞추어 사이드패널에서 선택 가능한 Gemini 모델을 공식 GA 및 최신 플래그십 2개 모델(`gemini-3.8-flash`, `gemini-4-argon`)로 정리했습니다.  
+또한 무료 API 키 사용 시 `gemini-4-argon`에서 발생하던 `429 RESOURCE_EXHAUSTED (limit: 0)` 오류의 원인을 분석하고, 무료 및 유료 결제 계정 구분을 UI 라벨에 명시하여 사용성을 대폭 개선했습니다.
+
+### 70.2 원인 분석 및 기술적 해결
+1. **Google AI Studio 무료 티어 쿼터 정책 분석**:
+   - **`gemini-4-argon`**: 최신 최상위 플래그십 심층 추론 모델로서 Google에서 **무료 티어 쿼터를 미제공(`limit: 0`)**하며, Google Cloud Billing 결제 계정이 연동된 종량제(Pay-as-you-go) 계정에서만 사용 가능함을 규명.
+   - **`gemini-3.8-flash`**: Google AI Studio 무료 티어(RPM 5, RPD 20 등)를 공식 지원하는 고속/에이전트 권장 기본 모델.
+2. **모델 목록 간소화 및 직관적 라벨링 (`ui/sidepanel.html`)**:
+   - 구형/Deprecated된 모델(`gemini-3.7-flash`, `gemini-3.6-flash`, `gemini-3.5-flash`, `gemini-3.1-pro-preview`)을 정리하고 아래 2종으로 명확화:
+     - **`gemini-3.8-flash (최신 고속/에이전트 권장 - 무료 지원)`** (기본 선택값 / Default)
+     - **`gemini-4-argon (최신 플래그십 심층 추론 - 유료 결제 전용)`**
+3. **생성자 모델 유효성 검증 및 캐시 폴백 가드 (`ui/ai_providers.js`)**:
+   - `GeminiProvider` 생성자에서 유효 모델 배열(`['gemini-3.8-flash', 'gemini-4-argon']`) 검증을 추가하여, 로컬스토리지에 기존 구형 모델명이 남아 있더라도 안전하게 기본값(`gemini-3.8-flash`)으로 자동 폴백되도록 보호.
+
+### 70.3 관련 소스 코드
+- [`ui/sidepanel.html`](file:///c:/projects/lite_browser/ui/sidepanel.html)
+- [`ui/ai_providers.js`](file:///c:/projects/lite_browser/ui/ai_providers.js)
+
+### 70.4 빌드 및 검증 결과
+- **디버그 빌드**: `cmake --build cef_binary_154.0.34/build --config Debug --target cefsimple_capi` 성공 (`Exit code 0, 오류 0개`).
+- **실기 검증**:
+  - 무료 API 키 사용 시 기본 선택된 `gemini-3.8-flash`로 정상 실시간 스트리밍 및 웹페이지 분석이 완료됨을 확인.
+  - 드롭다운 라벨에 무료 지원 여부와 유료 전용 여부가 명시되어 쿼터 초과 혼선 방지.
+
+
 
