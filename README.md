@@ -37,11 +37,12 @@ HTML5/CSS3/JavaScript 기반의 현대적 **벤토 그리드(Bento Grid) 웹 UI*
 - `GWLP_USERDATA`와 구조체 동적 할당(`browser_window_t`)을 활용한 안전한 멀티 윈도우/다중 탭 격리를 구현했습니다.
 - `WM_DESTROY` 수신 시 메모리를 조기 해제하지 않고, 자식 UI 브라우저 및 모든 탭 브라우저들의 비동기 소멸 콜백(`on_before_close`)이 100% 완료된 시점에만 메모리를 해제하는 **비동기 수명 주기 격리 가드**로 Use-After-Free(UAF) 크래시를 원천 차단했습니다.
 
-### 2. 🗂️ 다중 탭 (Multi-Tab) 관리, 균등 비율 축소 & 실시간 탭 분리 (Reparenting)
+### 2. 🗂️ 다중 탭 (Multi-Tab) 관리, 균등 비율 축소, 실시간 탭 분리(Tear-off) & 다른 창 재결합(Re-docking)
 - **Chrome/Edge 스타일 균등 축소**: 탭이 늘어나면 `flex: 1 1 0px` 및 `min-width: 32px`로 전 탭의 폭이 균등하게 자동 축소되며, Container Queries(`@container (max-width: 75px)`)로 닫기 버튼이 부드럽게 자동 숨김 처리됩니다.
 - **활성 탭 기준 상대 위치 새 탭 삽입**: 새 탭 생성 시 맨 끝에 추가되지 않고 현재 보고 있는 탭의 바로 오른쪽(`active_tab_index + 1`) 슬롯에 즉시 삽입되어 자연스러운 탐색 흐름을 유지합니다.
-- **새로고침 없는 탭 분리(Reparenting)**: `PointerEvent`의 **`setPointerCapture`**를 채택하여 탭을 윈도우 밖으로 드래그할 때 OS 드롭 제한 기호(🚫)를 우회하고, 마우스를 놓는 즉시 새 창을 생성한 뒤 Win32 `SetParent` API를 통해 네이티브 콘텐츠 브라우저 HWND를 리로드 없이 실시간 이관합니다.
-- **HWND Z-order 잔상 차단**: 탭 전환 시 비활성 탭들의 HWND를 명시적으로 `ShowWindow(SW_HIDE)` 처리하고 활성 탭만 `ShowWindow(SW_SHOW)`하여 브라우저 전환 시 겹침 현상과 잔상을 완벽히 방지합니다.
+- **실시간 탭 분리(Tear-off) & 비모달 드래그 추적**: 탭을 탭 바 밖(25px)으로 드래그하는 즉시 새 창으로 분리되며, 비모달 마우스 캡처(`SetCapture`)와 동기 UI 생성(`cef_browser_host_create_browser_sync`)을 통해 드래그 중에도 주소창/툴바가 즉시 렌더링되고 마우스 커서를 부드럽게 추적합니다.
+- **다른 창 탭 바로 드롭 시 재결합 (Re-docking)**: 분리된 탭을 다른 LiteBrowser 창의 탭 바 위로 드롭하면, Z-order 히트 테스트 및 DPI 스케일 탭바 레이아웃에 맞춰 웹 콘텐츠 브라우저 HWND를 리로드 없이 해당 창으로 원자적 이관·병합합니다.
+- **HWND Z-order 잔상 차단 & 2단계 안전 소멸**: 탭 전환 시 비활성 탭들의 HWND를 명시적으로 `ShowWindow(SW_HIDE)` 처리하고 활성 탭만 `ShowWindow(SW_SHOW)`하여 잔상을 차단하며, 탭 병합 후 빈 창 종료 시 비동기 `PostMessage(WM_CLOSE)` 및 `is_window_destroyed` 2단계 가드로 Use-After-Free 크래시를 원천 방지합니다.
 
 ### 3. ◫ 듀얼 화면 분할 (Dual Split-View Multitasking)
 - 단일 탭 내에서 좌/우 2개의 독립된 웹 브라우저 인스턴스를 동시 렌더링하여 효율적인 멀티태스킹을 지원합니다.

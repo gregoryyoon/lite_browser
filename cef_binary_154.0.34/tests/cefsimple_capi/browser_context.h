@@ -5,6 +5,7 @@
 #include "include/capi/cef_browser_capi.h"
 
 #define MAX_TABS 20
+#define TIMER_DRAG_WATCHDOG 1005
 
 typedef struct _tab_info_t {
   int tab_id;
@@ -55,11 +56,21 @@ typedef struct _browser_window_t {
   int is_resizing_sidepanel;
   int sidepanel_drag_start_x;
   int sidepanel_drag_start_w;
+
+  // Non-modal window drag tracking for detached tab
+  int is_dragging_window;
+  int drag_offset_x;
+  int drag_offset_y;
+
+  // Window destruction and cleanup lifecycle tracking
+  int is_window_destroyed;
 } browser_window_t;
 
 #if defined(OS_WIN)
 browser_window_t* create_browser_window(const char* startup_url);
 browser_window_t* create_browser_window_for_detached(cef_browser_t* detached_browser, HWND detached_hwnd, const char* url, const char* title, int x, int y, HWND parent_hwnd);
+browser_window_t* create_browser_window_for_detached_tab(tab_info_t* tab, int x, int y, HWND parent_hwnd);
+int TryRedockTab(browser_window_t* src_win, POINT drop_pt);
 void CreateSidepanelBrowser(browser_window_t* win_ctx);
 void SubclassAllChildWindows(HWND main_hwnd);
 extern int g_window_count;

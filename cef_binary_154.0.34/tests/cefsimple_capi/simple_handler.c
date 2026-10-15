@@ -19,6 +19,7 @@
 #include <string.h>
 
 #include "include/capi/cef_task_capi.h"
+#include "include/capi/cef_parser_capi.h"
 #include "tests/cefsimple_capi/ref_counted.h"
 #include "tests/cefsimple_capi/simple_browser_list.h"
 #include "tests/cefsimple_capi/simple_utils.h"
@@ -301,7 +302,25 @@ static void scan_directory_recursive(const char* dir_path, char** json_ptr, size
 #endif
 
 void LogMsg(const char *format, ...) {
-  (void)format;
+  char buffer[4096];
+  va_list args;
+  va_start(args, format);
+  vsnprintf(buffer, sizeof(buffer), format, args);
+  va_end(args);
+
+  OutputDebugStringA(buffer);
+
+  FILE* fp = fopen("C:\\projects\\lite_browser\\debug.log", "a");
+  if (!fp) {
+    fp = fopen("debug.log", "a");
+  }
+  if (fp) {
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    fprintf(fp, "[%02d:%02d:%02d.%03d] %s", st.wHour, st.wMinute, st.wSecond, st.wMilliseconds, buffer);
+    fflush(fp);
+    fclose(fp);
+  }
 }
 
 static const char base64_table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -864,13 +883,30 @@ void update_ui_nav_state(browser_window_t* win_ctx) {
   char escaped_url[4096] = {0};
   EscapeJsonString(active_url, escaped_url, sizeof(escaped_url));
 
-  char js_code[5000];
+  char escaped_display_url[4096] = {0};
+  if (active_url && active_url[0] != '\0') {
+    cef_string_t in_url = {};
+    cef_string_from_utf8(active_url, strlen(active_url), &in_url);
+    cef_string_userfree_t dec_url = cef_uridecode(&in_url, 1, UU_NORMAL);
+    if (dec_url && dec_url->str) {
+      cef_string_utf8_t dec_u8 = {};
+      cef_string_to_utf8(dec_url->str, dec_url->length, &dec_u8);
+      if (dec_u8.str) {
+        EscapeJsonString(dec_u8.str, escaped_display_url, sizeof(escaped_display_url));
+        cef_string_utf8_clear(&dec_u8);
+      }
+      cef_string_userfree_free(dec_url);
+    }
+    cef_string_clear(&in_url);
+  }
+
+  char js_code[10000];
   snprintf(js_code, sizeof(js_code), 
            "if (window.updateNavState) { window.updateNavState(%d, %d, %d); } "
-           "if (window.updateAddress) { window.updateAddress(\"%s\"); } "
+           "if (window.updateAddress) { window.updateAddress(\"%s\", \"%s\"); } "
            "if (window.updateDualSplitState) { window.updateDualSplitState(%d, %d); } "
            "if (window.updateSidepanelState) { window.updateSidepanelState(%d); }", 
-           can_go_back, can_go_forward, is_loading, escaped_url,
+           can_go_back, can_go_forward, is_loading, escaped_url, escaped_display_url,
            active_tab->is_split, active_tab->active_split,
            win_ctx->show_sidepanel);
 
@@ -884,7 +920,7 @@ void update_ui_nav_state(browser_window_t* win_ctx) {
   }
 }
 
-static void RemoveTabAt(browser_window_t* win_ctx, int remove_idx, int close_cef_browser) {
+void RemoveTabAt(browser_window_t* win_ctx, int remove_idx, int close_cef_browser) {
   if (!win_ctx || remove_idx < 0 || remove_idx >= win_ctx->tab_count) return;
 
   if (win_ctx->tab_count <= 1) {
@@ -932,15 +968,26 @@ static void RemoveTabAt(browser_window_t* win_ctx, int remove_idx, int close_cef
     ShowWindow(win_ctx->tabs[new_active].hwnd, SW_SHOW);
     RECT rect;
     GetClientRect(win_ctx->main_hwnd, &rect);
-    int ui_height = GetUIHeightForWindow(win_ctx->main_hwnd);
-    int content_y = ui_height + 1;
-    int content_h = rect.bottom - content_y - 1;
-    MoveWindow(win_ctx->tabs[new_active].hwnd, 1, content_y, rect.right - 2, content_h, TRUE);
-    PostMessage(win_ctx->main_hwnd, WM_SIZE, 0, MAKELPARAM(rect.right, rect.bottom));
+    SendMessage(win_ctx->main_hwnd, WM_SIZE, 0, MAKELPARAM(rect.right, rect.bottom));
     if (win_ctx->tabs[new_active].browser) {
       cef_browser_host_t* host = win_ctx->tabs[new_active].browser->get_host(win_ctx->tabs[new_active].browser);
       if (host) {
         host->was_resized(host);
+        host->base.release(&host->base);
+      }
+    }
+    if (win_ctx->tabs[new_active].is_split && win_ctx->tabs[new_active].right_browser) {
+      cef_browser_host_t* r_host = win_ctx->tabs[new_active].right_browser->get_host(win_ctx->tabs[new_active].right_browser);
+      if (r_host) {
+        r_host->was_resized(r_host);
+        r_host->base.release(&r_host->base);
+      }
+    }
+    cef_browser_t* ab = (win_ctx->tabs[new_active].is_split && win_ctx->tabs[new_active].active_split == 1 && win_ctx->tabs[new_active].right_browser)
+                         ? win_ctx->tabs[new_active].right_browser : win_ctx->tabs[new_active].browser;
+    if (ab) {
+      cef_browser_host_t* host = ab->get_host(ab);
+      if (host) {
         host->set_focus(host, 1);
         host->base.release(&host->base);
       }
@@ -2395,7 +2442,27 @@ int CEF_CALLBACK request_handler_on_before_browse(
           PostMessage(win_ctx->main_hwnd, WM_CLOSE, 0, 0);
         } else if (strcmp(action, "drag-window") == 0) {
           ReleaseCapture();
-          SendMessage(win_ctx->main_hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0);
+          POINT start_pt;
+          GetCursorPos(&start_pt);
+          if (IsZoomed(win_ctx->main_hwnd)) {
+            ShowWindow(win_ctx->main_hwnd, SW_RESTORE);
+            RECT rest_r;
+            GetWindowRect(win_ctx->main_hwnd, &rest_r);
+            int rest_w = rest_r.right - rest_r.left;
+            int new_x = start_pt.x - (rest_w / 2);
+            int new_y = start_pt.y - 15;
+            SetWindowPos(win_ctx->main_hwnd, NULL, new_x, new_y, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+          }
+          if (GetAsyncKeyState(VK_LBUTTON) & 0x8000) {
+            SendMessage(win_ctx->main_hwnd, WM_NCLBUTTONDOWN, HTCAPTION, MAKELPARAM(start_pt.x, start_pt.y));
+          }
+          if (win_ctx->tab_count == 1) {
+            POINT drop_pt;
+            GetCursorPos(&drop_pt);
+            if (abs(drop_pt.x - start_pt.x) >= 5 || abs(drop_pt.y - start_pt.y) >= 5) {
+              TryRedockTab(win_ctx, drop_pt);
+            }
+          }
         } else if (strcmp(action, "window-minimize") == 0) {
           ShowWindow(win_ctx->main_hwnd, SW_MINIMIZE);
         } else if (strcmp(action, "window-maximize") == 0) {
@@ -2976,7 +3043,6 @@ int CEF_CALLBACK request_handler_on_before_browse(
           }
           if (found_idx != -1 && win_ctx->tab_count > 1) {
             cef_browser_t* detached_browser = win_ctx->tabs[found_idx].browser;
-            HWND detached_hwnd = win_ctx->tabs[found_idx].hwnd;
             char target_url[4096];
             char target_title[256];
             strcpy(target_url, win_ctx->tabs[found_idx].url);
@@ -3000,20 +3066,100 @@ int CEF_CALLBACK request_handler_on_before_browse(
               }
             }
 
-            browser_window_t* new_win = create_browser_window_for_detached(
-                detached_browser, detached_hwnd, target_url, target_title, CW_USEDEFAULT, CW_USEDEFAULT, win_ctx ? win_ctx->main_hwnd : NULL);
+            tab_info_t moving_tab = win_ctx->tabs[found_idx];
+            if (moving_tab.url[0] == '\0') {
+              strncpy(moving_tab.url, target_url, sizeof(moving_tab.url) - 1);
+            }
+
+            browser_window_t* new_win = create_browser_window_for_detached_tab(
+                &moving_tab, CW_USEDEFAULT, CW_USEDEFAULT, win_ctx ? win_ctx->main_hwnd : NULL);
+
+            if (new_win) {
+              RemoveTabAt(win_ctx, found_idx, 0);
+            }
+          }
+        } else if (strncmp(action, "detach-drag?", 12) == 0) {
+          int target_id = -1;
+          int grab_x = 0;
+          int grab_y = 0;
+
+          char* p_id = get_query_param(action + 12, "id");
+          if (p_id) { target_id = atoi(p_id); free(p_id); }
+          char* p_gx = get_query_param(action + 12, "grabX");
+          if (p_gx) { grab_x = atoi(p_gx); free(p_gx); }
+          char* p_gy = get_query_param(action + 12, "grabY");
+          if (p_gy) { grab_y = atoi(p_gy); free(p_gy); }
+
+          int found_idx = -1;
+          for (int i = 0; i < win_ctx->tab_count; i++) {
+            if (win_ctx->tabs[i].tab_id == target_id) {
+              found_idx = i;
+              break;
+            }
+          }
+
+          if (found_idx != -1 && win_ctx->tab_count > 1) {
+            POINT pt;
+            GetCursorPos(&pt);
+            double scale = 1.0;
+            UINT dpi = GetDpiForWindow(win_ctx->main_hwnd);
+            if (dpi > 0) {
+              scale = (double)dpi / 96.0;
+            }
+            int offset_x = (int)((8 + grab_x) * scale);
+            int offset_y = (int)((7 + grab_y) * scale);
+            int new_x = pt.x - offset_x;
+            int new_y = pt.y - offset_y;
+
+            tab_info_t moving_tab = win_ctx->tabs[found_idx];
+            if (moving_tab.url[0] == '\0' && moving_tab.browser) {
+              cef_frame_t* mf = moving_tab.browser->get_main_frame(moving_tab.browser);
+              if (mf) {
+                cef_string_userfree_t cur_u = mf->get_url(mf);
+                if (cur_u && cur_u->length > 0) {
+                  cef_string_utf8_t u8 = {};
+                  cef_string_to_utf8(cur_u->str, cur_u->length, &u8);
+                  if (u8.str && u8.length > 0) {
+                    strncpy(moving_tab.url, u8.str, sizeof(moving_tab.url) - 1);
+                    moving_tab.url[sizeof(moving_tab.url) - 1] = '\0';
+                  }
+                  cef_string_utf8_clear(&u8);
+                  cef_string_userfree_free(cur_u);
+                }
+                mf->base.release(&mf->base);
+              }
+            }
+
+            browser_window_t* new_win = create_browser_window_for_detached_tab(
+                &moving_tab, new_x, new_y, win_ctx ? win_ctx->main_hwnd : NULL);
 
             if (new_win) {
               RemoveTabAt(win_ctx, found_idx, 0);
 
-              cef_browser_host_t* host = detached_browser->get_host(detached_browser);
-              cef_client_t* client = host->get_client(host);
-              if (client) {
-                simple_handler_t* detached_handler = (simple_handler_t*)client;
-                detached_handler->window_ctx = new_win;
-                new_win->tabs[0].tab_handler = detached_handler;
+              ReleaseCapture();
+              SetForegroundWindow(new_win->main_hwnd);
+              if (GetAsyncKeyState(VK_LBUTTON) & 0x8000) {
+                new_win->is_dragging_window = 1;
+                new_win->drag_offset_x = offset_x;
+                new_win->drag_offset_y = offset_y;
+                SetCapture(new_win->main_hwnd);
+                SetTimer(new_win->main_hwnd, TIMER_DRAG_WATCHDOG, 10, NULL);
+              } else {
+                POINT drop_pt;
+                GetCursorPos(&drop_pt);
+                if (!TryRedockTab(new_win, drop_pt)) {
+                  SetForegroundWindow(new_win->main_hwnd);
+                  if (new_win->tabs[0].browser) {
+                    cef_browser_t* ab = (new_win->tabs[0].is_split && new_win->tabs[0].active_split == 1 && new_win->tabs[0].right_browser)
+                                        ? new_win->tabs[0].right_browser : new_win->tabs[0].browser;
+                    cef_browser_host_t* h = ab->get_host(ab);
+                    if (h) {
+                      h->set_focus(h, 1);
+                      h->base.release(&h->base);
+                    }
+                  }
+                }
               }
-              host->base.release(&host->base);
             }
           }
         } else if (strncmp(action, "drag-end?id=", 12) == 0) {
@@ -3031,23 +3177,17 @@ int CEF_CALLBACK request_handler_on_before_browse(
               }
             }
             if (found_idx != -1 && win_ctx->tab_count > 1) {
-              cef_browser_t* detached_browser = win_ctx->tabs[found_idx].browser;
-              HWND detached_hwnd = win_ctx->tabs[found_idx].hwnd;
-              char target_url[4096];
-              char target_title[256];
-              strcpy(target_url, win_ctx->tabs[found_idx].url);
-              strcpy(target_title, win_ctx->tabs[found_idx].title);
-
-              if (target_url[0] == '\0' && detached_browser) {
-                cef_frame_t* mf = detached_browser->get_main_frame(detached_browser);
+              tab_info_t moving_tab = win_ctx->tabs[found_idx];
+              if (moving_tab.url[0] == '\0' && moving_tab.browser) {
+                cef_frame_t* mf = moving_tab.browser->get_main_frame(moving_tab.browser);
                 if (mf) {
                   cef_string_userfree_t cur_u = mf->get_url(mf);
                   if (cur_u && cur_u->length > 0) {
                     cef_string_utf8_t u8 = {};
                     cef_string_to_utf8(cur_u->str, cur_u->length, &u8);
                     if (u8.str && u8.length > 0) {
-                      strncpy(target_url, u8.str, sizeof(target_url) - 1);
-                      target_url[sizeof(target_url) - 1] = '\0';
+                      strncpy(moving_tab.url, u8.str, sizeof(moving_tab.url) - 1);
+                      moving_tab.url[sizeof(moving_tab.url) - 1] = '\0';
                     }
                     cef_string_utf8_clear(&u8);
                     cef_string_userfree_free(cur_u);
@@ -3056,20 +3196,11 @@ int CEF_CALLBACK request_handler_on_before_browse(
                 }
               }
 
-              browser_window_t* new_win = create_browser_window_for_detached(
-                  detached_browser, detached_hwnd, target_url, target_title, pt.x - 100, pt.y - 10, win_ctx ? win_ctx->main_hwnd : NULL);
+              browser_window_t* new_win = create_browser_window_for_detached_tab(
+                  &moving_tab, pt.x - 100, pt.y - 10, win_ctx ? win_ctx->main_hwnd : NULL);
 
               if (new_win) {
                 RemoveTabAt(win_ctx, found_idx, 0);
-
-                cef_browser_host_t* host = detached_browser->get_host(detached_browser);
-                cef_client_t* client = host->get_client(host);
-                if (client) {
-                  simple_handler_t* detached_handler = (simple_handler_t*)client;
-                  detached_handler->window_ctx = new_win;
-                  new_win->tabs[0].tab_handler = detached_handler;
-                }
-                host->base.release(&host->base);
               }
             }
           }

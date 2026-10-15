@@ -119,10 +119,22 @@ void CEF_CALLBACK life_span_handler_on_after_created(
     host->base.release(&host->base);
 
     if (handler->parent->type == BROWSER_TYPE_UI) {
-      win_ctx->ui_browser = browser;
-      browser->base.add_ref(&browser->base);
+      if (win_ctx->ui_browser != browser) {
+        if (win_ctx->ui_browser) {
+          win_ctx->ui_browser->base.release(&win_ctx->ui_browser->base);
+        }
+        win_ctx->ui_browser = browser;
+        browser->base.add_ref(&browser->base);
+      }
       win_ctx->ui_hwnd = hwnd;
       LogMsg("Set win_ctx->ui_browser = %p, hwnd = %p\n", browser, hwnd);
+      if (!win_ctx->main_hwnd || !IsWindow(win_ctx->main_hwnd)) {
+        cef_browser_host_t* h = browser->get_host(browser);
+        if (h) {
+          h->close_browser(h, 1);
+          h->base.release(&h->base);
+        }
+      }
     } else if (handler->parent->type == BROWSER_TYPE_SIDEPANEL) {
       win_ctx->sidepanel_browser = browser;
       browser->base.add_ref(&browser->base);
@@ -551,8 +563,13 @@ void CEF_CALLBACK life_span_handler_on_before_close(
     }
 
     if (!any_active) {
-      LogMsg("on_before_close: all browsers closed for win_ctx %p, freeing context\n", win_ctx);
-      free(win_ctx);
+      if (win_ctx->is_window_destroyed) {
+        LogMsg("on_before_close: all browsers closed and window destroyed for win_ctx %p, freeing context\n", win_ctx);
+        handler->parent->window_ctx = NULL;
+        free(win_ctx);
+      } else {
+        LogMsg("on_before_close: all browsers closed for win_ctx %p, waiting for window destruction\n", win_ctx);
+      }
     }
   }
 

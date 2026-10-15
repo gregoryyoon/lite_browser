@@ -113,20 +113,27 @@ LiteBrowser 실행 시 Windows OS의 사용자 기본 로캘(UI Language)을 자
 3. **현재 활성 탭 바로 우측 위치 새 탭 삽입 (Active Tab Relative Insertion)**:
    - 새 탭 생성 시 무조건 전체 탭의 맨 우측 끝에 추가되던 기존 방식을 개편하여, 크롬/엣지 표준 UX와 동일하게 **현재 활성화된 탭의 바로 오른쪽(`active_tab_index + 1`) 위치에 새 탭이 즉시 삽입(Insert)**되도록 `CreateNewTab` 공통 함수 내 탭 배열 시프트(Shift) 알고리즘을 구현했습니다.
 
-### 5.3 비동기 탭 분리(Reparenting) 및 드래그앤드롭 새 창 생성
-1. **새로고침 없는 탭 Reparenting**:
-   - 활성화된 자식 콘텐츠 브라우저 창의 부모 윈도우를 Win32 `SetParent` API로 신규 메인 윈도우에 동적 연결합니다.
-   - 스타일 비트(`WS_POPUP` 해제, `WS_CHILD` 적용) 갱신 후 `MoveWindow` 및 `host->was_resized(host)`, `host->set_focus(host, 1)`를 수행하여 기존 웹 세션을 새로고침 없이 실시간 새 창으로 이관합니다.
-2. **PointerEvent 캡처 기법을 통한 이탈 감지 및 커서 동기화**:
-   - HTML5 DnD API 사용 시 OS 제한으로 윈도우 외부 드롭 시 포인터가 🚫(드롭 금지)로 고착되는 현상을 해결하고자 **PointerEvent `setPointerCapture`**를 도입했습니다.
-   - 탭바 이탈 시 포인터 커서를 복사/추가 기호가 결합된 **`copy` 커서**로 실시간 전환하고, 마우스를 놓는 순간 스크린 좌표(`GetCursorPos`)를 백엔드로 넘겨 새 메인 윈도우를 해당 좌표에 스냅 팝업시킵니다.
+### 5.3 실시간 탭 분리(Tear-off), 비모달 윈도우 드래그 및 다른 창 재결합(Re-docking)
+1. **실시간 탭 분리(Tear-off) 및 새로고침 없는 HWND Reparenting**:
+   - 사용자가 탭을 탭 바 외부(상/하/좌/우 25px 이상)로 드래그하는 순간 즉시 감지하여 백엔드 IPC(`detach-drag?id=...&grabX=...&grabY=...`)를 발송합니다.
+   - 백엔드는 기존 탭의 웹 브라우저 HWND(분할 뷰의 경우 보조 브라우저 포함)를 리로드 없이 신규 메인 윈도우로 Win32 `SetParent` 이관합니다.
+   - 동기적 UI 브라우저 생성(`cef_browser_host_create_browser_sync`)을 적용하여, 분리 직후 드래그 중인 상태에서도 상단 컨트롤 UI(주소창, 버튼 등)가 흰색 깜빡임 없이 완벽히 렌더링되도록 보장했습니다.
+2. **비모달 윈도우 드래그 (`SetCapture` + `TIMER_DRAG_WATCHDOG`)**:
+   - `WM_NCLBUTTONDOWN(HTCAPTION)`의 동기 모달 루프가 CEF 메시지 루프를 일시 차단하여 UI 렌더링이 멈추는 현상을 방지하고자, 비모달 마우스 캡처(`SetCapture`)와 10ms 타이머(`TIMER_DRAG_WATCHDOG`) 및 `WM_MOUSEMOVE` 기반의 커스텀 드래그 루프를 탑재했습니다.
+   - 분리 창이 마우스 커서를 실시간으로 부드럽게 추적하면서도 CEF 렌더러가 주소창과 툴바를 즉시 화면에 그릴 수 있도록 구현했습니다.
+3. **다른 창 탭 바로 드롭 시 재결합 (Re-docking / Tab Merging)**:
+   - 마우스 버튼을 놓는 시점(`WM_LBUTTONUP` 또는 타이머 워치독)에 `TryRedockTab`을 호출하여 Z-order 기반으로 마우스 좌표 아래에 위치한 대상 LiteBrowser 창의 탭 바를 감지합니다.
+   - 대상 창의 DPI 배율(`scale = DPI / 96.0`)을 적용하여 마우스 X 좌표에 비례하는 정확한 탭 삽입 인덱스(`insert_idx`)를 계산하고, 웹 콘텐츠 HWND를 대상 창으로 다시 `SetParent` 재배치하며 탭 정보와 핸들러 컨텍스트(`window_ctx`)를 원자적으로 이관합니다.
 
-### 5.4 비동기 수명 주기 및 메모리 안정성 (Use-After-Free 크래시 방지)
-1. **비동기 메모리 소멸 위임 (UAF 크래시 차단)**:
-   - Win32 `WM_DESTROY` 메시지가 수신되었을 때 `free(win_ctx)`를 성급하게 수행하면, CEF 내부 스레드의 비동기 브라우저 소멸 과정(`life_span_handler_on_before_close`)에서 댕글링 포인터를 참조하여 세그멘테이션 크래시가 유발됩니다.
-   - 이를 막고자 `WM_DESTROY`에서는 브라우저 closure만 요청하고, **해당 창 내부의 UI 브라우저 및 모든 자식 탭 브라우저들의 소멸 콜백(`on_before_close`)이 100% 완료되어 카운트가 `0`이 되는 최종 시점에 비로소 `free(win_ctx)`가 실행되도록 소멸 라이프사이클을 격리**했습니다.
-2. **개별 창 종료 표준 가드 (`_WIN32`)**:
-   - 플랫폼 빌드 매크로 가드를 표준 **`_WIN32`**로 보정하여, 다중 창 구동 중 개별 팝업/분리 창을 닫았을 때 전체 프로그램이 동시 종료되는 문제를 막고, 메인 창 카운트(`g_window_count == 0`)가 마지막 1개일 때만 CEF 메시지 루프(`cef_quit_message_loop`)가 이탈되도록 보장했습니다.
+### 5.4 비동기 수명 주기 및 2단계 소멸 안전성 (Use-After-Free 및 중첩 Win32 디스패치 크래시 방지)
+1. **비동기 `WM_CLOSE` 포스팅을 통한 안전한 창 종료**:
+   - 탭 재결합으로 마지막 남은 탭을 기증한 소스 창(Donor Window)을 닫을 때, 메시지 처리 또는 브라우즈 콜백 루프 내부에서 동기적 `DestroyWindow`를 즉시 호출하면 Win32 메시지 디스패처 및 Chromium 내부 상태 불일치로 인한 크래시가 발생합니다.
+   - 이를 해결하기 위해 소스 창을 즉시 숨김(`ShowWindow(SW_HIDE)`) 처리한 후 `PostMessage(main_hwnd, WM_CLOSE, 0, 0)`를 통해 Win32 메시지 큐의 다음 틱에서 안전하게 비동기 종료 절차를 밟도록 구현했습니다.
+2. **2단계 창-브라우저 수명 주기 추적 플래그 (`is_window_destroyed`)**:
+   - CEF 비동기 콜백(`life_span_handler_on_before_close`)과 Win32 윈도우 파괴(`WM_DESTROY` / `WM_NCDESTROY`) 간의 실행 순서가 OS/렌더러 상황에 따라 가변적인 문제를 해결하기 위해 `win_ctx->is_window_destroyed` 플래그를 도입했습니다.
+   - 브라우저 인스턴스 소멸과 Win32 윈도우 핸들 파괴가 모두 완료된 시점에만 최종 `free(win_ctx)`가 수행되도록 격리하여, 세그멘테이션 폴트 및 Use-After-Free(UAF) 크래시를 원천 차단했습니다.
+3. **개별 창 종료 표준 가드 (`_WIN32`)**:
+   - 플랫폼 빌드 매크로 가드를 표준 **`_WIN32`**로 보정하여, 다중 창 구동 중 개별 창/분리 창을 닫았을 때 전체 프로그램이 동시 종료되는 문제를 막고, 메인 창 카운트(`g_window_count == 0`)가 마지막 1개일 때만 CEF 메시지 루프(`cef_quit_message_loop`)가 이탈되도록 보장했습니다.
 
 ### 5.5 커스텀 프레임리스 윈도우, High DPI & 듀얼 모니터 최대화 보정
 1. **창 위치/크기 영속 복원 및 스냅 기동 (Flicker-free Startup)**:
@@ -2417,4 +2424,69 @@ Lite Browser의 기반 임베디드 브라우저 프레임워크를 기존 CEF 1
   1. Claude Pro 구독 1-클릭 대화형 로그인 시 새 탭 인증 후 즉시 콜백이 가로채지며 인증 탭이 깔끔하게 닫히고 사이드패널에 연결 상태 표시.
   2. 사이드패널에서 `"페이지 요약 해줘"` 전송 시 AI가 `browser_get_page_content` 도구를 정상 호출하여 현재 활성 탭의 본문을 추출하고 실시간 SSE 청크 스트리밍으로 한국어 요약 답변을 완료함을 확인.
   3. `claude-opus-4-7`, `claude-sonnet-4-6`, `claude-opus-4-6` 3개 모델 모두 HTTP 200 OK로 정상 동작함을 사용자 실기 테스트 및 디버그 로그로 최종 검증.
+
+## 66. 실시간 탭 분리(Tear-off), 비모달 윈도우 드래그 추적 및 다른 창 재결합(Re-docking)과 안전한 창 소멸 생명주기 동기화 (Real-Time Tab Tear-Off, Non-Modal Drag Tracking, Re-Docking & Safe Asynchronous Window Lifecycle Destruction)
+
+### 66.1 개요 (GitHub Issue #84)
+Lite Browser의 탭 드래그 앤 드롭 시스템을 최신 Chromium/Edge 브라우저 수준으로 완성하기 위해, 탭을 드래그하여 탭 바 영역 밖으로 벗어나는 순간 실시간으로 새 창으로 분리(Tear-off)되어 마우스 커서를 따라 이동하고, 다른 LiteBrowser 창의 탭 바 위에 마우스를 드롭하면 해당 창의 탭으로 자연스럽게 재결합(Re-docking / Tab Merging)되도록 전면 개선했습니다.  
+또한, 분리 드래그 중 상단 주소창 및 툴바가 멈추지 않고 즉시 렌더링되도록 비모달(Non-modal) 윈도우 드래그 파이프라인을 구축하고, 재결합 후 빈 창 소멸 시 발생하던 Win32 디스패치 및 CEF 비동기 콜백 경합 크래시를 비동기 2단계 소멸 라이프사이클 기법으로 원천 해결했습니다.
+
+### 66.2 배경 및 근본 원인 분석
+1. **분리 타이밍 지연 및 드래그 중 창 미표시**:
+   - 기존 방식은 탭 바 밖으로 마우스를 드래그하더라도 마우스 버튼을 놓기 전까지는 `copy` 커서만 표시되고 실제 새 창이 생성되지 않아, 다중 모니터 간 직관적인 창 이동 및 실시간 뷰포트 배치가 불가능했습니다.
+2. **동기 모달 이동 루프(`WM_NCLBUTTONDOWN`, `HTCAPTION`)로 인한 UI 프리징**:
+   - 초기 구현에서 탭 이탈 즉시 새 창을 띄운 뒤 Win32 기본 모달 이동 루프(`SendMessage(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0)`)를 실행했을 때, Windows OS의 모달 메시지 펌프가 CEF의 UI 렌더러 스레드 메시지 처리를 차단하여, 드롭하기 전까지 상단 주소창 윈도우가 백색으로 표시되거나 툴바가 렌더링되지 않는 시각적 결함이 발생했습니다.
+3. **재결합(Re-docking) 기능 부재**:
+   - 실수로 탭을 분리했거나 여러 창으로 나뉜 탭들을 다시 하나의 메인 창으로 합치고 싶을 때, 다른 창의 탭 바 위로 탭을 드롭해도 흡수되지 않고 독립된 창으로 계속 남아있어 UX가 저하되었습니다.
+4. **재결합 드롭 시 강제 종료(Crash) 결함**:
+   - 다른 창으로 탭을 성공적으로 병합한 직후, 남겨진 소스 창(Donor Window)을 정리하기 위해 `DestroyWindow(src_win->main_hwnd)`를 동기 호출했습니다.
+   - 하지만 이 시점에 아직 CEF의 `request_handler_on_before_browse` 콜백이 진행 중이었으며, 내부 Win32 메시지 디스패처가 활성 상태인 채로 부모 HWND가 강제 파괴되면서 `life_span_handler_on_before_close`에서 이미 해제된 컨텍스트를 참조하거나 Chromium C++ 런타임이 잘못된 HWND 메시지를 처리하다 `Access Violation (0xC0000005)` 크래시를 유발했습니다.
+
+### 66.3 주요 구현 내역
+
+1. **프론트엔드 실시간 탭 분리 감지 (`ui/app.js`)**:
+   - `onPointerMove`에서 포인터 위치가 탭 바 바운딩 박스를 기준으로 상/하/좌/우 **25px** 이상 벗어나는 순간(`Math.abs(dy) > 25 || dx < -25 || dx > tabsRect.width + 25`)을 감지.
+   - 드래그 중인 탭의 시작 마우스 오프셋(`grabX`, `grabY`)을 계산하고 즉시 포인터 캡처를 해제(`releasePointerCapture`)한 뒤 백엔드 IPC `http://ui-action/detach-drag?id=...&grabX=...&grabY=...`를 발송.
+   - 탭이 1개만 남아있는 창의 경우, 탭 드래그 시 창 전체 이동(`drag-window`)으로 자연스럽게 핸드오프되어 다른 창과의 병합을 지원.
+
+2. **동기적 UI 브라우저 생성 및 즉각 툴바 준비 (`create_browser_window_for_detached_tab`, `simple_app.c`)**:
+   - 분리 창 생성 시 상단 UI 브라우저를 비동기 생성이 아닌 **`cef_browser_host_create_browser_sync`**로 생성하여 분리 창이 화면에 노출되는 첫 프레임부터 주소창, 탭, 뒤로/앞으로 버튼 툴바가 100% 준비되도록 개선.
+   - 이관 대상 탭의 메인 브라우저 HWND(분할 모드인 경우 우측 보조 브라우저 포함)를 신규 창으로 `SetParent` 연결하고 Z-order 및 포커스를 보정.
+
+3. **비모달 윈도우 드래그 루프 구축 (`simple_app.c`, `simple_handler.c`)**:
+   - `WM_NCLBUTTONDOWN` 대신 백엔드에서 `is_dragging_window = 1`, `SetCapture(new_win->main_hwnd)`를 설정하고 10ms 주기 타이머(`TIMER_DRAG_WATCHDOG`)를 활성화.
+   - 마우스 커서 스크린 좌표와 `grabX`/`grabY` 오프셋을 기반으로 `SetWindowPos`를 호출해 창을 이동시킴으로써, Win32 모달 루프 진입 없이 CEF 메시지 펌프가 정상 가동되어 드래그 중에도 주소창과 툴바가 끊김 없이 실시간 렌더링.
+   - 마우스 좌클릭 해제 시(`WM_LBUTTONUP` 또는 `TIMER_DRAG_WATCHDOG`의 `GetAsyncKeyState(VK_LBUTTON) == 0`) 캡처를 해제하고 재결합 루틴을 실행.
+
+4. **Z-order 히트 테스트 및 DPI 적응형 탭 재결합 엔진 (`TryRedockTab`, `simple_app.c`)**:
+   - 드롭 위치(`drop_pt`)에서 `GetWindow(hwnd, GW_HWNDNEXT)`를 통해 최상위부터 Z-order 순으로 다른 LiteBrowser 윈도우(`g_windows[i]`)의 탭 바 클라이언트 영역(`client_pt.y < tab_bar_h`)에 속하는지 히트 테스트 수행.
+   - 대상 창의 DPI 배율(`scale = DPI / 96.0`)을 동적 적용하여 드롭 X 좌표를 기반으로 탭 삽입 위치(`insert_idx`)를 계산.
+   - 이동 대상 탭의 메인 콘텐츠 HWND 및 분할 뷰 HWND를 대상 윈도우로 `SetParent` 이관하고, `simple_handler_t`의 `window_ctx` 포인터를 대상 창으로 안전하게 갱신.
+   - 대상 창의 `update_ui_tabs` 및 `update_ui_nav_state`를 호출하여 상단 탭 바 UI를 즉시 동기화하고 웹 뷰포트 크기를 재조정(`was_resized`)한 뒤 포커스를 인계.
+
+5. **비동기 `PostMessage(WM_CLOSE)` 및 2단계 소멸 라이프사이클을 통한 크래시 원천 해결**:
+   - 재결합 후 마지막 남은 탭을 기증하고 비어있는 소스 창(Donor Window)에 대해 `DestroyWindow`를 즉각 호출하지 않고, **`ShowWindow(src_win->main_hwnd, SW_HIDE)` 후 `PostMessage(src_win->main_hwnd, WM_CLOSE, 0, 0)`**를 호출하여 현재 실행 중인 콜백 스택이 정상 종료된 후 메시지 큐에서 안전하게 창이 닫히도록 개선.
+   - `browser_context.h`에 **`is_window_destroyed`** 플래그를 추가하고, `WM_DESTROY` / `WM_NCDESTROY`와 `life_span_handler_on_before_close` 양방향에서 상태를 동기화.
+   - CEF의 브라우저 소멸 콜백(`!any_active`)과 Win32 윈도우 파괴(`is_window_destroyed == 1`)가 둘 다 완료된 시점에만 컨텍스트 메모리(`free(win_ctx)`)를 해제하도록 격리하여 Use-After-Free 크래시를 원천 방지.
+
+6. **크래시 필터 및 타임스탬프 로깅 인프라 (`cefsimple_win.c`, `simple_handler.c`)**:
+   - `SetUnhandledExceptionFilter`를 등록하여 예기치 못한 예외 발생 시 예외 코드와 메모리 주소를 `debug.log` 파일에 영속화하도록 안전장치 구축.
+   - `LogMsg` 함수를 통해 `[HH:MM:SS.mmm]` 형식의 밀리초 정밀 타임스탬프와 함께 콘솔 및 `debug.log` 파일로 수명 주기 이벤트를 추적할 수 있도록 개선.
+
+### 66.4 관련 소스 코드
+- [`cef_binary_154.0.34/tests/cefsimple_capi/browser_context.h`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/browser_context.h)
+- [`cef_binary_154.0.34/tests/cefsimple_capi/cefsimple_win.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/cefsimple_win.c)
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_app.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_app.c)
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.c)
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.h`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.h)
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_life_span_handler.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_life_span_handler.c)
+- [`ui/app.js`](file:///c:/projects/lite_browser/ui/app.js)
+- [`ui/style.css`](file:///c:/projects/lite_browser/ui/style.css)
+
+### 66.5 빌드 및 검증 결과
+- **디버그 빌드**: `cmake --build cef_binary_154.0.34/build --config Debug --target cefsimple_capi` 성공 (`Exit code 0, 오류 0개`).
+- **실기 검증 (사용자 확인 완료)**:
+  1. **탭 분리 및 실시간 이동**: 탭 바 25px 이상 드래그 시 즉시 독립 창으로 분리되며 마우스 커서를 끊김 없이 추적하고, 드래그 도중에도 상단 주소창 및 툴바가 완벽히 표시됨을 확인.
+  2. **다른 창 탭 바로 드롭 재결합**: 분리된 창의 탭을 기존의 다른 LiteBrowser 창 탭 바 위로 드롭했을 때, 지정된 위치로 탭이 자연스럽게 병합되고 웹 페이지가 새로고침 없이 유지됨을 확인.
+  3. **재결합 후 크래시 해결**: 재결합 완료 후 소스 창이 백그라운드에서 부드럽게 닫히며 프로그램이 비정상 종료되던 문제가 완벽히 해소되고 안정적으로 동작함을 사용자 실기 테스트로 검증 완료.
 

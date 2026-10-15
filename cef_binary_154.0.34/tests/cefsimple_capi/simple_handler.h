@@ -164,6 +164,7 @@ void CreateNewTab(browser_window_t* win_ctx, const char* url);
 void CreateNewTabEx(browser_window_t* win_ctx, const char* url, int insert_at_end);
 void CreateNewTabEx2(browser_window_t* win_ctx, const char* url, int insert_at_end, int in_background);
 void CreateRightSplitBrowser(browser_window_t* win_ctx, tab_info_t* tab, const char* initial_url);
+void RemoveTabAt(browser_window_t* win_ctx, int remove_idx, int close_cef_browser);
 
 void get_theme_config(char* out_mode, size_t max_len);
 void save_theme_config(const char* mode);

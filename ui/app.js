@@ -75,6 +75,15 @@ window.updateSidepanelState = function(isOpen) {
 };
 
 function handleKey(event) {
+  if (event.key === 'Escape') {
+    event.target.value = formatDisplayUrl(currentUrl);
+    hasUserModifiedAddress = false;
+    closeOmniboxDropdown();
+    if (typeof event.target.blur === 'function') {
+      event.target.blur();
+    }
+    return;
+  }
   if (event.key === 'Enter') {
     const dropdown = document.getElementById('omnibox-dropdown');
     const isDropdownOpen = dropdown && !dropdown.classList.contains('hide');
@@ -122,6 +131,7 @@ let historyData = {
   history: []
 };
 let currentUrl = '';
+let hasUserModifiedAddress = false;
 let currentTitle = '';
 
 function requestLoadBookmarks() {
@@ -261,7 +271,13 @@ function updateStarIcon() {
 function formatDisplayUrl(url) {
   if (!url) return '';
   try {
-    return decodeURI(url);
+    // 1. Edge/Chromium Omnibox rule: %20 (spaces) must NOT be unescaped in address bar.
+    const protectedUrl = url.replace(/%20/gi, '__LITE_PCT_SPACE__');
+    let decoded = decodeURI(protectedUrl).replace(/__LITE_PCT_SPACE__/g, '%20');
+    
+    // 2. Anti-spoofing: Re-encode BiDi override and zero-width characters (RFC/Chromium Omnibox rule)
+    decoded = decoded.replace(/[\u200E\u200F\u202A-\u202E\u2066-\u2069\u061C\u200B-\u200D\uFEFF\u3164]/g, (ch) => encodeURIComponent(ch));
+    return decoded;
   } catch (e) {
     try {
       return url.replace(/%([0-9a-fA-F]{2})/g, (match, hex) => {
@@ -275,8 +291,9 @@ function formatDisplayUrl(url) {
   }
 }
 
-window.updateAddress = function(url) {
+window.updateAddress = function(url, displayUrl) {
   currentUrl = url;
+  hasUserModifiedAddress = false;
   const addressBar = document.getElementById('address-bar');
   if (document.activeElement !== addressBar) {
     if (url.indexOf('ui/index.html') !== -1 || url.indexOf('ui-action') !== -1) {
@@ -290,7 +307,7 @@ window.updateAddress = function(url) {
     } else if (url.indexOf('ui/sidepanel.html') !== -1 || url.indexOf('lite://sidepanel') !== -1) {
       addressBar.value = 'lite://sidepanel';
     } else {
-      addressBar.value = formatDisplayUrl(url);
+      addressBar.value = displayUrl || formatDisplayUrl(url);
     }
   }
   updateStarIcon();
@@ -399,7 +416,34 @@ function createTabDom(tab, isActive) {
   closeEl.addEventListener('pointerdown', (e) => {
     e.stopPropagation();
   });
+  closeEl.addEventListener('mousedown', (e) => {
+    e.stopPropagation();
+  });
   tabEl.appendChild(closeEl);
+
+  tabEl.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    if (e.target.closest('.tab-close') || e.target.closest('.tab-split-badge')) return;
+    const container = document.getElementById('tabs');
+    const tabs = container ? container.querySelectorAll('.tab') : [];
+    if (tabs.length <= 1) {
+      const sX = e.clientX;
+      const sY = e.clientY;
+      const onMove = (me) => {
+        if (Math.abs(me.clientX - sX) >= 4 || Math.abs(me.clientY - sY) >= 4) {
+          window.removeEventListener('mousemove', onMove);
+          window.removeEventListener('mouseup', onUp);
+          sendUiAction('http://ui-action/drag-window');
+        }
+      };
+      const onUp = () => {
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+      };
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    }
+  });
 
   let isDragging = false;
   let startX = 0;
@@ -505,22 +549,23 @@ function createTabDom(tab, isActive) {
       const barRect = tabsBar ? tabsBar.getBoundingClientRect() : (container ? container.getBoundingClientRect() : null);
 
       const isDetaching = barRect && (
-        e.clientY < barRect.top - 20 ||
-        e.clientY > barRect.bottom + 20 ||
-        e.clientX < barRect.left - 40 ||
-        e.clientX > barRect.right + 40
+        e.clientY < barRect.top - 25 ||
+        e.clientY > barRect.bottom + 25 ||
+        e.clientX < barRect.left - 25 ||
+        e.clientX > barRect.right + 25
       );
 
-      if (isDetaching) {
-        isOutside = true;
-        document.body.style.cursor = 'copy';
-        tabEl.style.cursor = 'copy';
-        tabEl.style.opacity = '0.75';
-        tabEl.style.transform = `translate3d(${dx}px, ${dy}px, 0)`;
+      if (isDetaching && tabElements.length > 1) {
+        const origRect = (tabRects && tabRects[originalIndex]) ? tabRects[originalIndex] : tabEl.getBoundingClientRect();
+        const grabX = Math.max(0, Math.min(Math.round(origRect.width), Math.round(startX - origRect.left)));
+        const grabY = Math.max(0, Math.min(Math.round(origRect.height), Math.round(startY - origRect.top)));
 
-        tabElements.forEach(el => {
-          if (el !== tabEl) el.style.transform = 'translate3d(0, 0, 0)';
-        });
+        if (tabEl.hasPointerCapture(e.pointerId)) {
+          tabEl.releasePointerCapture(e.pointerId);
+        }
+        cleanupDrag();
+        sendUiAction(`http://ui-action/detach-drag?id=${tab.id}&grabX=${grabX}&grabY=${grabY}`);
+        return;
       } else {
         isOutside = false;
         document.body.style.cursor = 'grabbing';
@@ -771,17 +816,56 @@ function toggleMenu(event) {
   }
 }
 
-// 창 드래그 이동을 위한 마우스 리스너
+// 창 드래그 이동 및 더블클릭 최대화 토글을 위한 마우스 리스너
 document.addEventListener('DOMContentLoaded', () => {
   const tabsBar = document.querySelector('.tabs-bar');
   if (tabsBar) {
+    let isTitleDragging = false;
+    let titleStartX = 0;
+    let titleStartY = 0;
+
     tabsBar.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
       const target = e.target;
-      // .tab, .tab-btn, .win-control-btn 자식 요소를 클릭한 경우 드래그하지 않음
-      if (target.closest('.tab') || target.closest('.tab-btn') || target.closest('.win-control-btn')) {
+      // .tabs-container (#tabs), .tab, .tab-btn, .win-control-btn 자식 요소를 클릭한 경우 드래그하지 않음 (이슈 #88: 탭 위쪽 빈 공간 no-op)
+      if (target.closest('.tabs-container') || target.closest('.tab') || target.closest('.tab-btn') || target.closest('.win-control-btn')) {
         return;
       }
-      sendUiAction('http://ui-action/drag-window');
+
+      titleStartX = e.clientX;
+      titleStartY = e.clientY;
+      isTitleDragging = true;
+
+      const onMouseMove = (moveEvent) => {
+        if (!isTitleDragging) return;
+        const dx = Math.abs(moveEvent.clientX - titleStartX);
+        const dy = Math.abs(moveEvent.clientY - titleStartY);
+        if (dx >= 4 || dy >= 4) {
+          isTitleDragging = false;
+          window.removeEventListener('mousemove', onMouseMove);
+          window.removeEventListener('mouseup', onMouseUp);
+          sendUiAction('http://ui-action/drag-window');
+        }
+      };
+
+      const onMouseUp = () => {
+        isTitleDragging = false;
+        window.removeEventListener('mousemove', onMouseMove);
+        window.removeEventListener('mouseup', onMouseUp);
+      };
+
+      window.addEventListener('mousemove', onMouseMove);
+      window.addEventListener('mouseup', onMouseUp);
+    });
+
+    // 타이틀바 여백 더블클릭 시 최대화 / 이전 크기 복원 토글
+    tabsBar.addEventListener('dblclick', (e) => {
+      if (e.button !== 0) return;
+      const target = e.target;
+      if (target.closest('.tabs-container') || target.closest('.tab') || target.closest('.tab-btn') || target.closest('.win-control-btn')) {
+        return;
+      }
+      maximizeWindow();
     });
   }
 
@@ -803,63 +887,59 @@ document.addEventListener('DOMContentLoaded', () => {
       isSelectAllOnFocus = false;
     });
 
+    function getSelectedAddressText() {
+      const start = addressBar.selectionStart;
+      const end = addressBar.selectionEnd;
+      if (start === end) return null;
+      const selectedText = addressBar.value.substring(start, end);
+      const isFullSelection = (start === 0 && end === addressBar.value.length);
+      
+      // Edge / Chromium Omnibox copy rule:
+      // If user selected the entire address bar AND has NOT modified the text,
+      // copy the canonical RFC 3986 URL (currentUrl).
+      // Otherwise (partial copy OR user edited the text), copy the exact displayed/selected text without forced encodeURI.
+      let copyText = selectedText;
+      if (isFullSelection && !hasUserModifiedAddress && currentUrl && !currentUrl.startsWith('ui/')) {
+        copyText = currentUrl;
+      }
+      return { start, end, copyText };
+    }
+
     addressBar.addEventListener('paste', (e) => {
       const pasteData = (e.clipboardData || window.clipboardData)?.getData('text');
       if (pasteData) {
         e.preventDefault();
-        const decoded = formatDisplayUrl(pasteData);
+        const formatted = formatDisplayUrl(pasteData.trim());
         const start = addressBar.selectionStart;
         const end = addressBar.selectionEnd;
         const text = addressBar.value;
-        addressBar.value = text.slice(0, start) + decoded + text.slice(end);
-        addressBar.selectionStart = addressBar.selectionEnd = start + decoded.length;
+        addressBar.value = text.slice(0, start) + formatted + text.slice(end);
+        addressBar.selectionStart = addressBar.selectionEnd = start + formatted.length;
+        hasUserModifiedAddress = true;
         addressBar.dispatchEvent(new Event('input', { bubbles: true }));
       }
     });
 
     addressBar.addEventListener('copy', (e) => {
-      const start = addressBar.selectionStart;
-      const end = addressBar.selectionEnd;
-      if (start === end) return;
-      const selectedText = addressBar.value.substring(start, end);
-      let copyText = selectedText;
-      if (start === 0 && end === addressBar.value.length && currentUrl && !currentUrl.startsWith('ui/')) {
-        copyText = currentUrl;
-      } else {
-        try {
-          copyText = encodeURI(selectedText);
-        } catch (err) {
-          copyText = selectedText;
-        }
-      }
+      const sel = getSelectedAddressText();
+      if (!sel) return;
       e.preventDefault();
       if (e.clipboardData) {
-        e.clipboardData.setData('text/plain', copyText);
+        e.clipboardData.setData('text/plain', sel.copyText);
       }
     });
 
     addressBar.addEventListener('cut', (e) => {
-      const start = addressBar.selectionStart;
-      const end = addressBar.selectionEnd;
-      if (start === end) return;
-      const selectedText = addressBar.value.substring(start, end);
-      let copyText = selectedText;
-      if (start === 0 && end === addressBar.value.length && currentUrl && !currentUrl.startsWith('ui/')) {
-        copyText = currentUrl;
-      } else {
-        try {
-          copyText = encodeURI(selectedText);
-        } catch (err) {
-          copyText = selectedText;
-        }
-      }
+      const sel = getSelectedAddressText();
+      if (!sel) return;
       e.preventDefault();
       if (e.clipboardData) {
-        e.clipboardData.setData('text/plain', copyText);
+        e.clipboardData.setData('text/plain', sel.copyText);
       }
       const text = addressBar.value;
-      addressBar.value = text.slice(0, start) + text.slice(end);
-      addressBar.selectionStart = addressBar.selectionEnd = start;
+      addressBar.value = text.slice(0, sel.start) + text.slice(sel.end);
+      addressBar.selectionStart = addressBar.selectionEnd = sel.start;
+      hasUserModifiedAddress = true;
       addressBar.dispatchEvent(new Event('input', { bubbles: true }));
     });
   }
@@ -1390,6 +1470,7 @@ function compareHistoryItems(a, b) {
 }
 
 function handleOmniboxInput(e) {
+  hasUserModifiedAddress = true;
   const rawValue = e.target.value;
   const query = rawValue.trim().toLowerCase();
   const dropdown = document.getElementById('omnibox-dropdown');
@@ -1506,6 +1587,7 @@ function navigateOmniboxUrl(url, isNewTab = false) {
   const addressBar = document.getElementById('address-bar');
   if (addressBar) {
     addressBar.value = formatDisplayUrl(url);
+    hasUserModifiedAddress = false;
     addressBar.blur();
   }
   closeOmniboxDropdown();

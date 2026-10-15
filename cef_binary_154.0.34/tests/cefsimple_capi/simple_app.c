@@ -395,6 +395,46 @@ void SubclassAllChildWindows(HWND main_hwnd) {
   }
 }
 
+static void HandleWindowDragTracking(HWND hwnd, browser_window_t* win_ctx, int force_drop) {
+  if (!win_ctx || !win_ctx->is_dragging_window) return;
+
+  if (!force_drop && (GetAsyncKeyState(VK_LBUTTON) & 0x8000)) {
+    if (GetCapture() != hwnd) {
+      SetCapture(hwnd);
+    }
+    POINT pt;
+    GetCursorPos(&pt);
+    int nx = pt.x - win_ctx->drag_offset_x;
+    int ny = pt.y - win_ctx->drag_offset_y;
+    RECT wr;
+    GetWindowRect(hwnd, &wr);
+    if (wr.left != nx || wr.top != ny) {
+      SetWindowPos(hwnd, NULL, nx, ny, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+  } else {
+    KillTimer(hwnd, TIMER_DRAG_WATCHDOG);
+    win_ctx->is_dragging_window = 0;
+    if (GetCapture() == hwnd) {
+      ReleaseCapture();
+    }
+    POINT drop_pt;
+    GetCursorPos(&drop_pt);
+    if (!TryRedockTab(win_ctx, drop_pt)) {
+      SetForegroundWindow(hwnd);
+      update_ui_tabs(win_ctx);
+      update_ui_nav_state(win_ctx);
+      if (win_ctx->tab_count > 0 && win_ctx->tabs[0].browser) {
+        cef_browser_t* ab = (win_ctx->tabs[0].is_split && win_ctx->tabs[0].active_split == 1 && win_ctx->tabs[0].right_browser)
+                            ? win_ctx->tabs[0].right_browser : win_ctx->tabs[0].browser;
+        cef_browser_host_t* h = ab->get_host(ab);
+        if (h) {
+          h->set_focus(h, 1);
+          h->base.release(&h->base);
+        }
+      }
+    }
+  }
+}
 
 LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
                                         LPARAM lParam)
@@ -632,6 +672,10 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
   }
   case WM_SETCURSOR:
   {
+    if (win_ctx && win_ctx->is_dragging_window) {
+      SetCursor(LoadCursor(NULL, IDC_ARROW));
+      return TRUE;
+    }
     if (win_ctx) {
       POINT pt;
       GetCursorPos(&pt);
@@ -735,6 +779,10 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
   }
   case WM_MOUSEMOVE:
   {
+    if (win_ctx && win_ctx->is_dragging_window) {
+      HandleWindowDragTracking(hwnd, win_ctx, 0);
+      return 0;
+    }
     if (win_ctx && win_ctx->is_resizing_sidepanel) {
       int cur_x = (short)LOWORD(lParam);
       RECT r;
@@ -778,10 +826,42 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
   }
   case WM_LBUTTONUP:
   {
+    if (win_ctx && win_ctx->is_dragging_window) {
+      HandleWindowDragTracking(hwnd, win_ctx, 1);
+      return 0;
+    }
     if (win_ctx && (win_ctx->is_resizing_splitter || win_ctx->is_resizing_sidepanel)) {
       ReleaseCapture();
       win_ctx->is_resizing_splitter = 0;
       win_ctx->is_resizing_sidepanel = 0;
+      return 0;
+    }
+    break;
+  }
+  case WM_TIMER:
+  {
+    if (wParam == TIMER_DRAG_WATCHDOG) {
+      if (win_ctx && win_ctx->is_dragging_window) {
+        HandleWindowDragTracking(hwnd, win_ctx, 0);
+      } else {
+        KillTimer(hwnd, TIMER_DRAG_WATCHDOG);
+      }
+      return 0;
+    }
+    break;
+  }
+  case WM_CAPTURECHANGED:
+  {
+    if (win_ctx && win_ctx->is_dragging_window) {
+      HandleWindowDragTracking(hwnd, win_ctx, 0);
+      return 0;
+    }
+    break;
+  }
+  case WM_CANCELMODE:
+  {
+    if (win_ctx && win_ctx->is_dragging_window) {
+      HandleWindowDragTracking(hwnd, win_ctx, 1);
       return 0;
     }
     break;
@@ -992,6 +1072,9 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
         HWND ui_hwnd = host->get_window_handle(host);
         if (ui_hwnd)
         {
+          if (!win_ctx->ui_hwnd) {
+            win_ctx->ui_hwnd = ui_hwnd;
+          }
           int target_ui_h = (win_ctx->is_ui_expanded && win_ctx->ui_expanded_height > 0) 
                               ? win_ctx->ui_expanded_height 
                               : ui_height;
@@ -1143,13 +1226,14 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
     
     WINDOWPLACEMENT wp = {0};
     wp.length = sizeof(WINDOWPLACEMENT);
-    if (GetWindowPlacement(hwnd, &wp)) {
+    int is_redocked_donor = (win_ctx && win_ctx->tab_count == 0 && g_window_count > 1);
+    if (!is_redocked_donor && GetWindowPlacement(hwnd, &wp)) {
       char config_path[MAX_PATH];
       GetConfigFilePath(config_path, sizeof(config_path));
       FILE* f = fopen(config_path, "w");
       if (f) {
         int saveCmd = wp.showCmd;
-        if (saveCmd == SW_SHOWMINIMIZED || saveCmd == SW_MINIMIZE || saveCmd == SW_SHOWMINNOACTIVE) {
+        if (saveCmd == SW_SHOWMINIMIZED || saveCmd == SW_MINIMIZE || saveCmd == SW_SHOWMINNOACTIVE || saveCmd == SW_HIDE || saveCmd == 0) {
           saveCmd = SW_SHOWNORMAL;
         }
         fprintf(f, "%d %d %d %d %d\n",
@@ -1168,6 +1252,16 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
 
     if (win_ctx)
     {
+      win_ctx->is_window_destroyed = 1;
+
+      if (win_ctx->is_dragging_window) {
+        KillTimer(hwnd, TIMER_DRAG_WATCHDOG);
+        win_ctx->is_dragging_window = 0;
+        if (GetCapture() == hwnd) {
+          ReleaseCapture();
+        }
+      }
+
       // Remove from global tracker
       for (int i = 0; i < MAX_WINDOWS; i++)
       {
@@ -1180,11 +1274,22 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
         }
       }
 
+      // Snapshot browser pointers before calling close_browser
+      cef_browser_t* ui_b = win_ctx->ui_browser;
+      cef_browser_t* sp_b = win_ctx->sidepanel_browser;
+      int t_count = win_ctx->tab_count;
+      cef_browser_t* t_browsers[MAX_TABS] = {0};
+      for (int i = 0; i < t_count && i < MAX_TABS; i++) {
+        t_browsers[i] = win_ctx->tabs[i].browser;
+      }
+
+      SetWindowLongPtr(hwnd, GWLP_USERDATA, 0);
+
       // Note: CEF browser close calls are asynchronous,
       // they will trigger on_before_close and cleanups.
-      if (win_ctx->ui_browser)
+      if (ui_b)
       {
-        cef_browser_host_t* host = win_ctx->ui_browser->get_host(win_ctx->ui_browser);
+        cef_browser_host_t* host = ui_b->get_host(ui_b);
         if (host)
         {
           host->close_browser(host, 1);
@@ -1192,9 +1297,9 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
         }
       }
 
-      if (win_ctx->sidepanel_browser)
+      if (sp_b)
       {
-        cef_browser_host_t* host = win_ctx->sidepanel_browser->get_host(win_ctx->sidepanel_browser);
+        cef_browser_host_t* host = sp_b->get_host(sp_b);
         if (host)
         {
           host->close_browser(host, 1);
@@ -1202,11 +1307,11 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
         }
       }
 
-      for (int i = 0; i < win_ctx->tab_count; i++)
+      for (int i = 0; i < t_count; i++)
       {
-        if (win_ctx->tabs[i].browser)
+        if (t_browsers[i])
         {
-          cef_browser_host_t* host = win_ctx->tabs[i].browser->get_host(win_ctx->tabs[i].browser);
+          cef_browser_host_t* host = t_browsers[i]->get_host(t_browsers[i]);
           if (host)
           {
             host->close_browser(host, 1);
@@ -1214,7 +1319,6 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
           }
         }
       }
-      // free(win_ctx); // Asynchronous cleanup will free this in on_before_close
     }
 
     LogMsg("WM_DESTROY: checking quit. g_window_count = %d\n", g_window_count);
@@ -1224,6 +1328,26 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
       cef_quit_message_loop();
     }
     return 0;
+  }
+  case WM_NCDESTROY:
+  {
+    if (win_ctx) {
+      int any_active = 0;
+      if (win_ctx->ui_browser != NULL || win_ctx->sidepanel_browser != NULL) {
+        any_active = 1;
+      }
+      for (int i = 0; i < win_ctx->tab_count; i++) {
+        if (win_ctx->tabs[i].browser != NULL || win_ctx->tabs[i].right_browser != NULL) {
+          any_active = 1;
+          break;
+        }
+      }
+      if (!any_active) {
+        LogMsg("WM_NCDESTROY: no active browsers for win_ctx %p, freeing context\n", win_ctx);
+        free(win_ctx);
+      }
+    }
+    return DefWindowProc(hwnd, message, wParam, lParam);
   }
   }
   return DefWindowProc(hwnd, message, wParam, lParam);
@@ -1490,7 +1614,7 @@ browser_window_t* create_browser_window(const char* startup_url) {
   return win_ctx;
 }
 
-browser_window_t* create_browser_window_for_detached(cef_browser_t* detached_browser, HWND detached_hwnd, const char* url, const char* title, int x, int y, HWND parent_hwnd) {
+browser_window_t* create_browser_window_for_detached_tab(tab_info_t* tab, int x, int y, HWND parent_hwnd) {
   HINSTANCE hInstance = GetModuleHandle(NULL);
 
   browser_window_t* win_ctx = (browser_window_t*)calloc(1, sizeof(browser_window_t));
@@ -1574,10 +1698,59 @@ browser_window_t* create_browser_window_for_detached(cef_browser_t* detached_bro
   ui_browser_settings.background_color = is_theme_dark() ? 0xFF141721 : 0xFFE4E4E7;
 
   int ui_height = GetUIHeightForWindow(main_hwnd);
-  int content_y = ui_height;
-  int content_h = height - content_y;
 
-  // 1. Create UI child browser
+  // 1. Attach the detached tab to win_ctx FIRST so that ui_browser has immediate tab context
+  if (tab) {
+    win_ctx->tabs[0] = *tab;
+  }
+  win_ctx->tabs[0].tab_id = 1;
+  win_ctx->tabs[0].is_loaded = 1;
+  win_ctx->active_tab_index = 0;
+  win_ctx->tab_count = 1;
+
+  if (win_ctx->tabs[0].hwnd) {
+    SetParent(win_ctx->tabs[0].hwnd, main_hwnd);
+    DWORD style = GetWindowLong(win_ctx->tabs[0].hwnd, GWL_STYLE);
+    style &= ~WS_POPUP;
+    style |= WS_CHILD | WS_VISIBLE;
+    SetWindowLong(win_ctx->tabs[0].hwnd, GWL_STYLE, style);
+  }
+
+  if (win_ctx->tabs[0].browser) {
+    cef_browser_host_t* host = win_ctx->tabs[0].browser->get_host(win_ctx->tabs[0].browser);
+    if (host) {
+      cef_client_t* client = host->get_client(host);
+      if (client) {
+        simple_handler_t* detached_handler = (simple_handler_t*)client;
+        detached_handler->window_ctx = win_ctx;
+        win_ctx->tabs[0].tab_handler = detached_handler;
+      }
+      host->base.release(&host->base);
+    }
+  }
+
+  if (win_ctx->tabs[0].is_split && win_ctx->tabs[0].right_hwnd) {
+    SetParent(win_ctx->tabs[0].right_hwnd, main_hwnd);
+    DWORD r_style = GetWindowLong(win_ctx->tabs[0].right_hwnd, GWL_STYLE);
+    r_style &= ~WS_POPUP;
+    r_style |= WS_CHILD | WS_VISIBLE;
+    SetWindowLong(win_ctx->tabs[0].right_hwnd, GWL_STYLE, r_style);
+
+    if (win_ctx->tabs[0].right_browser) {
+      cef_browser_host_t* r_host = win_ctx->tabs[0].right_browser->get_host(win_ctx->tabs[0].right_browser);
+      if (r_host) {
+        cef_client_t* r_client = r_host->get_client(r_host);
+        if (r_client) {
+          simple_handler_t* r_handler = (simple_handler_t*)r_client;
+          r_handler->window_ctx = win_ctx;
+          win_ctx->tabs[0].right_tab_handler = r_handler;
+        }
+        r_host->base.release(&r_host->base);
+      }
+    }
+  }
+
+  // 2. Create UI child browser
   cef_window_info_t ui_window_info = {};
   ui_window_info.size = sizeof(cef_window_info_t);
   ui_window_info.style =
@@ -1596,44 +1769,73 @@ browser_window_t* create_browser_window_for_detached(cef_browser_t* detached_bro
   ui_handler->window_ctx = win_ctx;
   ui_handler->type = BROWSER_TYPE_UI;
 
-  cef_browser_host_create_browser(&ui_window_info, &ui_handler->client,
-                                  &ui_url, &ui_browser_settings, NULL, NULL);
+  cef_browser_t* sync_ui_browser = cef_browser_host_create_browser_sync(
+      &ui_window_info, &ui_handler->client, &ui_url, &ui_browser_settings, NULL, NULL);
+  if (sync_ui_browser) {
+    if (!win_ctx->ui_browser) {
+      win_ctx->ui_browser = sync_ui_browser;
+      sync_ui_browser->base.add_ref(&sync_ui_browser->base);
+    }
+    if (!win_ctx->ui_hwnd) {
+      cef_browser_host_t* host = sync_ui_browser->get_host(sync_ui_browser);
+      if (host) {
+        win_ctx->ui_hwnd = host->get_window_handle(host);
+        host->base.release(&host->base);
+      }
+    }
+    sync_ui_browser->base.release(&sync_ui_browser->base);
+  } else {
+    cef_browser_host_create_browser(&ui_window_info, &ui_handler->client,
+                                    &ui_url, &ui_browser_settings, NULL, NULL);
+  }
   cef_string_clear(&ui_url);
 
-  // 2. Attach the detached browser (SetParent)
-  SetParent(detached_hwnd, main_hwnd);
+  SubclassAllChildWindows(main_hwnd);
 
-  // Modify styles to act as child of the new window
-  DWORD style = GetWindowLong(detached_hwnd, GWL_STYLE);
-  style &= ~WS_POPUP;
-  style |= WS_CHILD | WS_VISIBLE;
-  SetWindowLong(detached_hwnd, GWL_STYLE, style);
+  // Position content and UI browsers according to window size
+  SendMessage(main_hwnd, WM_SIZE, 0, MAKELPARAM(width, height));
 
-  // Update bounds
-  MoveWindow(detached_hwnd, 0, content_y, width, content_h, TRUE);
-
-  // Assign to tabs
-  win_ctx->tabs[0].tab_id = 1;
-  win_ctx->tabs[0].browser = detached_browser;
-  win_ctx->tabs[0].hwnd = detached_hwnd;
-  strncpy(win_ctx->tabs[0].url, url ? url : "", sizeof(win_ctx->tabs[0].url) - 1);
-  strncpy(win_ctx->tabs[0].title, title ? title : "", sizeof(win_ctx->tabs[0].title) - 1);
-  win_ctx->tabs[0].is_loaded = 1;
-  win_ctx->active_tab_index = 0;
-  win_ctx->tab_count = 1;
-
-  // Let the browser host know it has been resized and focus it
-  cef_browser_host_t* host = detached_browser->get_host(detached_browser);
-  if (host) {
-    cef_client_t* client = host->get_client(host);
-    if (client) {
-      simple_handler_t* detached_handler = (simple_handler_t*)client;
-      detached_handler->window_ctx = win_ctx;
-      win_ctx->tabs[0].tab_handler = detached_handler;
+  if (win_ctx->tabs[0].is_split) {
+    if (win_ctx->tabs[0].split_ratio < 0.2f || win_ctx->tabs[0].split_ratio > 0.8f) {
+      win_ctx->tabs[0].split_ratio = 0.5f;
     }
-    host->was_resized(host);
-    host->set_focus(host, 1);
-    host->base.release(&host->base);
+  }
+
+  // Notify CEF of resize
+  if (win_ctx->ui_browser) {
+    cef_browser_host_t* host = win_ctx->ui_browser->get_host(win_ctx->ui_browser);
+    if (host) {
+      host->was_resized(host);
+      host->base.release(&host->base);
+    }
+  }
+  if (win_ctx->tabs[0].browser) {
+    cef_browser_host_t* host = win_ctx->tabs[0].browser->get_host(win_ctx->tabs[0].browser);
+    if (host) {
+      host->was_resized(host);
+      host->base.release(&host->base);
+    }
+  }
+  if (win_ctx->tabs[0].is_split && win_ctx->tabs[0].right_browser) {
+    cef_browser_host_t* r_host = win_ctx->tabs[0].right_browser->get_host(win_ctx->tabs[0].right_browser);
+    if (r_host) {
+      r_host->was_resized(r_host);
+      r_host->base.release(&r_host->base);
+    }
+  }
+
+  update_ui_tabs(win_ctx);
+  update_ui_nav_state(win_ctx);
+
+  // Focus active browser
+  cef_browser_t* active_b = (win_ctx->tabs[0].is_split && win_ctx->tabs[0].active_split == 1 && win_ctx->tabs[0].right_browser)
+                             ? win_ctx->tabs[0].right_browser : win_ctx->tabs[0].browser;
+  if (active_b) {
+    cef_browser_host_t* host = active_b->get_host(active_b);
+    if (host) {
+      host->set_focus(host, 1);
+      host->base.release(&host->base);
+    }
   }
 
   // 3. Initialize Sidepanel state (Initially hidden & lazy loaded on demand)
@@ -1646,8 +1848,260 @@ browser_window_t* create_browser_window_for_detached(cef_browser_t* detached_bro
 
   ShowWindow(main_hwnd, SW_SHOW);
   UpdateWindow(main_hwnd);
+  if (!win_ctx->ui_hwnd && win_ctx->ui_browser) {
+    cef_browser_host_t* host = win_ctx->ui_browser->get_host(win_ctx->ui_browser);
+    if (host) {
+      win_ctx->ui_hwnd = host->get_window_handle(host);
+      host->base.release(&host->base);
+    }
+  }
+  if (win_ctx->ui_hwnd && IsWindow(win_ctx->ui_hwnd)) {
+    SetWindowPos(win_ctx->ui_hwnd, HWND_TOP, 0, 0, width, ui_height, SWP_SHOWWINDOW | SWP_NOACTIVATE);
+    ShowWindow(win_ctx->ui_hwnd, SW_SHOW);
+    UpdateWindow(win_ctx->ui_hwnd);
+  }
 
   return win_ctx;
+}
+
+browser_window_t* create_browser_window_for_detached(cef_browser_t* detached_browser, HWND detached_hwnd, const char* url, const char* title, int x, int y, HWND parent_hwnd) {
+  tab_info_t temp_tab;
+  memset(&temp_tab, 0, sizeof(tab_info_t));
+  temp_tab.tab_id = 1;
+  temp_tab.browser = detached_browser;
+  temp_tab.hwnd = detached_hwnd;
+  if (url) strncpy(temp_tab.url, url, sizeof(temp_tab.url) - 1);
+  if (title) strncpy(temp_tab.title, title, sizeof(temp_tab.title) - 1);
+  temp_tab.is_loaded = 1;
+  return create_browser_window_for_detached_tab(&temp_tab, x, y, parent_hwnd);
+}
+
+int TryRedockTab(browser_window_t* src_win, POINT drop_pt) {
+  if (!src_win) return 0;
+  LogMsg("TryRedockTab: enter. src_win=%p, drop_pt=(%ld, %ld), src tab_count=%d\n",
+         src_win, drop_pt.x, drop_pt.y, src_win->tab_count);
+
+  browser_window_t* target_win = NULL;
+
+  // Search through all windows except src_win to find a window whose tab bar contains drop_pt
+  // Check topmost window in Z-order first
+  HWND hwnd = GetTopWindow(NULL);
+  while (hwnd) {
+    if (IsWindowVisible(hwnd) && !IsIconic(hwnd) && hwnd != src_win->main_hwnd) {
+      for (int i = 0; i < MAX_WINDOWS; i++) {
+        if (g_windows[i] && g_windows[i] != src_win && g_windows[i]->main_hwnd == hwnd) {
+          POINT client_pt = drop_pt;
+          ScreenToClient(hwnd, &client_pt);
+          RECT cr;
+          GetClientRect(hwnd, &cr);
+          int ui_h = GetUIHeightForWindow(hwnd);
+          int tab_bar_h = (int)(45.0f * ((float)ui_h / 76.0f));
+          if (client_pt.x >= 0 && client_pt.x < cr.right && client_pt.y >= 0 && client_pt.y < tab_bar_h) {
+            target_win = g_windows[i];
+            break;
+          }
+        }
+      }
+      if (target_win) break;
+    }
+    hwnd = GetWindow(hwnd, GW_HWNDNEXT);
+  }
+
+  // Fallback if not found via Z-order
+  if (!target_win) {
+    for (int i = 0; i < MAX_WINDOWS; i++) {
+      if (g_windows[i] && g_windows[i] != src_win && g_windows[i]->main_hwnd &&
+          IsWindow(g_windows[i]->main_hwnd) && IsWindowVisible(g_windows[i]->main_hwnd) &&
+          !IsIconic(g_windows[i]->main_hwnd)) {
+        HWND h = g_windows[i]->main_hwnd;
+        POINT client_pt = drop_pt;
+        ScreenToClient(h, &client_pt);
+        RECT cr;
+        GetClientRect(h, &cr);
+        int ui_h = GetUIHeightForWindow(h);
+        int tab_bar_h = (int)(45.0f * ((float)ui_h / 76.0f));
+        if (client_pt.x >= 0 && client_pt.x < cr.right && client_pt.y >= 0 && client_pt.y < tab_bar_h) {
+          target_win = g_windows[i];
+          break;
+        }
+      }
+    }
+  }
+
+  if (!target_win) {
+    LogMsg("TryRedockTab: no target_win found under drop_pt\n");
+    return 0;
+  }
+  if (target_win->tab_count >= MAX_TABS) {
+    LogMsg("TryRedockTab: target_win tab limit reached (%d)\n", target_win->tab_count);
+    return 0;
+  }
+
+  int src_idx = (src_win->active_tab_index >= 0 && src_win->active_tab_index < src_win->tab_count)
+                ? src_win->active_tab_index : 0;
+  if (src_win->tab_count <= 0) return 0;
+  tab_info_t moving_tab = src_win->tabs[src_idx];
+
+  // Calculate target insertion index using DPI-scaled tab bar layout
+  UINT dpi = GetDpiForWindow(target_win->main_hwnd);
+  double scale = dpi > 0 ? ((double)dpi / 96.0) : 1.0;
+  POINT client_pt = drop_pt;
+  ScreenToClient(target_win->main_hwnd, &client_pt);
+  RECT target_cr;
+  GetClientRect(target_win->main_hwnd, &target_cr);
+
+  int pad_left = (int)(8.0 * scale);
+  int controls_w = (int)(150.0 * scale);
+  int rel_x = client_pt.x - pad_left;
+  int avail_w = target_cr.right - pad_left - controls_w;
+  int est_tab_w = (int)(180.0 * scale);
+  if (target_win->tab_count > 0 && target_win->tab_count * est_tab_w > avail_w && avail_w > 0) {
+    est_tab_w = avail_w / target_win->tab_count;
+  }
+  int min_tab_w = (int)(32.0 * scale);
+  if (est_tab_w < min_tab_w) est_tab_w = min_tab_w;
+  int insert_idx = (rel_x > 0) ? (rel_x / est_tab_w) : 0;
+  if (insert_idx > target_win->tab_count) insert_idx = target_win->tab_count;
+  if (insert_idx < 0) insert_idx = 0;
+
+  LogMsg("TryRedockTab: target_win=%p (tab_count=%d), transferring tab_id=%d to insert_idx=%d\n",
+         target_win, target_win->tab_count, moving_tab.tab_id, insert_idx);
+
+  int max_id = 0;
+  for (int k = 0; k < target_win->tab_count; k++) {
+    if (target_win->tabs[k].tab_id > max_id) max_id = target_win->tabs[k].tab_id;
+  }
+
+  for (int i = target_win->tab_count; i > insert_idx; i--) {
+    target_win->tabs[i] = target_win->tabs[i - 1];
+  }
+
+  target_win->tabs[insert_idx] = moving_tab;
+  target_win->tabs[insert_idx].tab_id = max_id + 1;
+  target_win->tab_count++;
+  target_win->active_tab_index = insert_idx;
+
+  // Reparent main browser
+  if (moving_tab.hwnd) {
+    SetParent(moving_tab.hwnd, target_win->main_hwnd);
+    DWORD style = GetWindowLong(moving_tab.hwnd, GWL_STYLE);
+    style &= ~WS_POPUP;
+    style |= WS_CHILD | WS_VISIBLE;
+    SetWindowLong(moving_tab.hwnd, GWL_STYLE, style);
+  }
+  if (moving_tab.tab_handler) {
+    ((simple_handler_t*)moving_tab.tab_handler)->window_ctx = target_win;
+    target_win->tabs[insert_idx].tab_handler = moving_tab.tab_handler;
+  }
+  if (moving_tab.browser) {
+    cef_browser_host_t* host = moving_tab.browser->get_host(moving_tab.browser);
+    if (host) {
+      cef_client_t* client = host->get_client(host);
+      if (client) {
+        simple_handler_t* h = (simple_handler_t*)client;
+        h->window_ctx = target_win;
+        target_win->tabs[insert_idx].tab_handler = h;
+        client->base.release(&client->base);
+      }
+      host->base.release(&host->base);
+    }
+  }
+
+  // Reparent right browser if dual-split
+  if (moving_tab.is_split && moving_tab.right_hwnd) {
+    SetParent(moving_tab.right_hwnd, target_win->main_hwnd);
+    DWORD r_style = GetWindowLong(moving_tab.right_hwnd, GWL_STYLE);
+    r_style &= ~WS_POPUP;
+    r_style |= WS_CHILD | WS_VISIBLE;
+    SetWindowLong(moving_tab.right_hwnd, GWL_STYLE, r_style);
+  }
+  if (moving_tab.is_split && moving_tab.right_tab_handler) {
+    ((simple_handler_t*)moving_tab.right_tab_handler)->window_ctx = target_win;
+    target_win->tabs[insert_idx].right_tab_handler = moving_tab.right_tab_handler;
+  }
+  if (moving_tab.is_split && moving_tab.right_browser) {
+    cef_browser_host_t* r_host = moving_tab.right_browser->get_host(moving_tab.right_browser);
+    if (r_host) {
+      cef_client_t* r_client = r_host->get_client(r_host);
+      if (r_client) {
+        simple_handler_t* rh = (simple_handler_t*)r_client;
+        rh->window_ctx = target_win;
+        target_win->tabs[insert_idx].right_tab_handler = rh;
+        r_client->base.release(&r_client->base);
+      }
+      r_host->base.release(&r_host->base);
+    }
+  }
+
+  // Show new tab windows (placed right behind ui_hwnd)
+  HWND insert_after = (target_win->ui_hwnd && IsWindow(target_win->ui_hwnd)) ? target_win->ui_hwnd : HWND_TOP;
+  if (moving_tab.hwnd) {
+    SetWindowPos(moving_tab.hwnd, insert_after, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW | SWP_NOACTIVATE);
+  }
+  if (moving_tab.is_split && moving_tab.right_hwnd) {
+    SetWindowPos(moving_tab.right_hwnd, moving_tab.hwnd ? moving_tab.hwnd : insert_after, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW | SWP_NOACTIVATE);
+  }
+
+  // Hide other tabs in target_win
+  for (int k = 0; k < target_win->tab_count; k++) {
+    if (k != insert_idx) {
+      if (target_win->tabs[k].hwnd) ShowWindow(target_win->tabs[k].hwnd, SW_HIDE);
+      if (target_win->tabs[k].right_hwnd) ShowWindow(target_win->tabs[k].right_hwnd, SW_HIDE);
+    }
+  }
+
+  SubclassAllChildWindows(target_win->main_hwnd);
+
+  RECT rc;
+  GetClientRect(target_win->main_hwnd, &rc);
+  SendMessage(target_win->main_hwnd, WM_SIZE, 0, MAKELPARAM(rc.right, rc.bottom));
+  update_ui_tabs(target_win);
+  update_ui_nav_state(target_win);
+
+  // Notify CEF of resize for both panes
+  if (moving_tab.browser) {
+    cef_browser_host_t* h = moving_tab.browser->get_host(moving_tab.browser);
+    if (h) {
+      h->was_resized(h);
+      h->base.release(&h->base);
+    }
+  }
+  if (moving_tab.is_split && moving_tab.right_browser) {
+    cef_browser_host_t* rh = moving_tab.right_browser->get_host(moving_tab.right_browser);
+    if (rh) {
+      rh->was_resized(rh);
+      rh->base.release(&rh->base);
+    }
+  }
+
+  cef_browser_t* active_b = (moving_tab.is_split && moving_tab.active_split == 1 && moving_tab.right_browser)
+                             ? moving_tab.right_browser : moving_tab.browser;
+  if (active_b) {
+    cef_browser_host_t* h = active_b->get_host(active_b);
+    if (h) {
+      h->set_focus(h, 1);
+      h->base.release(&h->base);
+    }
+  }
+
+  SetForegroundWindow(target_win->main_hwnd);
+
+  if (src_win->tab_count > 1) {
+    LogMsg("TryRedockTab: src_win had %d tabs, removing tab at %d\n", src_win->tab_count, src_idx);
+    RemoveTabAt(src_win, src_idx, 0);
+  } else {
+    // Single tab window being closed: clear tabs so WM_DESTROY doesn't close the browser
+    LogMsg("TryRedockTab: src_win had 1 tab, closing donor window %p via PostMessage WM_CLOSE\n", src_win->main_hwnd);
+    memset(&src_win->tabs[0], 0, sizeof(tab_info_t));
+    src_win->tab_count = 0;
+    ShowWindow(src_win->main_hwnd, SW_HIDE);
+    PostMessage(src_win->main_hwnd, WM_CLOSE, 0, 0);
+  }
+
+  LogMsg("TryRedockTab: successfully redocked into target_win %p\n", target_win);
+  return 1;
 }
 #endif
 

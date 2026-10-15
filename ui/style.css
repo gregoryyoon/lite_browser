@@ -103,6 +103,7 @@ body {
 .tabs-container {
   display: flex;
   align-items: flex-end;
+  height: 100%;
   flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;

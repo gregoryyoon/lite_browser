@@ -39,6 +39,7 @@ cef_binary_154.0.34/swiftshader/
 
 # Ignore temp debug log files
 debug_c.txt
+debug.log
 documents/
 
 # Ignore installer build outputs
