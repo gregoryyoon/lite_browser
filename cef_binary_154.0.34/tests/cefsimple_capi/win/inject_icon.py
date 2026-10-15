@@ -221,9 +221,18 @@ if __name__ == '__main__':
         print("Usage: python inject_icon.py <path_to_exe> <path_to_ico> [group_icon_id]")
         sys.exit(1)
         
-    exe_path = sys.argv[1]
-    ico_path = sys.argv[2]
+    exe_path = os.path.abspath(sys.argv[1])
+    ico_path = os.path.abspath(sys.argv[2])
     group_id = int(sys.argv[3]) if len(sys.argv) > 3 else 120
     
-    success = inject_ico_to_exe(exe_path, ico_path, group_id)
+    import time
+    success = False
+    for attempt in range(5):
+        success = inject_ico_to_exe(exe_path, ico_path, group_id)
+        if success:
+            break
+        if attempt < 4:
+            print(f"Retrying icon injection (attempt {attempt + 2}/5) after 0.5s due to file lock...")
+            time.sleep(0.5)
+        
     sys.exit(0 if success else 1)

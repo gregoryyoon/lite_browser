@@ -17,6 +17,13 @@
 #include <shellapi.h>
 #pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "shell32.lib")
+
+#ifndef IDI_CEFSIMPLE
+#define IDI_CEFSIMPLE 120
+#endif
+#ifndef IDI_SMALL
+#define IDI_SMALL 121
+#endif
 #endif
 #include <stdarg.h>
 #include <stdio.h>
@@ -436,6 +443,22 @@ static void HandleWindowDragTracking(HWND hwnd, browser_window_t* win_ctx, int f
   }
 }
 
+#if defined(OS_WIN)
+static void UpdateAppWindowIcons(HWND hwnd) {
+  HINSTANCE hInst = GetModuleHandle(NULL);
+  HICON hIconBig = (HICON)LoadImage(hInst, MAKEINTRESOURCE(IDI_CEFSIMPLE), IMAGE_ICON,
+                                    GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR);
+  HICON hIconSm = (HICON)LoadImage(hInst, MAKEINTRESOURCE(IDI_CEFSIMPLE), IMAGE_ICON,
+                                   GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
+  if (hIconBig) {
+    SendMessage(hwnd, WM_SETICON, ICON_BIG, (LPARAM)hIconBig);
+  }
+  if (hIconSm) {
+    SendMessage(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)hIconSm);
+  }
+}
+#endif
+
 LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
                                         LPARAM lParam)
 {
@@ -443,6 +466,14 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
 
   switch (message)
   {
+  case WM_GETICON:
+  {
+    LRESULT lres = DefWindowProc(hwnd, message, wParam, lParam);
+    if (lres) return lres;
+    HICON hIcon = (HICON)GetClassLongPtr(hwnd, (wParam == ICON_SMALL || wParam == 2 /* ICON_SMALL2 */) ? GCLP_HICONSM : GCLP_HICON);
+    if (hIcon) return (LRESULT)hIcon;
+    return 0;
+  }
   case WM_GETMINMAXINFO:
   {
     MINMAXINFO* mmi = (MINMAXINFO*)lParam;
@@ -1208,6 +1239,7 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
   }
   case WM_DPICHANGED:
   {
+    UpdateAppWindowIcons(hwnd);
     RECT* const prcNewWindow = (RECT*)lParam;
     SetWindowPos(hwnd, NULL,
                  prcNewWindow->left, prcNewWindow->top,
@@ -1412,6 +1444,10 @@ browser_window_t* create_browser_window(const char* startup_url) {
     wcex.lpfnWndProc = LiteBrowserMainWndProc;
     wcex.hInstance = hInstance;
     wcex.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wcex.hIcon = (HICON)LoadImage(hInstance, MAKEINTRESOURCE(IDI_CEFSIMPLE), IMAGE_ICON,
+                                  GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR);
+    wcex.hIconSm = (HICON)LoadImage(hInstance, MAKEINTRESOURCE(IDI_CEFSIMPLE), IMAGE_ICON,
+                                    GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
     int dark_init = is_theme_dark();
     wcex.hbrBackground = CreateSolidBrush(dark_init ? RGB(13, 15, 21) : RGB(244, 244, 245));
     wcex.lpszClassName = L"LiteBrowserMainWindowClass";
@@ -1450,6 +1486,7 @@ browser_window_t* create_browser_window(const char* startup_url) {
 
   win_ctx->main_hwnd = main_hwnd;
   SetWindowLongPtr(main_hwnd, GWLP_USERDATA, (LONG_PTR)win_ctx);
+  UpdateAppWindowIcons(main_hwnd);
 
   // If this is a secondary window (g_window_count > 0, e.g. '새 창'):
   browser_window_t* active_parent = NULL;
@@ -1674,6 +1711,7 @@ browser_window_t* create_browser_window_for_detached_tab(tab_info_t* tab, int x,
 
   win_ctx->main_hwnd = main_hwnd;
   SetWindowLongPtr(main_hwnd, GWLP_USERDATA, (LONG_PTR)win_ctx);
+  UpdateAppWindowIcons(main_hwnd);
 
   int dark = is_theme_dark();
   HBRUSH hbr = CreateSolidBrush(dark ? RGB(13, 15, 21) : RGB(228, 228, 231));

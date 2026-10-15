@@ -2490,3 +2490,76 @@ Lite Browser의 탭 드래그 앤 드롭 시스템을 최신 Chromium/Edge 브�
   2. **다른 창 탭 바로 드롭 재결합**: 분리된 창의 탭을 기존의 다른 LiteBrowser 창 탭 바 위로 드롭했을 때, 지정된 위치로 탭이 자연스럽게 병합되고 웹 페이지가 새로고침 없이 유지됨을 확인.
   3. **재결합 후 크래시 해결**: 재결합 완료 후 소스 창이 백그라운드에서 부드럽게 닫히며 프로그램이 비정상 종료되던 문제가 완벽히 해소되고 안정적으로 동작함을 사용자 실기 테스트로 검증 완료.
 
+## 67. Windows 11 작업 전환기(Alt+Tab / 작업 보기) 앱 아이콘 배지 누락 해결 및 멀티 DPI 윈도우/클래스 아이콘 파이프라인 (Windows 11 Alt+Tab Task Switcher App Icon Badge & Multi-DPI Icon Integration)
+
+### 67.1 개요 (GitHub Issue #89)
+Windows 11 OS 환경에서 작업 전환기(Alt+Tab) 또는 작업 보기(Task View, Win+Tab)를 호출했을 때, Edge, 메모장, 계산기 등 다른 일반 앱은 썸네일 미리보기 창 좌측 상단에 프로그램 고유 아이콘 배지가 선명하게 표시되는 반면, Lite Browser는 아이콘이 누락되어 빈 영역으로 노출되던 결함([GitHub Issue #89](https://github.com/gregoryyoon/lite_browser/issues/89))을 해결했습니다.  
+Win32 윈도우 클래스 레벨, 윈도우 인스턴스 레벨, 메시지 디스패치(`WM_GETICON`), 다중 모니터 DPI 전환(`WM_DPICHANGED`)을 아우르는 전면적인 네이티브 아이콘 바인딩 아키텍처를 구축하고 빌드 후처리 안정성을 강화했습니다.
+
+### 67.2 근본 원인 분석
+1. **윈도우 클래스 아이콘 등록 누락 (`WNDCLASSEX`)**:
+   - `simple_app.c`의 `create_browser_window()`에서 `LiteBrowserMainWindowClass`를 등록할 때 `wcex.hIcon` 및 `wcex.hIconSm`이 기본값 `NULL`로 설정되어 있었습니다.
+2. **윈도우 인스턴스 아이콘 메시지 미전송 (`WM_SETICON`)**:
+   - `CreateWindowEx`로 생성된 `main_hwnd` 및 분리 탭 윈도우에 `WM_SETICON`(`ICON_BIG`, `ICON_SMALL`) 메시지를 전송하지 않아 윈도우 핸들에 아이콘이 바인딩되지 않았습니다.
+3. **`WM_GETICON` 메시지 처리 부재**:
+   - Windows 11의 DWM(데스크톱 창 관리자) 및 작업 전환기(Flip / Alt+Tab)는 창 썸네일 배지를 렌더링할 때 대상 윈도우에 `WM_GETICON`(`ICON_BIG`, `ICON_SMALL`, `ICON_SMALL2`)을 질의하고, 응답이 없으면 클래스 아이콘(`GetClassLongPtr(hwnd, GCLP_HICON/HICONSM)`)을 순차 조회합니다.
+   - 윈도우 인스턴스 아이콘과 클래스 아이콘이 모두 부재하여 `DefWindowProc`이 `NULL`을 반환하였고, 이로 인해 작업 전환기 배지가 표시되지 않았습니다.
+4. **빌드 후처리 파일 잠금 경합 (Win32 Error 110: `ERROR_OPEN_FAILED`)**:
+   - CMake 후처리 단계에서 `inject_icon.py`가 PE 실행 파일에 5-프레임 멀티 해상도 아이콘을 주입할 때, 새로 복사된 파일에 대해 Windows 백그라운드 인덱서 또는 안티바이러스 스캐너가 일시적으로 읽기 핸들을 점유하여 `EndUpdateResourceW`가 실패하는 현상이 확인되었습니다.
+
+### 67.3 주요 구현 내역
+
+1. **윈도우 클래스 레벨 DPI 인식 아이콘 로드 (`simple_app.c`, `simple_life_span_handler.c`)**:
+   - `LiteBrowserMainWindowClass` 및 `LiteBrowserPopupWnd` 클래스 등록 시 시스템 메트릭 기반의 `LoadImage`를 적용하여 윈도우 클래스 자체에 고해상도 및 저해상도 아이콘 핸들을 바인딩:
+     ```c
+     wcex.hIcon = (HICON)LoadImage(hInstance, MAKEINTRESOURCE(IDI_CEFSIMPLE), IMAGE_ICON,
+                                   GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR);
+     wcex.hIconSm = (HICON)LoadImage(hInstance, MAKEINTRESOURCE(IDI_CEFSIMPLE), IMAGE_ICON,
+                                     GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
+     ```
+
+2. **윈도우 인스턴스 동기화 헬퍼 구축 (`UpdateAppWindowIcons`)**:
+   - 메인 윈도우 생성([`create_browser_window`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_app.c#L1440)), 탭 분리 신규 윈도우([`create_browser_window_for_detached_tab`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_app.c#L1705)), 팝업 윈도우 생성 시점에 즉시 `WM_SETICON` 메시지를 전송하여 DWM이 윈도우 핸들 수준에서 아이콘을 즉각 인식하도록 구현:
+     ```c
+     static void UpdateAppWindowIcons(HWND hwnd) {
+       HINSTANCE hInst = GetModuleHandle(NULL);
+       HICON hIconBig = (HICON)LoadImage(hInst, MAKEINTRESOURCE(IDI_CEFSIMPLE), IMAGE_ICON,
+                                         GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR);
+       HICON hIconSm = (HICON)LoadImage(hInst, MAKEINTRESOURCE(IDI_CEFSIMPLE), IMAGE_ICON,
+                                        GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
+       if (hIconBig) SendMessage(hwnd, WM_SETICON, ICON_BIG, (LPARAM)hIconBig);
+       if (hIconSm) SendMessage(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)hIconSm);
+     }
+     ```
+
+3. **명시적 `WM_GETICON` 응답 및 폴백 처리**:
+   - `LiteBrowserMainWndProc` 및 `LiteBrowserPopupWndProc`에서 `WM_GETICON` 수신 시 `DefWindowProc`을 우선 호출하여 윈도우별 지정 아이콘을 반환하고, 부재 시 클래스 아이콘으로 안전하게 폴백:
+     ```c
+     case WM_GETICON:
+     {
+       LRESULT lres = DefWindowProc(hwnd, message, wParam, lParam);
+       if (lres) return lres;
+       HICON hIcon = (HICON)GetClassLongPtr(hwnd, (wParam == ICON_SMALL || wParam == 2 /* ICON_SMALL2 */) ? GCLP_HICONSM : GCLP_HICON);
+       if (hIcon) return (LRESULT)hIcon;
+       return 0;
+     }
+     ```
+
+4. **다중 모니터 배율(DPI) 변경 동적 대응 (`WM_DPICHANGED`)**:
+   - 서로 다른 배율의 디스플레이 간에 창을 이동할 때 `WM_DPICHANGED` 메시지 핸들러에서 `UpdateAppWindowIcons(hwnd)`를 호출하여, 목적지 디스플레이의 DPI 메트릭에 부합하는 최적 크기의 아이콘 프레임으로 자동 갱신되도록 처리.
+
+5. **빌드 파이프라인 일시 잠금 내결함성 강화 (`inject_icon.py`)**:
+   - CMake 후처리 아이콘 주입기(`inject_icon.py`)에 `os.path.abspath` 경로 정규화 및 백그라운드 스캐너 파일 잠금 대비 **최대 5회 지수/선형 백오프 재시도(`time.sleep(0.5)`)** 로직을 도입하여 빌드 중 `EndUpdateResourceW (error 110)` 실패를 원천 방지.
+
+### 67.4 관련 소스 코드
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_app.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_app.c)
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_life_span_handler.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_life_span_handler.c)
+- [`cef_binary_154.0.34/tests/cefsimple_capi/win/inject_icon.py`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/win/inject_icon.py)
+
+### 67.5 빌드 및 검증 결과
+- **디버그 빌드**: `cmake --build cef_binary_154.0.34/build --config Debug --target cefsimple_capi` 성공 (`Exit code 0, 오류 0개`).
+- **실기 검증 (사용자 확인 완료)**:
+  1. **Windows 11 작업 전환기(Alt+Tab)**: Lite Browser 창의 썸네일 미리보기 좌측 상단에 Lite Browser 고유 아이콘 배지가 선명하고 일관되게 표시됨을 실기 확인.
+  2. **작업 보기(Task View, Win+Tab)**: 전체 가상 데스크톱 및 창 미리보기 창 상단에 프로그램 아이콘이 안정적으로 렌더링됨을 검증.
+
+

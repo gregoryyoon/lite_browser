@@ -15,6 +15,9 @@
 #ifndef DWMWA_USE_IMMERSIVE_DARK_MODE
 #define DWMWA_USE_IMMERSIVE_DARK_MODE 20
 #endif
+#ifndef IDI_CEFSIMPLE
+#define IDI_CEFSIMPLE 120
+#endif
 #endif
 
 #include "include/capi/cef_app_capi.h"
@@ -41,6 +44,11 @@ static LRESULT CALLBACK LiteBrowserPopupWndProc(HWND hwnd, UINT message, WPARAM 
   popup_window_ctx_t* ctx = (popup_window_ctx_t*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
 
   switch (message) {
+  case WM_GETICON: {
+    LRESULT lr = DefWindowProc(hwnd, message, wParam, lParam);
+    if (lr) return lr;
+    return (LRESULT)GetClassLongPtrW(hwnd, (wParam == ICON_SMALL || wParam == 2) ? GCLP_HICONSM : GCLP_HICON);
+  }
   case WM_ERASEBKGND: {
     HDC hdc = (HDC)wParam;
     RECT r;
@@ -386,11 +394,13 @@ int CEF_CALLBACK life_span_handler_on_before_popup(
       wcex.style = CS_HREDRAW | CS_VREDRAW;
       wcex.lpfnWndProc = LiteBrowserPopupWndProc;
       wcex.hInstance = hInstance;
-      wcex.hIcon = (HICON)LoadImage(hInstance, MAKEINTRESOURCE(120), IMAGE_ICON, 32, 32, LR_DEFAULTCOLOR);
+      wcex.hIcon = (HICON)LoadImage(hInstance, MAKEINTRESOURCE(IDI_CEFSIMPLE), IMAGE_ICON,
+                                    GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR);
       wcex.hCursor = LoadCursor(NULL, IDC_ARROW);
       wcex.hbrBackground = CreateSolidBrush(dark_init ? RGB(13, 15, 21) : RGB(228, 228, 231));
       wcex.lpszClassName = L"LiteBrowserPopupWnd";
-      wcex.hIconSm = (HICON)LoadImage(hInstance, MAKEINTRESOURCE(120), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR);
+      wcex.hIconSm = (HICON)LoadImage(hInstance, MAKEINTRESOURCE(IDI_CEFSIMPLE), IMAGE_ICON,
+                                      GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
       RegisterClassExW(&wcex);
       s_popup_class_registered = 1;
     }
@@ -402,6 +412,13 @@ int CEF_CALLBACK life_span_handler_on_before_popup(
         NULL, NULL, hInstance, NULL);
 
     if (popup_hwnd) {
+      HICON hIconBig = (HICON)LoadImage(hInstance, MAKEINTRESOURCE(IDI_CEFSIMPLE), IMAGE_ICON,
+                                        GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR);
+      HICON hIconSm = (HICON)LoadImage(hInstance, MAKEINTRESOURCE(IDI_CEFSIMPLE), IMAGE_ICON,
+                                       GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
+      if (hIconBig) SendMessage(popup_hwnd, WM_SETICON, ICON_BIG, (LPARAM)hIconBig);
+      if (hIconSm) SendMessage(popup_hwnd, WM_SETICON, ICON_SMALL, (LPARAM)hIconSm);
+
       HBRUSH hbr = CreateSolidBrush(dark_init ? RGB(13, 15, 21) : RGB(228, 228, 231));
       HBRUSH old_hbr = (HBRUSH)SetClassLongPtrW(popup_hwnd, GCLP_HBRBACKGROUND, (LONG_PTR)hbr);
       if (old_hbr) DeleteObject(old_hbr);
