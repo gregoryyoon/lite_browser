@@ -1,6 +1,6 @@
 # Lite Browser 전체 기능 & 시스템 구현 보고서 (Walkthrough)
 
-본 문서는 **Lite Browser** 프로젝트의 빌드 및 실행 환경, CEF C API 아키텍처, 순수 Win32 + 이중 자식 브라우저 구조 및 전체 기능별 구현 내역(기본 언어 설정, 다중 탭 및 윈도우 관리, 차세대 북마크 & 지능형 주소창, 커스텀 아이콘 리소스 자동화 파이프라인, 다운로드 관리자, 듀얼 탭/창 분할 시스템, AI 에이전트 브라우저, 0px 심리스 레이아웃, 벤토 그리드 테마, 엣지 스타일 CEF 모달 및 알림/권한 요청 버블 다이얼로그 상단 중앙 정렬, 대화형 OAuth 2.0 PKCE ChatGPT 구독 인증 및 자율 브라우저 에이전트 도구 호출 시스템 등)을 통합하여 관리하는 전체 통합 기술 가이드입니다.
+본 문서는 **Lite Browser** 프로젝트의 빌드 및 실행 환경, CEF C API 아키텍처, 순수 Win32 + 이중 자식 브라우저 구조 및 전체 기능별 구현 내역(기본 언어 설정, 다중 탭 및 윈도우 관리, 차세대 북마크 & 지능형 주소창, 커스텀 아이콘 리소스 자동화 파이프라인, 다운로드 관리자, 듀얼 탭/창 분할 시스템, AI 에이전트 브라우저, 0px 심리스 레이아웃, 벤토 그리드 테마, 엣지 스타일 CEF 모달 및 알림/권한 요청 버블 다이얼로그 상단 중앙 정렬, 대화형 OAuth 2.0 PKCE ChatGPT 구독 인증 및 자율 브라우저 에이전트 도구 호출 시스템, 외부 데스크톱 애플리케이션 프로토콜 핸들러 등)을 통합하여 관리하는 전체 통합 기술 가이드입니다.
 
 ---
 
@@ -2626,6 +2626,55 @@ Google AI Studio의 최신 Gemini API 정책에 맞추어 사이드패널에서 
 - **실기 검증**:
   - 무료 API 키 사용 시 기본 선택된 `gemini-3.8-flash`로 정상 실시간 스트리밍 및 웹페이지 분석이 완료됨을 확인.
   - 드롭다운 라벨에 무료 지원 여부와 유료 전용 여부가 명시되어 쿼터 초과 혼선 방지.
+
+---
+
+## 71. 외부 데스크톱 애플리케이션 프로토콜 핸들러 구현 및 OpenText Exceed TurboX 연동 (External URL Protocol Handler & Exceed Client Launcher Support)
+
+### 71.1 개요
+사내 원격 접속 및 가상 데스크톱 솔루션인 OpenText Exceed TurboX(`https://etx.chipsnmedia.com:8443/etx/`)에서 웹 대시보드를 통해 세션을 실행할 때, "Launch Failure: The Client Launcher timed out or the server did not respond" 오류가 발생하며 로컬 Exceed Client Launcher가 기동되지 않는 현상을 해결했습니다.  
+Edge/Chrome 브라우저와 동일하게 Windows 레지스트리에 등록된 외부 애플리케이션 커스텀 URL 프로토콜(예: `etx12://`, `zoommtg://`, `mailto:`, `slack://` 등)을 안전하게 감지하고 사용자 확인 및 영구 허용 정책을 제공하는 전용 핸들러를 구축했습니다.
+
+### 71.2 기술적 원인 및 아키텍처
+1. **CEF 기본 탐색 제약**:
+   - CEF는 보안상 `http`, `https`, `file` 등 표준 웹 스킴 외의 알 수 없는 커스텀 스킴 URL에 대해 OS 쉘로 자동 위임하지 않고 `ERR_UNKNOWN_URL_SCHEME`으로 차단하거나 무시합니다.
+   - 웹 애플리케이션이 로컬 에이전트/런처를 기동하기 위해 `window.open("etx12://...")` 또는 iframe / 페이지 이동(`location.href = "etx12://..."`)을 실행할 때, 브라우저가 이를 핸들링하지 않아 로컬 런처와의 핸드셰이크가 타임아웃되었습니다.
+2. **해결 구조**:
+   - CEF의 네비게이션 진입점인 `life_span_handler_on_before_popup`, `request_handler_on_before_browse`, `request_handler_on_open_urlfrom_tab` 3곳에 프로토콜 가드를 배치.
+   - Windows 레지스트리(`HKEY_CLASSES_ROOT\<scheme>\URL Protocol`) 조회를 통해 시스템에 정상 등록된 애플리케이션인지 검증한 후, `TaskDialogIndirect` 확인창을 거쳐 `ShellExecuteW`로 안전하게 외부 앱을 기동하고 브라우저 내부 탐색 및 빈 팝업 생성을 방지(`return 1`).
+
+### 71.3 주요 구현 내역
+1. **외부 프로토콜 검증 및 영구 허용 모듈 (`simple_protocol_handler.h`, `simple_protocol_handler.c`)**:
+   - **레지스트리 등록 확인 (`is_registered_url_protocol`)**:
+     `HKEY_CLASSES_ROOT\<scheme>` 하위에 `URL Protocol` 값이 존재하는지 확인하고, 기본값에서 사용자 친화적 앱 명칭(예: `"OpenText ETX Client Launcher Protocol"`)을 파싱.
+   - **모던 시스템 다이얼로그 (`TaskDialogIndirect`)**:
+     호출 사이트 도메인(Origin)과 대상 앱 이름을 명시하는 다이얼로그를 표시하며, "이 사이트에서 이 앱 링크를 항상 열도록 허용" 체크박스 제공.
+   - **영구 화이트리스트 저장 및 조회 (`is_protocol_always_allowed`, `save_allowed_protocol`)**:
+     사용자가 항상 허용을 체크한 경우 `%USERPROFILE%\.lite-browser\allowed_protocols.txt` 파일에 `origin|scheme` 형식으로 영구 보관하여 이후 클릭 시 대화상자 없이 즉시 실행.
+   - **브라우저 통합 헬퍼 (`HandleExternalProtocolForBrowser`)**:
+     현재 브라우저의 메인 프레임 URL을 안전하게 조회하여 웹사이트 도메인을 추출하고 프로토콜 실행을 일괄 처리.
+2. **CEF 생명주기 및 요청 핸들러 연동**:
+   - **팝업 창 생성 방지 (`simple_life_span_handler.c`의 `life_span_handler_on_before_popup`)**:
+     `target_url`이 외부 프로토콜인 경우 `HandleExternalProtocolForBrowser`를 호출하여 외부 앱을 실행하고 `return 1`을 반환하여 불필요한 빈 팝업 창 생성을 차단.
+   - **프레임 네비게이션 가드 (`simple_handler.c`의 `request_handler_on_before_browse`)**:
+     페이지 내 스크립트나 링크 클릭으로 외부 프로토콜 호출 시 탐색을 취소(`return 1`)하여 CEF 에러 페이지 노출을 방지.
+   - **새 탭 오픈 가드 (`simple_handler.c`의 `request_handler_on_open_urlfrom_tab`)**:
+     사용자 탭 오픈 액션에서도 외부 프로토콜일 경우 탭 생성을 취소하고 앱을 실행.
+
+### 71.4 관련 소스 코드
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_protocol_handler.h`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_protocol_handler.h)
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_protocol_handler.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_protocol_handler.c)
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.c)
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_life_span_handler.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_life_span_handler.c)
+- [`cef_binary_154.0.34/tests/cefsimple_capi/CMakeLists.txt`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/CMakeLists.txt)
+
+### 71.5 빌드 및 검증 결과
+- **디버그 빌드**: `cmake --build cef_binary_154.0.34\build --config Debug --target cefsimple_capi` 성공 (`Exit code 0, 오류 0개`).
+- **실기 검증**:
+  - OpenText Exceed TurboX 세션 시작 시 "OpenText ETX Client Launcher Protocol을 여시겠습니까?" 다이얼로그 정상 출력.
+  - 열기 승인 후 Exceed Client Launcher 프로세스가 성공적으로 기동되어 원격 데스크톱 세션 접속 완료.
+  - "항상 열도록 허용" 체크 후 재실행 시 다이얼로그 없이 즉각 런처가 실행됨을 확인.
+
 
 
 

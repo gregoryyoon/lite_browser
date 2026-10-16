@@ -27,6 +27,7 @@
 extern int GetUIHeightForWindow(HWND hwnd);
 #include "tests/cefsimple_capi/simple_utils.h"
 #include "tests/cefsimple_capi/browser_context.h"
+#include "tests/cefsimple_capi/simple_protocol_handler.h"
 
 //
 // Dedicated Popup Window Context and WndProc
@@ -293,15 +294,22 @@ int CEF_CALLBACK life_span_handler_on_before_popup(
   simple_life_span_handler_t* handler = (simple_life_span_handler_t*)self;
   browser_window_t *win_ctx = handler->parent->window_ctx;
 
-  // Intercept password manager URL requests so they always open as tabs in Lite Browser instead of popups/separate windows
-  if (win_ctx && target_url && target_url->str && target_url->length > 0) {
+  // Check external application protocols (e.g. etx12://, mailto:, zoommtg://, etc.) or password manager
+  if (target_url && target_url->str && target_url->length > 0) {
     cef_string_utf8_t url_utf8 = {};
     cef_string_to_utf8(target_url->str, target_url->length, &url_utf8);
-    if (url_utf8.str) {
-      if (strstr(url_utf8.str, "password-manager") != NULL ||
+    if (url_utf8.str && url_utf8.length > 0) {
+      HWND parent_hwnd = win_ctx ? win_ctx->main_hwnd : NULL;
+      if (HandleExternalProtocolForBrowser(parent_hwnd, url_utf8.str, browser, frame)) {
+        LogMsg("life_span_handler_on_before_popup: handled external protocol -> cancel popup\n");
+        cef_string_utf8_clear(&url_utf8);
+        return 1;
+      }
+
+      if (win_ctx && (strstr(url_utf8.str, "password-manager") != NULL ||
           strncmp(url_utf8.str, "lite://passwords", 16) == 0 ||
           strncmp(url_utf8.str, "chrome://passwords", 18) == 0 ||
-          strncmp(url_utf8.str, "edge://passwords", 16) == 0) {
+          strncmp(url_utf8.str, "edge://passwords", 16) == 0)) {
         LogMsg("life_span_handler_on_before_popup: intercepted password manager -> CreateNewTab\n");
         cef_string_utf8_clear(&url_utf8);
         CreateNewTab(win_ctx, "chrome://password-manager/passwords");

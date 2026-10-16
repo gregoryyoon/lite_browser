@@ -37,6 +37,8 @@ set(CEFSIMPLE_CAPI_SRCS
   simple_dialog_helper.h
   simple_ai_proxy.c
   simple_ai_proxy.h
+  simple_protocol_handler.c
+  simple_protocol_handler.h
   )
 set(CEFSIMPLE_CAPI_SRCS_LINUX
   cefsimple_linux.c

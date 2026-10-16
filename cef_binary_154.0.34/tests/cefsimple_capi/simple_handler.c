@@ -11,6 +11,7 @@
 #include "tests/cefsimple_capi/simple_optimization.h"
 #include "tests/cefsimple_capi/simple_app.h"
 #include "tests/cefsimple_capi/simple_ai_proxy.h"
+#include "tests/cefsimple_capi/simple_protocol_handler.h"
 
 #include <stdarg.h>
 #include <stdatomic.h>
@@ -1178,6 +1179,17 @@ int CEF_CALLBACK request_handler_on_before_browse(
     cef_string_to_utf8(url_userfree->str, url_userfree->length, &url_utf8);
 
     if (url_utf8.str) {
+      simple_request_handler_t *req_h = (simple_request_handler_t*)self;
+      browser_window_t *w_ctx = (req_h && req_h->parent) ? req_h->parent->window_ctx : NULL;
+      HWND parent_hwnd = w_ctx ? w_ctx->main_hwnd : NULL;
+
+      if (HandleExternalProtocolForBrowser(parent_hwnd, url_utf8.str, browser, frame)) {
+        LogMsg("request_handler_on_before_browse: handled external protocol -> cancel navigation\n");
+        cef_string_utf8_clear(&url_utf8);
+        cef_string_userfree_free(url_userfree);
+        return 1;
+      }
+
       if (strncmp(url_utf8.str, "lite://favorites", 16) == 0 ||
           strncmp(url_utf8.str, "lite://bookmarks", 16) == 0 ||
           strncmp(url_utf8.str, "edge://favorites", 16) == 0 ||
@@ -3355,6 +3367,14 @@ int CEF_CALLBACK request_handler_on_open_urlfrom_tab(
     cef_string_utf8_clear(&url_utf8);
   } else {
     strcpy(target_url_str, "about:blank");
+  }
+
+  if (strlen(target_url_str) > 0) {
+    HWND parent_hwnd = win_ctx ? win_ctx->main_hwnd : NULL;
+    if (HandleExternalProtocolForBrowser(parent_hwnd, target_url_str, browser, frame)) {
+      LogMsg("request_handler_on_open_urlfrom_tab: handled external protocol -> cancel tab open\n");
+      return 1;
+    }
   }
 
   if (win_ctx) {
