@@ -2,8 +2,8 @@
 param(
     [Parameter(Mandatory=$true)]
     [string]$Token,
-    [string]$TagName = "v0.2.1",
-    [string]$ReleaseName = "Lite Browser v0.2.1",
+    [string]$TagName = "v0.2.2",
+    [string]$ReleaseName = "Lite Browser v0.2.2",
     [string]$InstallerPath = "LiteBrowserInstaller.exe",
     [string]$ReleaseBody = ""
 )
@@ -38,8 +38,10 @@ if (-not $ReleaseBody) {
 ## Lite Browser $TagName
 
 ### 주요 변경 사항
-- **자동 업데이트 파이프라인 검증**: 버전 0.2.0에서 0.2.1로의 자동 업데이트 및 사일런트 설치 검증 릴리즈
-- **안정성 및 보안 강화**: 최신 Authenticode 코드 서명 및 바이너리 무결성 검증
+- **상단 툴바 전용 업데이트 뱃지 버튼 도입**: 백그라운드 다운로드 완료 시 더보기 버튼 좌측에 Lucide SVG ``circle-arrow-up`` 뱃지 및 펄스(Pulse) 애니메이션 자동 표시
+- **원클릭 즉시 재시작 및 업데이트 적용**: 뱃지 클릭 시 즉시 NSIS 사일런트(``/S``) 설치 인계 및 브라우저 자동 재실행
+- **3점(⋮) 메뉴 UX 정제**: 별도 알림 점(Dot) 및 업데이트 중복 메뉴를 제거하여 깔끔하고 미니멀한 메뉴 인터페이스 구축
+- **보안 및 무결성**: 최신 Authenticode SHA-256 전자 서명 및 DigiCert RFC 3161 공식 타임스탬프 적용
 "@
 }
 

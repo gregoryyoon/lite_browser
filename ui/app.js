@@ -1820,16 +1820,23 @@ window.showToast = function(message, type = 'info', duration = 5000) {
 };
 window.updateAutoUpdaterStatus = function(info) {
   if (!info) return;
-  const menuBtn = document.getElementById('menu-btn');
-  if (menuBtn) {
-    if (info.state === 'READY') {
-      menuBtn.classList.add('has-update');
-      menuBtn.setAttribute('title', '메뉴 (새 버전 업데이트 준비 완료)');
-    } else {
-      menuBtn.classList.remove('has-update');
-      menuBtn.setAttribute('title', '메뉴');
+  const updateBadgeBtn = document.getElementById('update-badge-btn');
+
+  if (info.state === 'READY') {
+    if (updateBadgeBtn) {
+      updateBadgeBtn.classList.remove('hide');
+      const verText = info.latestVersion ? ` (${info.latestVersion})` : '';
+      updateBadgeBtn.setAttribute('title', `새 버전${verText} 준비 완료 - 클릭하여 지금 재시작`);
+    }
+  } else {
+    if (updateBadgeBtn) {
+      updateBadgeBtn.classList.add('hide');
     }
   }
+};
+
+window.applyUpdateDirectly = function() {
+  sendUiAction('http://ui-action/restart-update');
 };
 
 document.addEventListener('DOMContentLoaded', () => {

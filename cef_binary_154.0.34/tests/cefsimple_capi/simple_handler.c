@@ -2346,10 +2346,6 @@ int CEF_CALLBACK request_handler_on_before_browse(
             AppendMenuW(hMenu, MF_STRING, 1003, L"인쇄...");
             AppendMenuW(hMenu, MF_STRING, 1004, L"개발자 도구 (Inspect)");
             AppendMenuW(hMenu, MF_STRING, 1005, L"페이지 소스 보기");
-            if (simple_updater_is_ready_to_restart()) {
-              AppendMenuW(hMenu, MF_STRING, 1013, L"🚀 LiteBrowser 재시작하여 업데이트 적용");
-              AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
-            }
             AppendMenuW(hMenu, MF_STRING, 1010, L"설정");
             AppendMenuW(hMenu, MF_STRING, 1006, L"종료");
 
@@ -2366,8 +2362,6 @@ int CEF_CALLBACK request_handler_on_before_browse(
               CreateNewTabEx(win_ctx, "lite://downloads", 1);
             } else if (cmd == 1011) {
               CreateNewTabEx(win_ctx, "chrome://password-manager/passwords", 1);
-            } else if (cmd == 1013) {
-              simple_updater_apply_and_restart(win_ctx ? win_ctx->main_hwnd : NULL);
             } else if (cmd == 1010) {
               CreateNewTabEx(win_ctx, "lite://settings", 1);
             } else if (cmd == 1003) {
