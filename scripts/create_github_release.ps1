@@ -1,10 +1,11 @@
-# GitHub Release and Asset Upload Pipeline for Lite Browser
+﻿# GitHub Release and Asset Upload Pipeline for Lite Browser
 param(
     [Parameter(Mandatory=$true)]
     [string]$Token,
-    [string]$TagName = "v0.2.0",
-    [string]$ReleaseName = "Lite Browser v0.2.0",
-    [string]$InstallerPath = "LiteBrowserInstaller.exe"
+    [string]$TagName = "v0.2.1",
+    [string]$ReleaseName = "Lite Browser v0.2.1",
+    [string]$InstallerPath = "LiteBrowserInstaller.exe",
+    [string]$ReleaseBody = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -32,16 +33,15 @@ try {
     # 404 is expected if not created yet
 }
 
-$ReleaseBody = @"
-## Lite Browser v0.2.0
+if (-not $ReleaseBody) {
+    $ReleaseBody = @"
+## Lite Browser $TagName
 
 ### 주요 변경 사항
-- **자동 업데이트 시스템 구현**: GitHub Releases 연동 WinHTTP 스트리밍 백그라운드 다운로드 및 실시간 진행률 표시
-- **Authenticode 디지털 서명 검증**: ``WinVerifyTrust`` 기반 위변조 검증을 통한 보안 강화
-- **원클릭 사일런트 업데이트 적용**: NSIS 사일런트(``/S``) 설치 핸드오버 및 브라우저 자동 재실행
-- **단일 버전 관리(SSOT) 구축**: C 엔진, Windows PE 리소스, NSIS 인스톨러, Web UI 버전 일원화 (``version.h``)
-- **설정 대시보드 및 메뉴 개선**: ``lite://settings`` 내 실시간 업데이트 카드 연동 및 3점 메뉴 알림 배지 적용
+- **자동 업데이트 파이프라인 검증**: 버전 0.2.0에서 0.2.1로의 자동 업데이트 및 사일런트 설치 검증 릴리즈
+- **안정성 및 보안 강화**: 최신 Authenticode 코드 서명 및 바이너리 무결성 검증
 "@
+}
 
 $Release = $null
 if ($ExistingRelease) {
