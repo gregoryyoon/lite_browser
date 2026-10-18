@@ -1,5 +1,6 @@
 Unicode true
 !include "MUI2.nsh"
+!include "LogicLib.nsh"
 
 Name "Lite Browser"
 OutFile "LiteBrowserInstaller.exe"
@@ -28,16 +29,20 @@ RequestExecutionLevel admin
 !insertmacro MUI_LANGUAGE "English"
 !insertmacro MUI_LANGUAGE "Korean"
 
+; Read Single Source of Truth version from version.h
+!searchparse /file "cef_binary_154.0.34\tests\cefsimple_capi\version.h" `#define LITE_BROWSER_VERSION "` LITE_VERSION `"`
+!searchparse /file "cef_binary_154.0.34\tests\cefsimple_capi\version.h" `#define LITE_BROWSER_VERSION_WIN "` LITE_VERSION_WIN `"`
+
 ; Version Information & Security Metadata
-VIProductVersion "1.0.0.0"
-VIFileVersion "1.0.0.0"
+VIProductVersion "${LITE_VERSION_WIN}"
+VIFileVersion "${LITE_VERSION_WIN}"
 
 VIAddVersionKey "ProductName" "Lite Browser"
 VIAddVersionKey "CompanyName" "Gregory Yoon"
 VIAddVersionKey "LegalCopyright" "Copyright (C) 2026 Gregory Yoon. All rights reserved."
 VIAddVersionKey "FileDescription" "Lite Browser Installer"
-VIAddVersionKey "FileVersion" "1.0.0.0"
-VIAddVersionKey "ProductVersion" "1.0.0.0"
+VIAddVersionKey "FileVersion" "${LITE_VERSION_WIN}"
+VIAddVersionKey "ProductVersion" "${LITE_VERSION}"
 
 Section "Install"
   ; Use 64-bit registry view for 64-bit application
@@ -98,7 +103,7 @@ Section "Install"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
                   "DisplayIcon" "$\"$INSTDIR\lite_browser.exe$\",0"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
-                  "DisplayVersion" "1.0.0"
+                  "DisplayVersion" "${LITE_VERSION}"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
                   "UninstallString" "$\"$INSTDIR\uninstall.exe$\""
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
@@ -142,6 +147,11 @@ Section "Install"
   WriteRegStr HKLM "Software\Classes\LiteBrowserHTML" "FriendlyTypeName" "Lite Browser Document"
   WriteRegStr HKLM "Software\Classes\LiteBrowserHTML\DefaultIcon" "" "$\"$INSTDIR\lite_browser.exe$\",0"
   WriteRegStr HKLM "Software\Classes\LiteBrowserHTML\shell\open\command" "" "$\"$INSTDIR\lite_browser.exe$\" $\"%1$\""
+  
+  ; If silent installation (auto-update), relaunch lite_browser.exe
+  ${If} ${Silent}
+    Exec '"$INSTDIR\lite_browser.exe"'
+  ${EndIf}
 SectionEnd
 
 Section "Uninstall"

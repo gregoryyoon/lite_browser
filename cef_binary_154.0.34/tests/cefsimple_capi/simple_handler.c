@@ -7,6 +7,7 @@
 #include "tests/cefsimple_capi/simple_vault.h"
 #include "tests/cefsimple_capi/simple_auth.h"
 #include "tests/cefsimple_capi/simple_installer.h"
+#include "tests/cefsimple_capi/simple_updater.h"
 #include "tests/cefsimple_capi/default_browser.h"
 #include "tests/cefsimple_capi/simple_optimization.h"
 #include "tests/cefsimple_capi/simple_app.h"
@@ -2243,8 +2244,23 @@ int CEF_CALLBACK request_handler_on_before_browse(
             download_manager_cancel(id);
             free(id_str);
           }
-        } else if (strcmp(action, "check-cef-update") == 0) {
-          simple_installer_check_update_async(win_ctx);
+        } else if (strcmp(action, "check-update") == 0 || strcmp(action, "check-cef-update") == 0) {
+          simple_updater_check_async(win_ctx ? win_ctx->main_hwnd : NULL, 0);
+        } else if (strcmp(action, "get-update-status") == 0) {
+          if (frame) {
+            char status_json[1024];
+            simple_updater_get_status_json(status_json, sizeof(status_json));
+            char js_code[1200];
+            snprintf(js_code, sizeof(js_code),
+                     "if (window.updateAutoUpdaterStatus) { window.updateAutoUpdaterStatus(%s); }",
+                     status_json);
+            cef_string_t js_str = {};
+            cef_string_from_utf8(js_code, strlen(js_code), &js_str);
+            frame->execute_java_script(frame, &js_str, NULL, 0);
+            cef_string_clear(&js_str);
+          }
+        } else if (strcmp(action, "restart-update") == 0) {
+          simple_updater_apply_and_restart(win_ctx ? win_ctx->main_hwnd : NULL);
         } else if (strcmp(action, "get-default-browser-status") == 0) {
           int is_def = default_browser_is_default();
           char js_code[128];
@@ -2330,8 +2346,10 @@ int CEF_CALLBACK request_handler_on_before_browse(
             AppendMenuW(hMenu, MF_STRING, 1003, L"인쇄...");
             AppendMenuW(hMenu, MF_STRING, 1004, L"개발자 도구 (Inspect)");
             AppendMenuW(hMenu, MF_STRING, 1005, L"페이지 소스 보기");
-            AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
-            AppendMenuW(hMenu, MF_STRING, 1009, L"CEF 런타임 업데이트 확인");
+            if (simple_updater_is_ready_to_restart()) {
+              AppendMenuW(hMenu, MF_STRING, 1013, L"🚀 LiteBrowser 재시작하여 업데이트 적용");
+              AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+            }
             AppendMenuW(hMenu, MF_STRING, 1010, L"설정");
             AppendMenuW(hMenu, MF_STRING, 1006, L"종료");
 
@@ -2348,8 +2366,8 @@ int CEF_CALLBACK request_handler_on_before_browse(
               CreateNewTabEx(win_ctx, "lite://downloads", 1);
             } else if (cmd == 1011) {
               CreateNewTabEx(win_ctx, "chrome://password-manager/passwords", 1);
-            } else if (cmd == 1009) {
-              simple_installer_check_update_async(win_ctx);
+            } else if (cmd == 1013) {
+              simple_updater_apply_and_restart(win_ctx ? win_ctx->main_hwnd : NULL);
             } else if (cmd == 1010) {
               CreateNewTabEx(win_ctx, "lite://settings", 1);
             } else if (cmd == 1003) {

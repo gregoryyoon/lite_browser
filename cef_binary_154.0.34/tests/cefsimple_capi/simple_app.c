@@ -1,5 +1,6 @@
 #include "tests/cefsimple_capi/simple_app.h"
 #include "tests/cefsimple_capi/simple_installer.h"
+#include "tests/cefsimple_capi/simple_updater.h"
 #include "include/capi/cef_preference_capi.h"
 #include "include/capi/cef_request_context_capi.h"
 #include "include/capi/cef_values_capi.h"
@@ -1248,6 +1249,40 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
                  SWP_NOZORDER | SWP_NOACTIVATE);
     return 0;
   }
+  case WM_UPDATER_STATUS_CHANGED:
+  {
+    char status_json[1024];
+    simple_updater_get_status_json(status_json, sizeof(status_json));
+    char js_code[1200];
+    snprintf(js_code, sizeof(js_code),
+             "if (window.updateAutoUpdaterStatus) { window.updateAutoUpdaterStatus(%s); }",
+             status_json);
+    cef_string_t js_str = {};
+    cef_string_from_utf8(js_code, strlen(js_code), &js_str);
+
+    for (int i = 0; i < MAX_WINDOWS; i++) {
+      if (g_windows[i] && g_windows[i]->ui_browser) {
+        cef_frame_t* frame = g_windows[i]->ui_browser->get_main_frame(g_windows[i]->ui_browser);
+        if (frame) {
+          frame->execute_java_script(frame, &js_str, NULL, 0);
+          frame->base.release(&frame->base);
+        }
+      }
+      if (g_windows[i]) {
+        for (int t = 0; t < g_windows[i]->tab_count; t++) {
+          if (g_windows[i]->tabs[t].browser) {
+            cef_frame_t* frame = g_windows[i]->tabs[t].browser->get_main_frame(g_windows[i]->tabs[t].browser);
+            if (frame) {
+              frame->execute_java_script(frame, &js_str, NULL, 0);
+              frame->base.release(&frame->base);
+            }
+          }
+        }
+      }
+    }
+    cef_string_clear(&js_str);
+    return 0;
+  }
   case WM_CLOSE:
     LogMsg("WM_CLOSE: hwnd = %p, win_ctx = %p\n", hwnd, win_ctx);
     DestroyWindow(hwnd);
@@ -2308,8 +2343,13 @@ void CEF_CALLBACK browser_process_handler_on_context_initialized(
   }
 
 #if defined(OS_WIN)
-  create_browser_window(g_startup_url);
+  simple_updater_init();
+  browser_window_t* primary_win = create_browser_window(g_startup_url);
   simple_installer_report_launch_success();
+  if (primary_win && primary_win->main_hwnd) {
+    simple_updater_set_parent_hwnd(primary_win->main_hwnd);
+    simple_updater_check_async(primary_win->main_hwnd, 1 /* is_silent */);
+  }
 #else
   // Non-Windows fallback (views or generic single window)
   cef_window_info_t window_info = {};

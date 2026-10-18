@@ -1,0 +1,15 @@
+// Copyright (c) 2026 Lite Browser. All rights reserved.
+// Central Version Definition (Single Source of Truth)
+
+#ifndef CEF_TESTS_CEFSIMPLE_CAPI_VERSION_H_
+#define CEF_TESTS_CEFSIMPLE_CAPI_VERSION_H_
+
+#define LITE_BROWSER_VERSION_MAJOR 0
+#define LITE_BROWSER_VERSION_MINOR 2
+#define LITE_BROWSER_VERSION_PATCH 0
+#define LITE_BROWSER_VERSION_BUILD 0
+
+#define LITE_BROWSER_VERSION "0.2.0"
+#define LITE_BROWSER_VERSION_WIN "0.2.0.0"
+
+#endif  // CEF_TESTS_CEFSIMPLE_CAPI_VERSION_H_

@@ -334,6 +334,23 @@ body {
   color: var(--text-muted);
 }
 
+#menu-btn {
+  position: relative;
+}
+
+#menu-btn.has-update::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 7px;
+  height: 7px;
+  background-color: #3b82f6;
+  border-radius: 50%;
+  box-shadow: 0 0 6px rgba(59, 130, 246, 0.9);
+  pointer-events: none;
+}
+
 .nav-btn svg {
   width: 18px;
   height: 18px;

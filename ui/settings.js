@@ -4,18 +4,21 @@ document.addEventListener('DOMContentLoaded', () => {
   initThemeUI();
   requestDefaultBrowserStatus();
   requestOptimizationMode();
+  requestUpdateStatus();
 });
 
 // Auto refresh status when user returns focus to Lite Browser
 window.addEventListener('focus', () => {
   requestDefaultBrowserStatus();
   requestOptimizationMode();
+  requestUpdateStatus();
 });
 
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) {
     requestDefaultBrowserStatus();
     requestOptimizationMode();
+    requestUpdateStatus();
   }
 });
 
@@ -237,3 +240,93 @@ function renderOptimizationUI(savedMode, launchMode) {
     }
   }
 }
+
+// ==========================================================================
+// Auto-Updater Logic
+// ==========================================================================
+function requestUpdateStatus() {
+  window.location.href = 'http://ui-action/get-update-status';
+}
+
+function checkUpdateManual() {
+  const btn = document.getElementById('btn-updater-check');
+  if (btn) {
+    btn.disabled = true;
+    const span = btn.querySelector('span');
+    if (span) span.textContent = '확인 중...';
+  }
+  const text = document.getElementById('updater-status-text');
+  if (text) text.textContent = '업데이트 확인 중...';
+  const dot = document.getElementById('updater-dot');
+  if (dot) dot.className = 'updater-dot status-checking';
+
+  window.location.href = 'http://ui-action/check-update';
+}
+
+function restartForUpdate() {
+  const btn = document.getElementById('btn-updater-restart');
+  if (btn) {
+    btn.disabled = true;
+    const span = btn.querySelector('span');
+    if (span) span.textContent = '재시작 중...';
+  }
+  window.location.href = 'http://ui-action/restart-update';
+}
+
+window.updateAutoUpdaterStatus = function(info) {
+  if (!info) return;
+  const dot = document.getElementById('updater-dot');
+  const text = document.getElementById('updater-status-text');
+  const progBox = document.getElementById('updater-progress-container');
+  const progBar = document.getElementById('updater-progress-bar');
+  const checkBtn = document.getElementById('btn-updater-check');
+  const restartBtn = document.getElementById('btn-updater-restart');
+
+  if (text && info.message) {
+    text.textContent = info.message;
+  }
+
+  const verVal = document.getElementById('browser-version-val');
+  if (verVal && info.currentVersion) {
+    verVal.textContent = `${info.currentVersion} (64-bit)`;
+  }
+
+  if (dot) {
+    dot.className = 'updater-dot';
+    if (info.state === 'CHECKING') dot.classList.add('status-checking');
+    else if (info.state === 'UP_TO_DATE') dot.classList.add('status-up-to-date');
+    else if (info.state === 'DOWNLOADING') dot.classList.add('status-downloading');
+    else if (info.state === 'READY') dot.classList.add('status-ready');
+    else if (info.state === 'ERROR') dot.classList.add('status-error');
+    else dot.classList.add('status-idle');
+  }
+
+  if (info.state === 'DOWNLOADING') {
+    if (progBox) progBox.classList.remove('hide');
+    if (progBar) progBar.style.width = (info.progress || 0) + '%';
+    if (checkBtn) {
+      checkBtn.disabled = true;
+      const span = checkBtn.querySelector('span');
+      if (span) span.textContent = '다운로드 중...';
+    }
+    if (restartBtn) restartBtn.classList.add('hide');
+  } else if (info.state === 'READY') {
+    if (progBox) progBox.classList.add('hide');
+    if (checkBtn) checkBtn.classList.add('hide');
+    if (restartBtn) {
+      restartBtn.classList.remove('hide');
+      restartBtn.disabled = false;
+      const span = restartBtn.querySelector('span');
+      if (span) span.textContent = '지금 재시작하여 업데이트';
+    }
+  } else {
+    if (progBox) progBox.classList.add('hide');
+    if (checkBtn) {
+      checkBtn.classList.remove('hide');
+      checkBtn.disabled = (info.state === 'CHECKING');
+      const span = checkBtn.querySelector('span');
+      if (span) span.textContent = (info.state === 'CHECKING') ? '확인 중...' : '업데이트 확인';
+    }
+    if (restartBtn) restartBtn.classList.add('hide');
+  }
+};

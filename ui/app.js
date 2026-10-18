@@ -1818,7 +1818,21 @@ window.showToast = function(message, type = 'info', duration = 5000) {
     }, 250);
   }, duration);
 };
+window.updateAutoUpdaterStatus = function(info) {
+  if (!info) return;
+  const menuBtn = document.getElementById('menu-btn');
+  if (menuBtn) {
+    if (info.state === 'READY') {
+      menuBtn.classList.add('has-update');
+      menuBtn.setAttribute('title', '메뉴 (새 버전 업데이트 준비 완료)');
+    } else {
+      menuBtn.classList.remove('has-update');
+      menuBtn.setAttribute('title', '메뉴');
+    }
+  }
+};
 
-
-
+document.addEventListener('DOMContentLoaded', () => {
+  sendUiAction('http://ui-action/get-update-status');
+});
 
