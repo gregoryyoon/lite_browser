@@ -2,8 +2,8 @@
 param(
     [Parameter(Mandatory=$true)]
     [string]$Token,
-    [string]$TagName = "v0.2.2",
-    [string]$ReleaseName = "Lite Browser v0.2.2",
+    [string]$TagName = "v0.2.3",
+    [string]$ReleaseName = "Lite Browser v0.2.3",
     [string]$InstallerPath = "LiteBrowserInstaller.exe",
     [string]$ReleaseBody = ""
 )
@@ -38,9 +38,8 @@ if (-not $ReleaseBody) {
 ## Lite Browser $TagName
 
 ### 주요 변경 사항
-- **상단 툴바 전용 업데이트 뱃지 버튼 도입**: 백그라운드 다운로드 완료 시 더보기 버튼 좌측에 Lucide SVG ``circle-arrow-up`` 뱃지 및 펄스(Pulse) 애니메이션 자동 표시
-- **원클릭 즉시 재시작 및 업데이트 적용**: 뱃지 클릭 시 즉시 NSIS 사일런트(``/S``) 설치 인계 및 브라우저 자동 재실행
-- **3점(⋮) 메뉴 UX 정제**: 별도 알림 점(Dot) 및 업데이트 중복 메뉴를 제거하여 깔끔하고 미니멀한 메뉴 인터페이스 구축
+- **무음 사일런트 업데이트 (Zero-UAC) 도입**: Chrome / VS Code 표준의 사용자 단위(Per-User, ``%LOCALAPPDATA%\Programs\LiteBrowser``) 설치 방식으로 전면 개편하여 UAC 승인 창 없는 완전 무음 자동 업데이트 실현
+- **사용자 권한(HKCU) 레지스트리 일원화**: 기본 브라우저 설정 및 앱 등록을 Current User 레지스트리로 일원화하여 관리자 권한 없는 환경에서도 완벽 동작
 - **보안 및 무결성**: 최신 Authenticode SHA-256 전자 서명 및 DigiCert RFC 3161 공식 타임스탬프 적용
 "@
 }

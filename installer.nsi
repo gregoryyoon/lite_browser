@@ -4,10 +4,10 @@ Unicode true
 
 Name "Lite Browser"
 OutFile "LiteBrowserInstaller.exe"
-InstallDir "$PROGRAMFILES64\LiteBrowser"
+InstallDir "$LOCALAPPDATA\Programs\LiteBrowser"
 
-; Request application privileges for Windows Vista and higher
-RequestExecutionLevel admin
+; Request application privileges (Per-User installation - Zero UAC)
+RequestExecutionLevel user
 
 ; Interface Settings
 !define MUI_ABORTWARNING
@@ -45,15 +45,8 @@ VIAddVersionKey "FileVersion" "${LITE_VERSION_WIN}"
 VIAddVersionKey "ProductVersion" "${LITE_VERSION}"
 
 Section "Install"
-  ; Use 64-bit registry view for 64-bit application
-  SetRegView 64
-
-  ; Clean up legacy 32-bit (WOW6432Node) registry entries if they exist
-  SetRegView 32
-  DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser"
-  DeleteRegKey HKLM "Software\Clients\StartMenuInternet\LiteBrowser"
-  DeleteRegValue HKLM "Software\RegisteredApplications" "LiteBrowser"
-  DeleteRegKey HKLM "Software\Classes\LiteBrowserHTML"
+  ; Use Current User shell folders (Desktop, Start Menu) and 64-bit registry
+  SetShellVarContext current
   SetRegView 64
 
   SetOutPath "$INSTDIR"
@@ -97,56 +90,56 @@ Section "Install"
   ; Refresh Windows Shell icon cache immediately
   System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
 
-  ; Add uninstall information to Add/Remove Programs
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
+  ; Add uninstall information to Add/Remove Programs (Current User)
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
                   "DisplayName" "Lite Browser"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
                   "DisplayIcon" "$\"$INSTDIR\lite_browser.exe$\",0"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
                   "DisplayVersion" "${LITE_VERSION}"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
                   "UninstallString" "$\"$INSTDIR\uninstall.exe$\""
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
                   "QuietUninstallString" "$\"$INSTDIR\uninstall.exe$\" /S"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
                   "InstallLocation" "$\"$INSTDIR$\""
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
                   "Publisher" "Gregory Yoon"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
                   "HelpLink" "https://github.com/gregoryyoon/lite_browser"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
                   "URLInfoAbout" "https://github.com/gregoryyoon/lite_browser"
-  WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
+  WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
                   "EstimatedSize" 412589
-  WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
+  WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
                   "NoModify" 1
-  WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
+  WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser" \
                   "NoRepair" 1
 
-  ; Register Lite Browser capabilities for Windows Default Apps
-  WriteRegStr HKLM "Software\Clients\StartMenuInternet\LiteBrowser" "" "Lite Browser"
-  WriteRegStr HKLM "Software\Clients\StartMenuInternet\LiteBrowser\DefaultIcon" "" "$\"$INSTDIR\lite_browser.exe$\",0"
-  WriteRegStr HKLM "Software\Clients\StartMenuInternet\LiteBrowser\shell\open\command" "" "$\"$INSTDIR\lite_browser.exe$\" $\"%1$\""
+  ; Register Lite Browser capabilities for Windows Default Apps (Current User)
+  WriteRegStr HKCU "Software\Clients\StartMenuInternet\LiteBrowser" "" "Lite Browser"
+  WriteRegStr HKCU "Software\Clients\StartMenuInternet\LiteBrowser\DefaultIcon" "" "$\"$INSTDIR\lite_browser.exe$\",0"
+  WriteRegStr HKCU "Software\Clients\StartMenuInternet\LiteBrowser\shell\open\command" "" "$\"$INSTDIR\lite_browser.exe$\" $\"%1$\""
 
-  WriteRegStr HKLM "Software\Clients\StartMenuInternet\LiteBrowser\Capabilities" "ApplicationName" "Lite Browser"
-  WriteRegStr HKLM "Software\Clients\StartMenuInternet\LiteBrowser\Capabilities" "ApplicationIcon" "$\"$INSTDIR\lite_browser.exe$\",0"
-  WriteRegStr HKLM "Software\Clients\StartMenuInternet\LiteBrowser\Capabilities" "ApplicationDescription" "Lite Browser - Fast, lightweight, AI-integrated modern browser."
+  WriteRegStr HKCU "Software\Clients\StartMenuInternet\LiteBrowser\Capabilities" "ApplicationName" "Lite Browser"
+  WriteRegStr HKCU "Software\Clients\StartMenuInternet\LiteBrowser\Capabilities" "ApplicationIcon" "$\"$INSTDIR\lite_browser.exe$\",0"
+  WriteRegStr HKCU "Software\Clients\StartMenuInternet\LiteBrowser\Capabilities" "ApplicationDescription" "Lite Browser - Fast, lightweight, AI-integrated modern browser."
 
-  WriteRegStr HKLM "Software\Clients\StartMenuInternet\LiteBrowser\Capabilities\URLAssociations" "http" "LiteBrowserHTML"
-  WriteRegStr HKLM "Software\Clients\StartMenuInternet\LiteBrowser\Capabilities\URLAssociations" "https" "LiteBrowserHTML"
+  WriteRegStr HKCU "Software\Clients\StartMenuInternet\LiteBrowser\Capabilities\URLAssociations" "http" "LiteBrowserHTML"
+  WriteRegStr HKCU "Software\Clients\StartMenuInternet\LiteBrowser\Capabilities\URLAssociations" "https" "LiteBrowserHTML"
 
-  WriteRegStr HKLM "Software\Clients\StartMenuInternet\LiteBrowser\Capabilities\FileAssociations" ".htm" "LiteBrowserHTML"
-  WriteRegStr HKLM "Software\Clients\StartMenuInternet\LiteBrowser\Capabilities\FileAssociations" ".html" "LiteBrowserHTML"
-  WriteRegStr HKLM "Software\Clients\StartMenuInternet\LiteBrowser\Capabilities\FileAssociations" ".pdf" "LiteBrowserHTML"
-  WriteRegStr HKLM "Software\Clients\StartMenuInternet\LiteBrowser\Capabilities\FileAssociations" ".svg" "LiteBrowserHTML"
+  WriteRegStr HKCU "Software\Clients\StartMenuInternet\LiteBrowser\Capabilities\FileAssociations" ".htm" "LiteBrowserHTML"
+  WriteRegStr HKCU "Software\Clients\StartMenuInternet\LiteBrowser\Capabilities\FileAssociations" ".html" "LiteBrowserHTML"
+  WriteRegStr HKCU "Software\Clients\StartMenuInternet\LiteBrowser\Capabilities\FileAssociations" ".pdf" "LiteBrowserHTML"
+  WriteRegStr HKCU "Software\Clients\StartMenuInternet\LiteBrowser\Capabilities\FileAssociations" ".svg" "LiteBrowserHTML"
 
-  WriteRegStr HKLM "Software\RegisteredApplications" "LiteBrowser" "Software\Clients\StartMenuInternet\LiteBrowser\Capabilities"
+  WriteRegStr HKCU "Software\RegisteredApplications" "LiteBrowser" "Software\Clients\StartMenuInternet\LiteBrowser\Capabilities"
 
-  ; Register ProgID
-  WriteRegStr HKLM "Software\Classes\LiteBrowserHTML" "" "Lite Browser Document"
-  WriteRegStr HKLM "Software\Classes\LiteBrowserHTML" "FriendlyTypeName" "Lite Browser Document"
-  WriteRegStr HKLM "Software\Classes\LiteBrowserHTML\DefaultIcon" "" "$\"$INSTDIR\lite_browser.exe$\",0"
-  WriteRegStr HKLM "Software\Classes\LiteBrowserHTML\shell\open\command" "" "$\"$INSTDIR\lite_browser.exe$\" $\"%1$\""
+  ; Register ProgID (Current User)
+  WriteRegStr HKCU "Software\Classes\LiteBrowserHTML" "" "Lite Browser Document"
+  WriteRegStr HKCU "Software\Classes\LiteBrowserHTML" "FriendlyTypeName" "Lite Browser Document"
+  WriteRegStr HKCU "Software\Classes\LiteBrowserHTML\DefaultIcon" "" "$\"$INSTDIR\lite_browser.exe$\",0"
+  WriteRegStr HKCU "Software\Classes\LiteBrowserHTML\shell\open\command" "" "$\"$INSTDIR\lite_browser.exe$\" $\"%1$\""
   
   ; If silent installation (auto-update), relaunch lite_browser.exe
   ${If} ${Silent}
@@ -155,6 +148,7 @@ Section "Install"
 SectionEnd
 
 Section "Uninstall"
+  SetShellVarContext current
   SetRegView 64
 
   Delete "$DESKTOP\Lite Browser.lnk"
@@ -187,16 +181,9 @@ Section "Uninstall"
   
   RMDir "$INSTDIR"
   
-  ; Remove 64-bit registry entries
-  DeleteRegKey HKLM "Software\Clients\StartMenuInternet\LiteBrowser"
-  DeleteRegValue HKLM "Software\RegisteredApplications" "LiteBrowser"
-  DeleteRegKey HKLM "Software\Classes\LiteBrowserHTML"
-  DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser"
-
-  ; Clean up legacy 32-bit registry entries if present
-  SetRegView 32
-  DeleteRegKey HKLM "Software\Clients\StartMenuInternet\LiteBrowser"
-  DeleteRegValue HKLM "Software\RegisteredApplications" "LiteBrowser"
-  DeleteRegKey HKLM "Software\Classes\LiteBrowserHTML"
-  DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser"
+  ; Remove HKCU registry entries (Current User)
+  DeleteRegKey HKCU "Software\Clients\StartMenuInternet\LiteBrowser"
+  DeleteRegValue HKCU "Software\RegisteredApplications" "LiteBrowser"
+  DeleteRegKey HKCU "Software\Classes\LiteBrowserHTML"
+  DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser"
 SectionEnd
