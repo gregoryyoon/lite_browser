@@ -8,6 +8,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <commdlg.h>
+#include <ctype.h>
+
+#pragma comment(lib, "comdlg32.lib")
 
 #include "tests/cefsimple_capi/browser_context.h"
 #include "tests/cefsimple_capi/simple_handler.h"
@@ -39,6 +43,10 @@ static download_record_t g_download_records[MAX_DOWNLOAD_RECORDS];
 static int g_download_record_count = 0;
 static CRITICAL_SECTION g_download_cs;
 static int g_download_cs_initialized = 0;
+
+static char g_pending_save_as_url[4096] = {0};
+static char g_pending_save_as_path[MAX_PATH] = {0};
+static ULONGLONG g_pending_save_as_tick = 0;
 
 static void EnsureCriticalSectionInitialized(void) {
   if (!g_download_cs_initialized) {
@@ -574,7 +582,47 @@ int CEF_CALLBACK download_handler_on_before_download(
   }
 
   char full_path[MAX_PATH] = {0};
-  GenerateNonConflictingPath(dir, name_utf8, full_path, sizeof(full_path));
+  int is_custom_save_as = 0;
+
+  EnsureCriticalSectionInitialized();
+  EnterCriticalSection(&g_download_cs);
+  ULONGLONG now = GetTickCount64();
+  if (g_pending_save_as_tick > 0 && (now - g_pending_save_as_tick) <= 15000ULL) {
+    char item_url[4096] = {0};
+    if (download_item && download_item->is_valid(download_item)) {
+      cef_string_userfree_t u = download_item->get_url(download_item);
+      if (u) {
+        cef_string_utf8_t u8 = {};
+        cef_string_to_utf8(u->str, u->length, &u8);
+        if (u8.str) strncpy(item_url, u8.str, sizeof(item_url) - 1);
+        cef_string_utf8_clear(&u8);
+        cef_string_userfree_free(u);
+      }
+    }
+    if (g_pending_save_as_path[0] != '\0') {
+      strncpy(full_path, g_pending_save_as_path, sizeof(full_path) - 1);
+      full_path[sizeof(full_path) - 1] = '\0';
+      is_custom_save_as = 1;
+
+      const char *p = strrchr(full_path, '\\');
+      if (!p) p = strrchr(full_path, '/');
+      if (p) {
+        strncpy(name_utf8, p + 1, sizeof(name_utf8) - 1);
+        name_utf8[sizeof(name_utf8) - 1] = '\0';
+      }
+
+      g_pending_save_as_url[0] = '\0';
+      g_pending_save_as_path[0] = '\0';
+      g_pending_save_as_tick = 0;
+    }
+  }
+  LeaveCriticalSection(&g_download_cs);
+
+  if (!is_custom_save_as) {
+    GenerateNonConflictingPath(dir, name_utf8, full_path, sizeof(full_path));
+  } else {
+    DeleteFileA(full_path);
+  }
 
   cef_string_t cef_path = {};
   cef_string_from_utf8(full_path, strlen(full_path), &cef_path);
@@ -959,4 +1007,202 @@ int download_manager_cancel(uint32_t id) {
   LeaveCriticalSection(&g_download_cs);
   if (ok) BroadcastDownloadUpdate();
   return ok;
+}
+
+void download_manager_set_pending_save_as(const char *url, const char *target_path) {
+  EnsureCriticalSectionInitialized();
+  EnterCriticalSection(&g_download_cs);
+  if (url) {
+    strncpy(g_pending_save_as_url, url, sizeof(g_pending_save_as_url) - 1);
+    g_pending_save_as_url[sizeof(g_pending_save_as_url) - 1] = '\0';
+  } else {
+    g_pending_save_as_url[0] = '\0';
+  }
+  if (target_path) {
+    strncpy(g_pending_save_as_path, target_path, sizeof(g_pending_save_as_path) - 1);
+    g_pending_save_as_path[sizeof(g_pending_save_as_path) - 1] = '\0';
+  } else {
+    g_pending_save_as_path[0] = '\0';
+  }
+  g_pending_save_as_tick = GetTickCount64();
+  LeaveCriticalSection(&g_download_cs);
+}
+
+static void url_decode_local(const char *src, char *dst, size_t dst_len) {
+  size_t si = 0, di = 0;
+  while (src[si] != '\0' && di + 1 < dst_len) {
+    if (src[si] == '%' && isxdigit((unsigned char)src[si + 1]) && isxdigit((unsigned char)src[si + 2])) {
+      char hex[3] = { src[si + 1], src[si + 2], '\0' };
+      dst[di++] = (char)strtol(hex, NULL, 16);
+      si += 3;
+    } else if (src[si] == '+') {
+      dst[di++] = ' ';
+      si++;
+    } else {
+      dst[di++] = src[si++];
+    }
+  }
+  dst[di] = '\0';
+}
+
+static void sanitize_filename(const char *src, char *dst, size_t dst_len) {
+  size_t j = 0;
+  for (size_t i = 0; src[i] != '\0' && j + 1 < dst_len; i++) {
+    char c = src[i];
+    if (c == '<' || c == '>' || c == ':' || c == '"' || c == '/' ||
+        c == '\\' || c == '|' || c == '?' || c == '*' || (unsigned char)c < 32) {
+      dst[j++] = '_';
+    } else {
+      dst[j++] = c;
+    }
+  }
+  while (j > 0 && (dst[j - 1] == ' ' || dst[j - 1] == '.')) {
+    j--;
+  }
+  dst[j] = '\0';
+}
+
+int simple_download_trigger_save_as(HWND parent_hwnd, cef_browser_t *browser, const char *current_url, const char *page_title) {
+  if (!browser || !current_url || current_url[0] == '\0') {
+    return 0;
+  }
+
+  // Skip internal scheme pages
+  if (strncmp(current_url, "lite://", 7) == 0 ||
+      strncmp(current_url, "about:", 6) == 0 ||
+      strncmp(current_url, "devtools://", 11) == 0 ||
+      strncmp(current_url, "chrome://", 9) == 0) {
+    return 0;
+  }
+
+  const char *download_url = current_url;
+  if (strncmp(download_url, "view-source:", 12) == 0) {
+    download_url += 12;
+  }
+
+  char url_copy[4096] = {0};
+  strncpy(url_copy, download_url, sizeof(url_copy) - 1);
+
+  // Strip query and fragment
+  char *q = strchr(url_copy, '?');
+  if (q) *q = '\0';
+  char *h = strchr(url_copy, '#');
+  if (h) *h = '\0';
+
+  // Strip trailing slashes
+  size_t ulen = strlen(url_copy);
+  while (ulen > 0 && url_copy[ulen - 1] == '/') {
+    url_copy[--ulen] = '\0';
+  }
+
+  char candidate_name[MAX_PATH] = {0};
+  char candidate_ext[64] = {0};
+
+  char *slash = strrchr(url_copy, '/');
+  if (slash && strlen(slash + 1) > 0) {
+    char raw_segment[MAX_PATH] = {0};
+    url_decode_local(slash + 1, raw_segment, sizeof(raw_segment));
+    char clean_segment[MAX_PATH] = {0};
+    sanitize_filename(raw_segment, clean_segment, sizeof(clean_segment));
+
+    char *dot = strrchr(clean_segment, '.');
+    if (dot && strlen(dot + 1) > 0 && strlen(dot + 1) <= 10) {
+      strncpy(candidate_name, clean_segment, sizeof(candidate_name) - 1);
+      strncpy(candidate_ext, dot + 1, sizeof(candidate_ext) - 1);
+    }
+  }
+
+  // If no extension found or candidate name is empty, generate from title + .html
+  if (candidate_name[0] == '\0') {
+    char clean_title[MAX_PATH] = {0};
+    if (page_title && page_title[0] != '\0') {
+      sanitize_filename(page_title, clean_title, sizeof(clean_title) - 10);
+    }
+    if (clean_title[0] == '\0') {
+      strcpy(clean_title, "page");
+    }
+    snprintf(candidate_name, sizeof(candidate_name), "%s.html", clean_title);
+    strcpy(candidate_ext, "html");
+  }
+
+  // Convert extension to lowercase for comparison
+  char ext_lower[64] = {0};
+  for (size_t i = 0; candidate_ext[i] != '\0' && i < 63; i++) {
+    ext_lower[i] = (char)tolower((unsigned char)candidate_ext[i]);
+  }
+
+  // Construct double-null-terminated filters
+  WCHAR wfilter[512] = {0};
+  if (strcmp(ext_lower, "c") == 0 || strcmp(ext_lower, "h") == 0 ||
+      strcmp(ext_lower, "cpp") == 0 || strcmp(ext_lower, "hpp") == 0) {
+    const WCHAR f[] = L"C/C++ Source File (*.c;*.h;*.cpp)\0*.c;*.h;*.cpp\0모든 파일 (*.*)\0*.*\0\0";
+    memcpy(wfilter, f, sizeof(f));
+  } else if (strcmp(ext_lower, "txt") == 0 || strcmp(ext_lower, "log") == 0 || strcmp(ext_lower, "ini") == 0) {
+    const WCHAR f[] = L"텍스트 파일 (*.txt)\0*.txt\0모든 파일 (*.*)\0*.*\0\0";
+    memcpy(wfilter, f, sizeof(f));
+  } else if (strcmp(ext_lower, "md") == 0 || strcmp(ext_lower, "markdown") == 0) {
+    const WCHAR f[] = L"Markdown 문서 (*.md)\0*.md;*.markdown\0모든 파일 (*.*)\0*.*\0\0";
+    memcpy(wfilter, f, sizeof(f));
+  } else if (strcmp(ext_lower, "doc") == 0 || strcmp(ext_lower, "docx") == 0) {
+    const WCHAR f[] = L"Word 문서 (*.doc;*.docx)\0*.doc;*.docx\0모든 파일 (*.*)\0*.*\0\0";
+    memcpy(wfilter, f, sizeof(f));
+  } else if (strcmp(ext_lower, "json") == 0) {
+    const WCHAR f[] = L"JSON 파일 (*.json)\0*.json\0모든 파일 (*.*)\0*.*\0\0";
+    memcpy(wfilter, f, sizeof(f));
+  } else if (strcmp(ext_lower, "html") == 0 || strcmp(ext_lower, "htm") == 0) {
+    const WCHAR f[] = L"웹페이지 (*.html;*.htm)\0*.html;*.htm\0모든 파일 (*.*)\0*.*\0\0";
+    memcpy(wfilter, f, sizeof(f));
+  } else {
+    WCHAR wext[64] = {0};
+    MultiByteToWideChar(CP_UTF8, 0, ext_lower, -1, wext, 63);
+    int pos = 0;
+    pos += swprintf_s(wfilter + pos, 512 - pos, L"%s 파일 (*.%s)", wext, wext) + 1;
+    pos += swprintf_s(wfilter + pos, 512 - pos, L"*.%s", wext) + 1;
+    pos += swprintf_s(wfilter + pos, 512 - pos, L"모든 파일 (*.*)") + 1;
+    pos += swprintf_s(wfilter + pos, 512 - pos, L"*.*") + 1;
+    wfilter[pos] = L'\0';
+  }
+
+  WCHAR wdef_ext[32] = {0};
+  MultiByteToWideChar(CP_UTF8, 0, ext_lower, -1, wdef_ext, 31);
+
+  WCHAR wfile_path[MAX_PATH] = {0};
+  MultiByteToWideChar(CP_UTF8, 0, candidate_name, -1, wfile_path, MAX_PATH - 1);
+
+  char def_dir[MAX_PATH] = {0};
+  GetDefaultDownloadsDirectory(def_dir, sizeof(def_dir));
+  WCHAR winitial_dir[MAX_PATH] = {0};
+  MultiByteToWideChar(CP_UTF8, 0, def_dir, -1, winitial_dir, MAX_PATH - 1);
+
+  OPENFILENAMEW ofn = {0};
+  ofn.lStructSize = sizeof(OPENFILENAMEW);
+  ofn.hwndOwner = parent_hwnd;
+  ofn.lpstrFilter = wfilter;
+  ofn.nFilterIndex = 1;
+  ofn.lpstrFile = wfile_path;
+  ofn.nMaxFile = MAX_PATH;
+  ofn.lpstrInitialDir = winitial_dir;
+  ofn.lpstrDefExt = wdef_ext;
+  ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_EXPLORER | OFN_ENABLESIZING;
+
+  if (!GetSaveFileNameW(&ofn)) {
+    return 0; // User cancelled
+  }
+
+  char chosen_path[MAX_PATH] = {0};
+  WideCharToMultiByte(CP_UTF8, 0, wfile_path, -1, chosen_path, sizeof(chosen_path) - 1, NULL, NULL);
+
+  download_manager_set_pending_save_as(download_url, chosen_path);
+
+  cef_browser_host_t *host = browser->get_host(browser);
+  if (host) {
+    cef_string_t cef_url = {};
+    cef_string_from_utf8(download_url, strlen(download_url), &cef_url);
+    host->start_download(host, &cef_url);
+    cef_string_clear(&cef_url);
+    host->base.release(&host->base);
+    return 1;
+  }
+
+  return 0;
 }

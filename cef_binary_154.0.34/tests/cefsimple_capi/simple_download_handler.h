@@ -39,5 +39,7 @@ int download_manager_resume(uint32_t id);
 int download_manager_cancel(uint32_t id);
 void BroadcastDownloadUpdate(void);
 int simple_download_is_bubble_expected(void);
+void download_manager_set_pending_save_as(const char *url, const char *target_path);
+int simple_download_trigger_save_as(HWND parent_hwnd, cef_browser_t *browser, const char *current_url, const char *page_title);
 
 #endif // CEF_TESTS_CEFSIMPLE_CAPI_SIMPLE_DOWNLOAD_HANDLER_H_

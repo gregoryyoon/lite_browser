@@ -2767,3 +2767,51 @@ Chromium의 불완전한 내부 탭 종료 동작을 차단하고, `Ctrl + F4` �
 - **실기 검증**:
   - 웹페이지 본문 및 상단 툴바 어디서든 `Ctrl + F4` 또는 `Ctrl + W`를 입력했을 때 현재 활성 탭이 깨끗하게 닫히고 이전 탭으로 부드럽게 화면과 포커스가 전환됨을 최종 확인.
 
+---
+
+## 75. 우클릭 컨텍스트 메뉴 '다른 이름으로 저장' 기능 추가 및 원본 다운로드 파이프라인 연동 (Add 'Save As...' to Context Menu & Download Pipeline Integration)
+
+### 75.1 개요
+웹페이지 마우스 우클릭 시 노출되는 네이티브 컨텍스트 메뉴에 **'다른 이름으로 저장...'** 메뉴를 추가하고, Windows 표준 파일 저장 대화상자(`GetSaveFileNameW`) 및 LiteBrowser의 정규 다운로드 매니저 파이프라인을 연동했습니다.  
+또한 웹 브라우저 표준 단축키인 **`Ctrl + S`**로도 동일한 기능이 트리거되도록 구현하여, `.txt`, `.md`, `.doc`, `.json`, `.c` 등 텍스트 및 소스 코드 파일 URL 접속 시 해당 콘텐츠를 원본 그대로 다운로드할 수 있도록 완성했습니다.
+
+### 75.2 주요 구현 내역
+1. **컨텍스트 메뉴 항목 배치 및 상태 제어 (`simple_handler.c`)**:
+   - 메뉴 항목의 시각적 순서를 정돈하여 **'인쇄...'** 메뉴 바로 위에 **'다른 이름으로 저장...'** (`3005`)을 추가하고, **'인쇄...'** 바로 아래에 구분선(`MF_SEPARATOR`)을 배치:
+     - `뒤로 가기` / `앞으로 가기` / `새로고침`
+     - *(구분선)*
+     - **`다른 이름으로 저장...`**
+     - **`인쇄...`**
+     - *(구분선)*
+     - `페이지 소스 보기`
+     - *(구분선)*
+     - `검사 (Inspect)`
+   - 내부 시스템 페이지(`lite://`, `about:blank`, `devtools://`, `chrome://` 등)에서는 무분별한 다운로드 오류를 방지하기 위해 메뉴 항목을 회색 비활성화(`MF_GRAYED`) 처리.
+2. **웹페이지 표준 단축키 `Ctrl + S` 연동 (`keyboard_handler_on_pre_key_event`)**:
+   - CEF 키보드 핸들러의 `on_pre_key_event`에서 `Ctrl + S` 키 이벤트를 감지하여 Chromium의 기본 Save As 다이얼로그 가속기를 가로채고(`return 1`), 현재 활성 브라우저(분할 화면 활성 창 포함)의 저장 트리거 루틴으로 일관되게 연결.
+3. **지능형 파일명/확장자 추출 및 Windows 파일 저장 대화상자 (`simple_download_handler.c`)**:
+   - `simple_download_trigger_save_as` 함수를 모듈화하여 URL 구조와 페이지 특성을 분석:
+     - URL 경로에서 파일 확장자 감지 (`.c`, `.h`, `.cpp`, `.txt`, `.md`, `.doc`, `.docx`, `.json`, `.html`, `.xml`, `.pdf` 등) 및 전용 파일 필터와 기본 확장자 자동 지정.
+     - 쿼리 스트링(`?`) 및 해시(`#`) 파싱 분리 및 퍼센트 인코딩(URL 디코딩) 복원.
+     - 확장자가 없는 일반 웹페이지의 경우 현재 페이지 제목(`page_title`)의 특수문자를 살균(`_` 치환)하여 `[페이지제목].html`을 기본 제안 파일명으로 설정.
+   - `GetSaveFileNameW`를 통해 사용자가 원하는 폴더 및 파일명을 선택할 수 있도록 하며, 기본 저장 위치는 사용자의 `Downloads` 폴더로 지정.
+4. **일반 파일 다운로드 절차 및 원본 내용 그대로 저장 연동**:
+   - 사용자가 대화상자에서 지정한 대상 경로를 `download_manager_set_pending_save_as`로 큐잉한 뒤 CEF의 `host->start_download(host, &cef_url)`를 호출.
+   - `cef_download_handler_t::on_before_download`에서 대화상자 지정 경로를 감지하여 해당 경로로 저장을 컨펌(`callback->cont`).
+   - 상단 툴바 다운로드 버튼 배지, 실시간 다운로드 속도/진행률 표시, 완료 시 다운로드 팝업 목록 노출 및 `downloads.json` 히스토리 영구 저장까지 기존 다운로드 매니저와 100% 동일한 라이프사이클로 동작.
+   - `.txt`, `.md`, `.doc`, `.json`, `.c` 등의 URL은 CEF 네트워크 엔진을 통해 서버 원본 바이트 그대로 로컬 파일에 기록.
+
+### 75.3 관련 소스 코드
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_download_handler.h`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_download_handler.h)
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_download_handler.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_download_handler.c)
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.c)
+
+### 75.4 빌드 및 검증 결과
+- **디버그 빌드**: `cef_binary_154.0.34` MSBuild Debug 타깃 빌드 성공 (`Exit code 0, 경고 0개, 오류 0개`).
+- **실기 검증**:
+  - 웹페이지 우클릭 시 '인쇄...' 바로 위에 '다른 이름으로 저장...' 표시 및 '인쇄...' 바로 아래 분리바 노출 확인.
+  - 내부 시스템 페이지(`lite://` 등)에서 메뉴가 비활성화(회색)됨을 확인.
+  - 마우스 클릭 및 `Ctrl + S` 단축키 입력 시 파일 저장 대화상자가 표시되며, URL 확장자/제목에 따른 기본 파일명이 정확히 제안됨을 확인.
+  - 파일 저장 시 상단 다운로드 배지 및 팝업에 정상 등록되고 파일 내용이 원본 그대로 다운로드됨을 확인.
+
+

@@ -3688,11 +3688,37 @@ void CEF_CALLBACK context_menu_on_before_context_menu(
         int can_back = browser->can_go_back(browser);
         int can_forward = browser->can_go_forward(browser);
         
+        char cur_page_url[4096] = {0};
+        if (frame) {
+          cef_string_userfree_t u = frame->get_url(frame);
+          if (u) {
+            cef_string_utf8_t u8 = {};
+            cef_string_to_utf8(u->str, u->length, &u8);
+            if (u8.str) strncpy(cur_page_url, u8.str, sizeof(cur_page_url) - 1);
+            cef_string_utf8_clear(&u8);
+            cef_string_userfree_free(u);
+          }
+        }
+        if (cur_page_url[0] == '\0' && ctx_handler->parent && ctx_handler->parent->window_ctx) {
+          browser_window_t* w = ctx_handler->parent->window_ctx;
+          if (w->active_tab_index >= 0 && w->active_tab_index < w->tab_count) {
+            strncpy(cur_page_url, w->tabs[w->active_tab_index].url, sizeof(cur_page_url) - 1);
+          }
+        }
+
+        int can_save = (cur_page_url[0] != '\0' &&
+                        strncmp(cur_page_url, "lite://", 7) != 0 &&
+                        strncmp(cur_page_url, "about:", 6) != 0 &&
+                        strncmp(cur_page_url, "devtools://", 11) != 0 &&
+                        strncmp(cur_page_url, "chrome://", 9) != 0);
+
         AppendMenuW(hMenu, MF_STRING | (can_back ? 0 : MF_GRAYED), MENU_ID_BACK, L"뒤로 가기");
         AppendMenuW(hMenu, MF_STRING | (can_forward ? 0 : MF_GRAYED), MENU_ID_FORWARD, L"앞으로 가기");
         AppendMenuW(hMenu, MF_STRING, MENU_ID_RELOAD, L"새로고침");
         AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+        AppendMenuW(hMenu, MF_STRING | (can_save ? 0 : MF_GRAYED), 3005, L"다른 이름으로 저장...");
         AppendMenuW(hMenu, MF_STRING, MENU_ID_PRINT, L"인쇄...");
+        AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
         AppendMenuW(hMenu, MF_STRING, MENU_ID_VIEW_SOURCE, L"페이지 소스 보기");
         AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
         AppendMenuW(hMenu, MF_STRING, MENU_ID_USER_FIRST, L"검사 (Inspect)");
@@ -3744,6 +3770,27 @@ void CEF_CALLBACK context_menu_on_before_context_menu(
         browser->reload(browser);
       } else if (cmd == MENU_ID_PRINT) {
         host->print(host);
+      } else if (cmd == 3005) {
+        browser_window_t* win_ctx = ctx_handler->parent->window_ctx;
+        const char* page_title = (win_ctx && win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count)
+                                     ? win_ctx->tabs[win_ctx->active_tab_index].title
+                                     : "";
+        char cur_url[4096] = {0};
+        if (frame) {
+          cef_string_userfree_t u = frame->get_url(frame);
+          if (u) {
+            cef_string_utf8_t u8 = {};
+            cef_string_to_utf8(u->str, u->length, &u8);
+            if (u8.str) strncpy(cur_url, u8.str, sizeof(cur_url) - 1);
+            cef_string_utf8_clear(&u8);
+            cef_string_userfree_free(u);
+          }
+        }
+        if (cur_url[0] == '\0' && win_ctx && win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+          strncpy(cur_url, win_ctx->tabs[win_ctx->active_tab_index].url, sizeof(cur_url) - 1);
+        }
+        HWND parent_wnd = (win_ctx && win_ctx->main_hwnd) ? win_ctx->main_hwnd : hwnd;
+        simple_download_trigger_save_as(parent_wnd, browser, cur_url, page_title);
       } else if (cmd == 3001) {
         if (link_url_str) {
           browser_window_t* win_ctx = ctx_handler->parent->window_ctx;
@@ -4153,6 +4200,36 @@ int CEF_CALLBACK keyboard_handler_on_pre_key_event(
         CloseTab(win_ctx, target_id);
       }
       return 1; // Handled! Suppress default Chromium internal accelerator.
+    }
+
+    // Ctrl + S: Save As...
+    if (has_ctrl && !has_shift && (event->windows_key_code == 'S' || event->windows_key_code == 's')) {
+      if (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+        tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
+        cef_browser_t* target_browser = (active_tab->is_split && active_tab->active_split == 1 && active_tab->right_browser)
+                                            ? active_tab->right_browser
+                                            : active_tab->browser;
+        if (target_browser) {
+          cef_frame_t* target_frame = target_browser->get_main_frame(target_browser);
+          char cur_url[4096] = {0};
+          if (target_frame) {
+            cef_string_userfree_t u = target_frame->get_url(target_frame);
+            if (u) {
+              cef_string_utf8_t u8 = {};
+              cef_string_to_utf8(u->str, u->length, &u8);
+              if (u8.str) strncpy(cur_url, u8.str, sizeof(cur_url) - 1);
+              cef_string_utf8_clear(&u8);
+              cef_string_userfree_free(u);
+            }
+            target_frame->base.release(&target_frame->base);
+          }
+          if (cur_url[0] == '\0') {
+            strncpy(cur_url, active_tab->url, sizeof(cur_url) - 1);
+          }
+          simple_download_trigger_save_as(win_ctx->main_hwnd, target_browser, cur_url, active_tab->title);
+        }
+      }
+      return 1; // Handled! Suppress default Chromium accelerator.
     }
   }
 
