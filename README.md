@@ -9,12 +9,14 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/gregoryyoon/lite_browser/releases/latest"><img src="https://img.shields.io/badge/Release-v0.2.4-brightgreen.svg?logo=github&logoColor=white" alt="Latest Release v0.2.4" /></a>
   <a href="https://github.com/gregoryyoon/lite_browser"><img src="https://img.shields.io/badge/Platform-Windows%2064--bit-0078D4.svg?logo=windows&logoColor=white" alt="Platform Windows 64-bit" /></a>
   <a href="https://github.com/gregoryyoon/lite_browser"><img src="https://img.shields.io/badge/Language-C11%20%2F%20Pure%20C%20API-00599C.svg?logo=c&logoColor=white" alt="Language C11 / Pure Win32 C CAPI" /></a>
   <a href="https://github.com/gregoryyoon/lite_browser"><img src="https://img.shields.io/badge/CEF-154.0.34%20(Chromium%20154)-FF6F00.svg?logo=googlechrome&logoColor=white" alt="CEF 154.0.34 / Chromium 154" /></a>
   <a href="https://github.com/gregoryyoon/lite_browser"><img src="https://img.shields.io/badge/UI-Bento%20Grid%20%2F%20Lucide%20SVG-F7DF1E.svg?logo=javascript&logoColor=black" alt="Bento Grid & Lucide SVG" /></a>
   <a href="https://github.com/gregoryyoon/lite_browser"><img src="https://img.shields.io/badge/Optimization-ThinLTO%20%2F%20LTCG-orange.svg" alt="ThinLTO & LTCG Whole Program Optimization" /></a>
   <a href="https://github.com/gregoryyoon/lite_browser"><img src="https://img.shields.io/badge/Security-Authenticode%20SHA--256-success.svg" alt="Authenticode SHA-256 Code Signed" /></a>
+  <a href="https://github.com/gregoryyoon/lite_browser"><img src="https://img.shields.io/badge/Updater-Zero--UAC%20Per--User-blueviolet.svg" alt="Zero-UAC Silent Updater" /></a>
   <a href="https://github.com/gregoryyoon/lite_browser"><img src="https://img.shields.io/badge/Build-CMake%20%2F%20MSVC-064F8C.svg?logo=cmake&logoColor=white" alt="Build CMake & MSVC" /></a>
   <a href="https://github.com/gregoryyoon/lite_browser"><img src="https://img.shields.io/badge/Installer-NSIS%203.x-green.svg" alt="Installer NSIS 3.x" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-BSD%203--Clause-blue.svg" alt="License BSD-3-Clause" /></a>
@@ -26,7 +28,7 @@
 
 **Lite Browser**는 C++ 런타임 추상화, 스마트 포인터 및 묵직한 프레임워크 클래스에 의존하지 않고, **순수 C 언어(C11)**로 작성된 CEF (Chromium Embedded Framework) C API와 Windows Win32 Native API를 직결하여 초고속 시동 속도와 극상의 메모리 효율을 달성한 64-bit 하이브리드 데스크톱 웹 브라우저입니다.
 
-HTML5/CSS3/JavaScript 기반의 현대적 **벤토 그리드(Bento Grid) 웹 UI**와 순수 Win32 기반의 **멀티 브라우저 HWND 임베딩 아키텍처**를 결합하여, **듀얼 화면 분할(Split-View)**, **실시간 탭 분리(Reparenting)**, **Windows 10/11 기본 브라우저 연동 및 전용 설정 대시보드(`lite://settings`)**, **성능 모드 전환(실행 속도 우선 vs 메모리 절감 우선)**, **스마트 북마크/지능형 옴니박스 UX(`lite://favorites`)**, **다운로드 관리자(`lite://downloads`)**, 그리고 **독립 도킹 AI 에이전트 사이드패널**을 제공합니다.
+HTML5/CSS3/JavaScript 기반의 현대적 **벤토 그리드(Bento Grid) 웹 UI**와 순수 Win32 기반의 **멀티 브라우저 HWND 임베딩 아키텍처**를 결합하여, **듀얼 화면 분할(Split-View)**, **실시간 탭 분리(Reparenting)**, **Windows 10/11 기본 브라우저 연동 및 전용 설정 대시보드(`lite://settings`)**, **성능 모드 전환(실행 속도 우선 vs 메모리 절감 우선)**, **Zero-UAC 무음 자동 업데이트**, **웹 권한 관리(Permission Handler)**, **다른 이름으로 저장(`Ctrl+S`)**, **스마트 북마크/지능형 옴니박스 UX(`lite://favorites`)**, **다운로드 관리자(`lite://downloads`)**, 그리고 **독립 도킹 AI 에이전트 사이드패널**을 제공합니다.
 
 ---
 
@@ -64,7 +66,7 @@ HTML5/CSS3/JavaScript 기반의 현대적 **벤토 그리드(Bento Grid) 웹 UI*
   - Windows 레지스트리(`HKCU\Software\Classes\LiteBrowserHTML`, `StartMenuInternet`, `Capabilities`, `URLAssociations`, `FileAssociations`) 표준 등록 엔진(`default_browser.c`) 탑재.
   - 클릭 한 번으로 Windows 기본 앱 설정 창(`ms-settings:defaultapps`)을 자동 팝업.
   - Windows 설정에서 기본 브라우저를 변경하고 브라우저로 돌아오면(`focus`, `visibilitychange`), 새로고침 없이도 **실시간 상태 배지(`기본 브라우저로 설정됨` / `기본 브라우저 아님`)**가 즉시 자동 갱신(Auto-Refresh)됩니다.
-- **엔진 제원 명시**: 브라우저 버전(1.0.0 64-bit), CEF 런타임(154.0.34), Chromium 엔진(154.0.8037.98), 아키텍처(Pure Win32 C CAPI) 상세 표출.
+- **엔진 제원 명시**: 브라우저 버전(0.2.4 64-bit), CEF 런타임(154.0.34), Chromium 엔진(154.0.8037.98), 아키텍처(Pure Win32 C CAPI) 상세 표출.
 
 ### 6. 🚀 런타임 성능 모드 전환 & 빌드 타임 ThinLTO / LTCG 최적화
 - **사용자 맞춤 런타임 성능 모드 (`lite://settings`)**:
@@ -105,6 +107,32 @@ HTML5/CSS3/JavaScript 기반의 현대적 **벤토 그리드(Bento Grid) 웹 UI*
 - **다형성 AI Provider & 429 내결함성**: Gemini 3.7 Flash 기본 탑재, CoT 사고 과정(Thinking) 아코디언 스트리밍, 429 Rate Limit 발생 시 지수 백오프 자동 재시도(1.5초, 3.0초, 6.0초).
 - **Windows DPAPI 보안 볼트 ([`simple_vault.c`](cef_binary_154.0.34/tests/cefsimple_capi/simple_vault.c))**: `CryptProtectData` 기반으로 `%USERPROFILE%\.lite-browser\vault.dat`에 사용자 자격증명을 OS 수준에서 안전하게 암호화 보관.
 
+### 13. 🔄 무음 자동 업데이트 (Zero-UAC Silent Auto-Updater) & 단일 버전 관리 (SSOT)
+- **GitHub Releases 연동 백그라운드 자동 스트리밍**: 브라우저 실행 시 백그라운드 워커 스레드가 GitHub Releases 최신 버전을 감지하고, 유휴 대역폭으로 인스톨러 바이너리를 무음 다운로드(`WinHTTP`)합니다.
+- **`WinVerifyTrust` 기반 디지털 서명 무결성 검증**: 다운로드 완료 후 패키지의 Authenticode 디지털 서명을 사전 검증하여 위변조 바이너리 실행을 원천 차단합니다.
+- **상단 툴바 전용 알림 뱃지 & 원클릭 즉시 재시작**: 패키지 준비 완료 시 상단 더보기 버튼 좌측에 Lucide SVG `circle-arrow-up` 펄스 뱃지가 노출되며, 클릭 즉시 NSIS 사일런트(`/S`) 설치 인계 후 브라우저가 자동 재실행됩니다.
+- **Per-User (Zero-UAC) 무음 설치 아키텍처**: Chrome / VS Code 표준의 `%LOCALAPPDATA%\Programs\LiteBrowser` 사용자 단위 설치 및 `HKCU` 레지스트리를 채택하여, **설치 및 업데이트 전 과정에서 UAC 승인 창이 100% 뜨지 않는 완전 무음 자동 업데이트**를 달성했습니다.
+- **단일 버전 관리 (Single Source of Truth)**: [`version.h`](cef_binary_154.0.34/tests/cefsimple_capi/version.h)를 중심축으로 C 런타임, PE 리소스, NSIS 인스톨러, 설정 Web UI 버전이 일원화 관리됩니다.
+
+### 14. 💾 웹페이지 컨텍스트 메뉴 '다른 이름으로 저장...' (Save As) & `Ctrl+S` 단축키
+- 웹페이지 마우스 우클릭 시 '인쇄...' 바로 위에 **'다른 이름으로 저장...'** 항목을 배치하고, Windows 표준 파일 저장 대화상자(`GetSaveFileNameW`) 및 정규 다운로드 파이프라인을 연동했습니다.
+- 웹 브라우저 표준 단축키인 **`Ctrl + S`**로도 동일 기능이 즉시 호출됩니다.
+- URL 구조와 문서 특성을 지능 분석하여 `.txt`, `.md`, `.doc`, `.json`, `.c` 등 소스 코드 및 텍스트 파일 접속 시 해당 콘텐츠를 서버 원본 바이트 그대로 로컬에 저장합니다.
+- 내부 시스템 페이지(`lite://` 등) 접속 시에는 오작동 방지를 위해 메뉴가 회색 비활성화(`MF_GRAYED`) 처리됩니다.
+
+### 15. 🛡️ 웹 권한 관리 시스템 (Web Permission Handler)
+- CEF C API `_cef_permission_handler_t` 인터페이스를 구현한 독립 권한 제어 서브시스템([`simple_permission_handler.c`](cef_binary_154.0.34/tests/cefsimple_capi/simple_permission_handler.c))을 탑재했습니다.
+- 로컬 네트워크 및 루프백 접근(Local Network Access), 웹 리소스 보안 권한 요청을 선별 제어합니다.
+- 브라우저 종료 및 세션 완료 시 허용된 임시 권한을 안전하게 초기화(`simple_permission_handler_cleanup_session`)하여 사용자 프라이버시를 보호합니다.
+
+### 16. ⌨️ 탭 라이프사이클 안정성 & 키보드 단축키 (`Ctrl+W`, `Ctrl+F4`)
+- **표준 탭 닫기 단축키 지원**: 웹 본문 및 상단 툴바 어디서든 `Ctrl + W` 또는 `Ctrl + F4`를 입력하면 Chromium 단독 종료를 차단하고 LiteBrowser 정규 탭 닫기 파이프라인(`CloseTab`)을 호출하여 잔여 유령 탭과 회색 화면을 원천 방지합니다.
+- **실시간 메인 윈도우 타이틀 동기화**: 탭 클릭, 단축키 전환, 'x' 버튼 닫기, 분할 뷰 포커스 이동 시 Windows 작업 표시줄 및 Alt+Tab 전환창에 `[페이지 제목] - Lite Browser` 형식이 실시간 동기화됩니다.
+- **오른쪽 탭 일괄 닫기 회색 화면 버그 수정**: 우클릭 "오른쪽 탭 닫기"(`CloseTabsToRight`) 및 일괄 탭 종료 시 내부 상태 갱신 순서와 Z-order를 정상화하여 회색 화면(렌더링 누락) 문제를 완벽히 해결했습니다.
+
+### 17. 🔗 외부 데스크톱 애플리케이션 프로토콜 핸들러 (External Protocol Handler)
+- Windows 레지스트리에 등록된 외부 앱 프로토콜(`zoommtg://`, `slack://`, `kakaotalk://` 등) 호출을 감지하고, 보안 승인 팝업 다이얼로그를 통해 악성 링크의 무분별한 외부 프로세스 기동을 안전하게 방어합니다.
+
 ---
 
 ## 🏗️ 윈도우 레이아웃 및 아키텍처 (Architecture)
@@ -144,7 +172,7 @@ HTML5/CSS3/JavaScript 기반의 현대적 **벤토 그리드(Bento Grid) 웹 UI*
 | **윈도우 셸 연동** | Windows Shell APIs | `SHCNE_ASSOCCHANGED`, `GetUserDefaultLocaleName`, Registry Capabilities / ProgID |
 | **웹 프론트엔드 UI** | Chrome Controls & Dashboards | **HTML5, Vanilla CSS3 (Bento Grid Tokens), ES6+ JavaScript, Inline Lucide SVG** |
 | **빌드 시스템** | CMake & Visual Studio | CMake 3.19+, Visual Studio 2022/2026 MSVC C/C++ x64 |
-| **배포 패키징 도구** | NSIS (Nullsoft Scriptable Install System) | NSIS 3.x 64-bit Unicode (`$PROGRAMFILES64\LiteBrowser`) |
+| **배포 패키징 도구** | NSIS (Nullsoft Scriptable Install System) | **NSIS 3.x 64-bit Unicode (Per-User `%LOCALAPPDATA%\Programs\LiteBrowser`, Zero-UAC 무음 설치)** |
 
 ---
 
@@ -202,6 +230,7 @@ lite_browser\
 ├── LICENSE                                    # BSD 3-Clause 오픈소스 라이선스
 ├── installer.nsi                              # NSIS 64-bit 인스톨러 패키징 스크립트
 ├── scripts\                                   # 자동화 및 빌드 보조 스크립트
+│   ├── create_github_release.ps1              # GitHub Release 자동 생성, 서명 패키지 업로드 및 릴리즈 노트 자동화
 │   ├── sign_installer.ps1                     # signtool 기반 SHA-256 + DigiCert RFC 3161 코드 서명기
 │   └── certs\                                 # 코드 서명 인증서 디렉터리 (.gitignore 대상)
 ├── ui\                                        # HTML5 / CSS3 / Vanilla JS 벤토 그리드 UI 에셋
@@ -219,8 +248,12 @@ lite_browser\
 ├── cef_binary_154.0.34\                       # CEF 154.0.34 바이너리 배포본 (Chromium 154.0.8037.98)
 │   └── tests\cefsimple_capi\                  # 순수 C11 C API 메인 백엔드 소스 디렉터리
 │       ├── CMakeLists.txt                     # C11 타깃 빌드, LTCG 최적화 및 후처리 파이프라인
+│       ├── version.h                          # 브라우저 전역 단일 버전 관리 (SSOT: C, RC, NSIS, UI)
 │       ├── cefsimple_win.c                    # Win32 메인 진입점 (wWinMain), 로캘 감지, root_cache 격리
 │       ├── default_browser.c / h              # Windows 10/11 기본 브라우저 레지스트리 등록 및 제어
+│       ├── simple_updater.c / h               # 백그라운드 무음 업데이트 스트리밍, WinVerifyTrust 검증 및 인스톨러 인계
+│       ├── simple_permission_handler.c / h    # 웹 권한 제어 (Local Network Access, 세션 정리)
+│       ├── simple_protocol_handler.c / h      # 외부 데스크톱 앱 프로토콜 보안 호출 제어
 │       ├── simple_optimization.c / h          # 속도 우선 vs 메모리 절감 런타임 최적화 모드 엔진
 │       ├── simple_app.c / h                   # Win32 메인 프로시저, 서브클래싱, 0px 심리스 레이아웃
 │       ├── simple_handler.c / h               # IPC 액션 라우터, 탭 전환/생성, 옴니박스 동기화
