@@ -18,6 +18,13 @@
 - 웹 UI 아이콘은 외부 CDN 없이 인라인 Lucide SVG(`viewBox="0 0 24 24"`, `stroke="currentColor"`)를 사용하며, 이모지 문자 배제
 - 모든 네이티브 윈도우(`CreateWindowEx`)는 다크/라이트 모드별 브러시 분기, `WM_ERASEBKGND` 처리, DWM 다크 타이틀바 동기화 필수
 - 테이블 및 리스트 컴포넌트는 단일행 말줄임표(`nowrap` + `ellipsis`) 및 주요 컬럼 고정 너비 레이아웃 원칙 준수
+
+### 공식 릴리즈 및 문서 동기화 룰 (Release & Documentation Policy)
+- 공식 릴리즈(버전 태그 및 GitHub Release) 진행 시:
+  1. **릴리즈 노트 완전성**: `git log <이전_태그>..HEAD`와 `docs/walkthrough.md`를 반드시 참조하여 신규 기능 및 버그 수정 사항이 누락되지 않도록 릴리즈 본문 작성
+  2. **`README.md` 필수 동기화**: GitHub 메인 소개 문서인 `README.md`의 최신 릴리즈 뱃지, 신규 주요 기능 섹션, 기술 스택, 프로젝트 구조를 반드시 함께 업데이트
+  3. **단일 버전 관리 (SSOT)**: `version.h`, `installer.nsi`, `cefsimple.rc`, `settings.html`의 버전 표기가 완벽히 일치하는지 사전 검증
+
  
 
 
