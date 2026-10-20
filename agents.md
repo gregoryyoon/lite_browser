@@ -21,7 +21,7 @@
 
 ### 공식 릴리즈 및 문서 동기화 룰 (Release & Documentation Policy)
 - 공식 릴리즈(버전 태그 및 GitHub Release) 진행 시:
-  1. **릴리즈 노트 완전성**: `git log <이전_태그>..HEAD`와 `docs/walkthrough.md`를 반드시 참조하여 신규 기능 및 버그 수정 사항이 누락되지 않도록 릴리즈 본문 작성
+  1. **릴리즈 노트 완전성**: `git log <이전_태그>..HEAD`와 `docs/walkthrough.md`(순수 참고용, 파일 직접 수정 금지)를 반드시 참조하여 신규 기능 및 버그 수정 사항이 누락되지 않도록 릴리즈 본문 작성
   2. **`README.md` 프로젝트 소개 유지**: GitHub 메인 소개 문서인 `README.md`는 프로젝트 홍보 및 핵심 장점 소개용 문서이므로, 자잘한 기능/버그 수정 기록은 배제하고 프로젝트의 핵심 가치와 주요 장점(Performance, Bento UI, Split-View, AI 사이드패널, Zero-UAC 무음 업데이트 등) 위주로 깔끔하게 동기화 (상세 버그 수정 및 세부 내역은 GitHub 릴리즈 노트와 `docs/walkthrough.md`에만 상세 기술)
   3. **단일 버전 관리 (SSOT)**: `version.h`, `installer.nsi`, `cefsimple.rc`, `settings.html`의 버전 표기가 완벽히 일치하는지 사전 검증
 
