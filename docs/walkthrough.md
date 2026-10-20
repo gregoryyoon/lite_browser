@@ -2675,6 +2675,95 @@ Edge/Chrome 브라우저와 동일하게 Windows 레지스트리에 등록된 �
   - 열기 승인 후 Exceed Client Launcher 프로세스가 성공적으로 기동되어 원격 데스크톱 세션 접속 완료.
   - "항상 열도록 허용" 체크 후 재실행 시 다이얼로그 없이 즉각 런처가 실행됨을 확인.
 
+---
 
+## 72. 오른쪽 탭 닫기 및 일괄 탭 닫기 시 화면 미표시(회색 화면) 버그 수정 (Fix Blank/Gray Content on Close Tabs to Right)
 
+### 72.1 개요
+활성화된 탭의 왼쪽 탭에서 마우스 우클릭 후 "오른쪽 탭 닫기"(`CloseTabsToRight`)를 실행하면 오른쪽 탭들이 종료된 후 클릭했던 왼쪽 탭이 활성화되지만, 웹페이지 본문이 화면에 표시되지 않고 마우스 클릭도 되지 않는 전체 회색 화면(메인 윈도우 배경)으로 남던 문제를 해결했습니다.
+
+### 72.2 원인 분석 및 해결
+1. **상태 갱신과 윈도우 크기 조정 순서 오류**:
+   - `CloseTabsToRight`에서 이전 탭을 활성화하는 과정 중, 내부 컨텍스트의 `active_tab_index`와 `tab_count`를 갱신하기 전에 `SendMessage(win_ctx->main_hwnd, WM_SIZE, ...)`를 먼저 호출하고 있었습니다.
+   - `WM_SIZE` 메시지 핸들러는 아직 갱신되지 않은 이전 활성 탭 인덱스를 기준으로 동작하면서, 새로 활성화되어야 할 대상 탭을 비활성 탭으로 간주하여 `ShowWindow(..., SW_HIDE)`를 호출해 화면에서 숨겨버렸습니다.
+   - 그 결과 모든 본문 CEF 윈도우가 숨겨지고 메인 윈도우 배경 브러시(회색)만 사용자에게 노출되었습니다.
+2. **상태 반영 순서 및 Z-order 정상화 (`simple_handler.c`)**:
+   - `CloseTabsToRight` 및 `CloseOtherTabs`에서 탭들을 닫은 직후, **`win_ctx->tab_count` 및 `win_ctx->active_tab_index`를 먼저 최신 값으로 갱신**하도록 재배치했습니다.
+   - `RemoveTabAt`의 표준 루틴과 동일하게:
+     - `SetWindowPos(..., insert_after, ..., SWP_SHOWWINDOW)`로 상단 `ui_hwnd` 직하단에 Z-order를 안정적으로 배치.
+     - `SendMessage(WM_SIZE)` 및 `InvalidateRect`를 통해 활성 탭 본문을 정상 크기로 배치 및 노출.
+     - CEF 브라우저 `was_resized()` 및 `set_focus()`(분할 뷰 활성 분기 포함)를 호출하여 마우스/키보드 입력 포커스를 즉시 복원.
+
+### 72.3 관련 소스 코드
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.c)
+
+### 72.4 빌드 및 검증 결과
+- **디버그 빌드**: `cef_binary_154.0.34` MSBuild Debug 타깃 빌드 성공 (`Exit code 0, 경고 0개, 오류 0개`).
+- **실기 검증**:
+  - 탭 2개 이상 실행 상태에서 왼쪽 탭 우클릭 후 "오른쪽 탭 닫기" 실행 시, 오른쪽 탭들이 닫히고 왼쪽 탭이 지연/회색 화면 없이 즉시 정상 렌더링되며 마우스 조작이 원활하게 동작함을 확인.
+
+---
+
+## 73. 탭 전환 및 탭 종료 시 메인 윈도우 타이틀 실시간 동기화 (Real-Time Main Window Title Sync on Tab Switch and Tab Close)
+
+### 73.1 개요
+기존에는 웹페이지 로드가 완료될 때(`on_title_change`)에만 윈도우 타이틀을 설정하도록 되어 있어, 이미 로드된 탭들 간을 전환하거나 현재 탭을 'x' 버튼으로 닫았을 때 Windows 작업 표시줄 및 전환창(Alt+Tab)에 현재 보고 있는 페이지의 타이틀이 아닌 마지막으로 로드된 이전 탭의 타이틀이 표시되던 문제를 해결했습니다.
+
+### 73.2 주요 구현 내역
+1. **통합 윈도우 타이틀 동기화 엔진 (`update_window_title`)**:
+   - [`simple_handler.h`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.h) 및 [`simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.c)에 `update_window_title(browser_window_t* win_ctx)` 함수를 구현.
+   - Chrome/Edge 표준과 동일하게 **`[페이지 제목] - Lite Browser`** 형식으로 윈도우 타이틀(`SetWindowTextW`)을 동기화하며, 빈 탭/새 탭/로딩 중 상태에서는 `Lite Browser`로 설정.
+   - 내부 페이지(예: `북마크 관리자 - Lite Browser`, `설정 - Lite Browser`)처럼 이미 브라우저 이름이 포함된 경우 중복 추가되지 않도록 안전 가드 적용.
+   - 듀얼 분할 화면(Split View)일 경우 포커스가 위치한 활성 분할 창(Left 또는 Right)의 제목을 우선 반영.
+2. **탭 라이프사이클 전 구간 실시간 연동**:
+   - 탭 목록이 변경될 때마다 호출되는 `update_ui_tabs()`의 최상단에서 `update_window_title()`을 상시 호출하도록 연결하여:
+     - 탭 클릭 및 단축키 전환 시
+     - 'x' 버튼으로 탭 닫기 시 (이전 탭이 활성화되는 즉시 해당 탭 제목으로 동기화)
+     - 오른쪽 탭 닫기, 새 탭 생성, 탭 드래그 분리/합체 시에도 항상 최신 활성 탭 제목 유지.
+   - [`simple_handler_win.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_handler_win.c): 활성 탭에서 제목 변경 이벤트 도착 시에도 일관되게 `update_window_title()`을 거치도록 통일.
+   - [`simple_app.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_app.c): 분할 화면 내 좌/우 창 간 마우스 클릭 포커스 전환 시에도 실시간으로 해당 창의 타이틀로 갱신.
+
+### 73.3 관련 소스 코드
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.h`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.h)
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.c)
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_handler_win.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_handler_win.c)
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_app.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_app.c)
+
+### 73.4 빌드 및 검증 결과
+- **디버그 빌드**: `cef_binary_154.0.34` MSBuild Debug 타깃 빌드 성공 (`Exit code 0, 경고 0개, 오류 0개`).
+- **실기 검증**:
+  - 복수 탭 전환 시 및 'x' 버튼으로 탭 종료 시, Windows 작업 표시줄 및 Alt+Tab 전환창에 현재 보고 있는 페이지 제목(`[페이지 제목] - Lite Browser`)이 지연 없이 즉시 반영됨을 확인.
+
+---
+
+## 74. Ctrl+F4 및 Ctrl+W 탭 닫기 단축키 지원 및 잔여 회색 화면 방지 (Ctrl+F4 & Ctrl+W Tab Close Shortcut Support & Ghost Tab Cleanup)
+
+### 74.1 개요
+웹페이지 본문이나 상단 툴바에 포커스가 있는 상태에서 `Ctrl + F4` 단축키를 눌렀을 때, 상단 탭은 그대로 남아있고 하단 본문 브라우저만 파괴되어 빈 회색 화면이 남던 문제를 해결했습니다.  
+Chromium의 불완전한 내부 탭 종료 동작을 차단하고, `Ctrl + F4` 및 브라우저 공통 표준 단축키인 `Ctrl + W`를 LiteBrowser의 정규 탭 닫기 파이프라인으로 연결했습니다.
+
+### 74.2 원인 분석 및 기술적 해결
+1. **원인 분석**:
+   - `Ctrl + F4` (및 `Ctrl + W`)는 Chromium 자체의 가속기(Accelerator) 테이블에 MDI/탭 닫기 명령(`IDC_CLOSE_TAB`)으로 기본 등록되어 있어, LiteBrowser 백엔드의 UI 파이프라인을 거치지 않고 CEF 내부에서 해당 브라우저 인스턴스를 단독 종료해버렸습니다.
+   - 브라우저 인스턴스가 닫힌 후 `on_before_close` 핸들러는 포인터만 `NULL`로 비웠을 뿐 탭 목록에서 제거하거나 인접 탭을 활성화하는 `RemoveTabAt()`을 호출하지 않아, 상단 탭 UI에는 탭이 유령 상태로 남고 본문 영역만 빈 회색 창으로 노출되었습니다.
+2. **CEF Keyboard Handler 구현 (`simple_handler.h`, `simple_handler.c`)**:
+   - `_cef_keyboard_handler_t` 인터페이스를 신규 구현하고 `on_pre_key_event`를 등록.
+   - 웹 본문에 포커스가 있을 때 `Ctrl + F4` 및 `Ctrl + W` 입력이 감지되면:
+     - Chromium의 내부 탭 종료를 차단 (`return 1`).
+     - LiteBrowser 정규 탭 닫기 함수인 `CloseTab(win_ctx, target_id)`을 호출하여 이전 탭 활성화, Z-order 및 크기 재계산, 윈도우 타이틀 및 상단 탭 UI 갱신까지 일괄 처리.
+3. **상단 Web UI 영역 단축키 지원 (`ui/app.js`, `simple_handler.c`)**:
+   - 주소창이나 탭 바 등 상단 Web UI에 포커스가 있는 상태에서 `Ctrl + F4` 또는 `Ctrl + W`를 눌렀을 때도 현재 활성 탭이 정상 종료되도록 `close-active-tab` 액션 브리지를 연결.
+4. **예외적 브라우저 종료 시 이중 안전망 (`simple_life_span_handler.c`)**:
+   - 자바스크립트의 `window.close()` 등 예외적인 외부 경로로 브라우저가 종료되더라도 `on_before_close`에서 `RemoveTabAt(win_ctx, i, 0)`를 호출하여 잔여 탭 및 회색 화면이 남지 않도록 방어.
+
+### 74.3 관련 소스 코드
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.h`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.h)
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.c)
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_life_span_handler.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_life_span_handler.c)
+- [`ui/app.js`](file:///c:/projects/lite_browser/ui/app.js)
+
+### 74.4 빌드 및 검증 결과
+- **디버그 빌드**: `cef_binary_154.0.34` MSBuild Debug 타깃 빌드 성공 (`Exit code 0, 경고 0개, 오류 0개`).
+- **실기 검증**:
+  - 웹페이지 본문 및 상단 툴바 어디서든 `Ctrl + F4` 또는 `Ctrl + W`를 입력했을 때 현재 활성 탭이 깨끗하게 닫히고 이전 탭으로 부드럽게 화면과 포커스가 전환됨을 최종 확인.
 

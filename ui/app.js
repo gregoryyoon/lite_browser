@@ -1375,7 +1375,10 @@ let isKeyboardNavigating = false;
 document.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('keydown', (e) => {
     const isInput = document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA');
-    if (e.ctrlKey && (e.key === 'f' || e.key === 'F')) {
+    if (e.ctrlKey && !e.altKey && !e.shiftKey && (e.key === 'F4' || e.key === 'w' || e.key === 'W')) {
+      e.preventDefault();
+      sendUiAction('http://ui-action/close-active-tab');
+    } else if (e.ctrlKey && (e.key === 'f' || e.key === 'F')) {
       if (!isInput) {
         e.preventDefault();
         sendUiAction('http://ui-action/trigger-find');

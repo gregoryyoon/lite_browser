@@ -10,6 +10,7 @@
 #include "include/capi/cef_browser_capi.h"
 #include "include/capi/cef_client_capi.h"
 #include "include/capi/cef_request_handler_capi.h"
+#include "include/capi/cef_keyboard_handler_capi.h"
 #include "tests/cefsimple_capi/browser_context.h"
 #include "tests/cefsimple_capi/simple_browser_list.h"
 
@@ -21,6 +22,7 @@ typedef struct _simple_request_handler_t simple_request_handler_t;
 typedef struct _simple_context_menu_handler_t simple_context_menu_handler_t;
 typedef struct _simple_download_handler_t simple_download_handler_t;
 typedef struct _simple_focus_handler_t simple_focus_handler_t;
+typedef struct _simple_keyboard_handler_t simple_keyboard_handler_t;
 
 typedef enum {
   BROWSER_TYPE_CONTENT = 0,
@@ -46,6 +48,7 @@ typedef struct _simple_handler_t {
   simple_context_menu_handler_t *context_menu_handler;
   simple_download_handler_t *download_handler;
   simple_focus_handler_t *focus_handler;
+  simple_keyboard_handler_t *keyboard_handler;
 
   // Pointer to the browser window context this handler belongs to.
   browser_window_t *window_ctx;
@@ -131,6 +134,21 @@ typedef struct _simple_load_handler_t {
   simple_handler_t *parent;
 } simple_load_handler_t;
 
+// Keyboard handler structure.
+// Implements cef_keyboard_handler_t interface.
+typedef struct _simple_keyboard_handler_t {
+  // MUST be first member - CEF base structure.
+  cef_keyboard_handler_t handler;
+
+  // Reference count for this object.
+  atomic_int ref_count;
+
+  // Back reference to parent handler.
+  simple_handler_t *parent;
+} simple_keyboard_handler_t;
+
+simple_keyboard_handler_t *keyboard_handler_create(simple_handler_t *parent);
+
 // Create a new client handler instance.
 // Parameters:
 //   is_alloy_style - 1 for Alloy style, 0 for Chrome style
@@ -161,6 +179,7 @@ void simple_handler_platform_title_change(simple_handler_t *handler,
 void simple_handler_platform_show_window(simple_handler_t *handler,
                                          cef_browser_t *browser);
 
+void update_window_title(browser_window_t* win_ctx);
 void update_ui_tabs(browser_window_t* win_ctx);
 void update_ui_nav_state(browser_window_t* win_ctx);
 void CreateNewTab(browser_window_t* win_ctx, const char* url);

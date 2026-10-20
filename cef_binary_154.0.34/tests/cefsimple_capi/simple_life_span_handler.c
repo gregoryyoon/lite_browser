@@ -577,6 +577,7 @@ void CEF_CALLBACK life_span_handler_on_before_close(
           win_ctx->tabs[i].browser->base.release(&win_ctx->tabs[i].browser->base);
           win_ctx->tabs[i].browser = NULL;
           LogMsg("on_before_close: cleared content_browser tab %d\n", i);
+          RemoveTabAt(win_ctx, i, 0);
           break;
         }
         if (win_ctx->tabs[i].right_browser &&

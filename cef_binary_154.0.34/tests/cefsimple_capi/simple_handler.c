@@ -438,6 +438,7 @@ typedef struct _simple_focus_handler_t {
 
 simple_focus_handler_t *focus_handler_create(simple_handler_t *parent);
 cef_focus_handler_t *CEF_CALLBACK simple_handler_get_focus_handler(cef_client_t *self);
+cef_keyboard_handler_t *CEF_CALLBACK simple_handler_get_keyboard_handler(cef_client_t *self);
 
 //
 // Client handler implementation.
@@ -477,6 +478,10 @@ int CEF_CALLBACK simple_handler_release(cef_base_ref_counted_t *self) {
     if (handler->focus_handler) {
       handler->focus_handler->handler.base.release(
           &handler->focus_handler->handler.base);
+    }
+    if (handler->keyboard_handler) {
+      handler->keyboard_handler->handler.base.release(
+          &handler->keyboard_handler->handler.base);
     }
 
     // Destroy the browser list.
@@ -580,6 +585,17 @@ simple_handler_get_focus_handler(cef_client_t *self) {
   return NULL;
 }
 
+cef_keyboard_handler_t *CEF_CALLBACK
+simple_handler_get_keyboard_handler(cef_client_t *self) {
+  simple_handler_t *handler = (simple_handler_t *)self;
+  if (handler->keyboard_handler) {
+    handler->keyboard_handler->handler.base.add_ref(
+        &handler->keyboard_handler->handler.base);
+    return &handler->keyboard_handler->handler;
+  }
+  return NULL;
+}
+
 //
 // Public API implementation.
 //
@@ -603,6 +619,7 @@ simple_handler_t *simple_handler_create(int is_alloy_style) {
   handler->client.get_context_menu_handler = simple_handler_get_context_menu_handler;
   handler->client.get_download_handler = simple_handler_get_download_handler;
   handler->client.get_focus_handler = simple_handler_get_focus_handler;
+  handler->client.get_keyboard_handler = simple_handler_get_keyboard_handler;
 
   // Create sub-handlers.
   handler->display_handler = display_handler_create(handler);
@@ -619,6 +636,8 @@ simple_handler_t *simple_handler_create(int is_alloy_style) {
   CHECK(handler->download_handler);
   handler->focus_handler = focus_handler_create(handler);
   CHECK(handler->focus_handler);
+  handler->keyboard_handler = keyboard_handler_create(handler);
+  CHECK(handler->keyboard_handler);
 
   // Initialize other fields.
   handler->is_alloy_style = is_alloy_style;
@@ -761,8 +780,49 @@ static void EscapeJsonString(const char* src, char* dest, size_t dest_len) {
   dest[j] = '\0';
 }
 
+void update_window_title(browser_window_t* win_ctx) {
+  if (!win_ctx || !win_ctx->main_hwnd || !IsWindow(win_ctx->main_hwnd)) {
+    return;
+  }
+  if (win_ctx->active_tab_index < 0 || win_ctx->active_tab_index >= win_ctx->tab_count) {
+    SetWindowTextW(win_ctx->main_hwnd, L"Lite Browser");
+    return;
+  }
+
+  tab_info_t* tab = &win_ctx->tabs[win_ctx->active_tab_index];
+  const char* title_utf8 = (tab->is_split && tab->active_split == 1 && tab->right_title[0])
+                             ? tab->right_title : tab->title;
+
+  if (!title_utf8 || title_utf8[0] == '\0' ||
+      strcmp(title_utf8, "새 탭") == 0 || strcmp(title_utf8, "New Tab") == 0 ||
+      strcmp(title_utf8, "로딩 중...") == 0) {
+    SetWindowTextW(win_ctx->main_hwnd, L"Lite Browser");
+    return;
+  }
+
+  int wlen = MultiByteToWideChar(CP_UTF8, 0, title_utf8, -1, NULL, 0);
+  if (wlen > 0) {
+    wchar_t* wbuf = (wchar_t*)malloc(wlen * sizeof(wchar_t));
+    if (wbuf) {
+      MultiByteToWideChar(CP_UTF8, 0, title_utf8, -1, wbuf, wlen);
+
+      wchar_t full_title[1024];
+      if (wcsstr(wbuf, L"Lite Browser") != NULL) {
+        _snwprintf(full_title, sizeof(full_title) / sizeof(full_title[0]) - 1, L"%s", wbuf);
+      } else {
+        _snwprintf(full_title, sizeof(full_title) / sizeof(full_title[0]) - 1, L"%s - Lite Browser", wbuf);
+      }
+      full_title[sizeof(full_title) / sizeof(full_title[0]) - 1] = L'\0';
+      SetWindowTextW(win_ctx->main_hwnd, full_title);
+      free(wbuf);
+    }
+  }
+}
+
 void update_ui_tabs(browser_window_t* win_ctx) {
-  if (!win_ctx || !win_ctx->ui_browser) return;
+  if (!win_ctx) return;
+  update_window_title(win_ctx);
+  if (!win_ctx->ui_browser) return;
 
   char json[65536] = "[";
   for (int i = 0; i < win_ctx->tab_count; i++) {
@@ -1060,21 +1120,43 @@ static void CloseOtherTabs(browser_window_t* win_ctx, int keep_id) {
   win_ctx->tabs[0] = keep_tab;
   win_ctx->tab_count = 1;
   win_ctx->active_tab_index = 0;
+  win_ctx->tabs[0].is_loaded = 1;
 
   if (win_ctx->tabs[0].hwnd) {
-    ShowWindow(win_ctx->tabs[0].hwnd, SW_SHOW);
+    HWND insert_after = (win_ctx->ui_hwnd && IsWindow(win_ctx->ui_hwnd)) ? win_ctx->ui_hwnd : HWND_TOP;
+    SetWindowPos(win_ctx->tabs[0].hwnd, insert_after, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
     if (win_ctx->tabs[0].is_split && win_ctx->tabs[0].right_hwnd) {
-      ShowWindow(win_ctx->tabs[0].right_hwnd, SW_SHOW);
+      SetWindowPos(win_ctx->tabs[0].right_hwnd, win_ctx->tabs[0].hwnd, 0, 0, 0, 0,
+                   SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
     }
     RECT rect;
     GetClientRect(win_ctx->main_hwnd, &rect);
     SendMessage(win_ctx->main_hwnd, WM_SIZE, 0, MAKELPARAM(rect.right, rect.bottom));
     InvalidateRect(win_ctx->main_hwnd, NULL, TRUE);
-    cef_browser_host_t* host = win_ctx->tabs[0].browser->get_host(win_ctx->tabs[0].browser);
-    if (host) {
-      host->was_resized(host);
-      host->set_focus(host, 1);
-      host->base.release(&host->base);
+
+    if (win_ctx->tabs[0].browser) {
+      cef_browser_host_t* host = win_ctx->tabs[0].browser->get_host(win_ctx->tabs[0].browser);
+      if (host) {
+        host->was_resized(host);
+        host->base.release(&host->base);
+      }
+    }
+    if (win_ctx->tabs[0].is_split && win_ctx->tabs[0].right_browser) {
+      cef_browser_host_t* r_host = win_ctx->tabs[0].right_browser->get_host(win_ctx->tabs[0].right_browser);
+      if (r_host) {
+        r_host->was_resized(r_host);
+        r_host->base.release(&r_host->base);
+      }
+    }
+    cef_browser_t* ab = (win_ctx->tabs[0].is_split && win_ctx->tabs[0].active_split == 1 && win_ctx->tabs[0].right_browser)
+                         ? win_ctx->tabs[0].right_browser : win_ctx->tabs[0].browser;
+    if (ab) {
+      cef_browser_host_t* host = ab->get_host(ab);
+      if (host) {
+        host->set_focus(host, 1);
+        host->base.release(&host->base);
+      }
     }
   }
 
@@ -1117,29 +1199,50 @@ static void CloseTabsToRight(browser_window_t* win_ctx, int target_id) {
   }
 
   int old_active = win_ctx->active_tab_index;
-  int new_active = old_active;
-  if (old_active > target_idx) {
-    new_active = target_idx;
-    if (win_ctx->tabs[new_active].hwnd) {
-      ShowWindow(win_ctx->tabs[new_active].hwnd, SW_SHOW);
-      if (win_ctx->tabs[new_active].is_split && win_ctx->tabs[new_active].right_hwnd) {
-        ShowWindow(win_ctx->tabs[new_active].right_hwnd, SW_SHOW);
-      }
-      RECT rect;
-      GetClientRect(win_ctx->main_hwnd, &rect);
-      SendMessage(win_ctx->main_hwnd, WM_SIZE, 0, MAKELPARAM(rect.right, rect.bottom));
-      InvalidateRect(win_ctx->main_hwnd, NULL, TRUE);
+  int new_active = (old_active > target_idx) ? target_idx : old_active;
+
+  win_ctx->tab_count = target_idx + 1;
+  win_ctx->active_tab_index = new_active;
+  win_ctx->tabs[new_active].is_loaded = 1;
+
+  if (win_ctx->tabs[new_active].hwnd) {
+    HWND insert_after = (win_ctx->ui_hwnd && IsWindow(win_ctx->ui_hwnd)) ? win_ctx->ui_hwnd : HWND_TOP;
+    SetWindowPos(win_ctx->tabs[new_active].hwnd, insert_after, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+    if (win_ctx->tabs[new_active].is_split && win_ctx->tabs[new_active].right_hwnd) {
+      SetWindowPos(win_ctx->tabs[new_active].right_hwnd, win_ctx->tabs[new_active].hwnd, 0, 0, 0, 0,
+                   SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+    }
+
+    RECT rect;
+    GetClientRect(win_ctx->main_hwnd, &rect);
+    SendMessage(win_ctx->main_hwnd, WM_SIZE, 0, MAKELPARAM(rect.right, rect.bottom));
+    InvalidateRect(win_ctx->main_hwnd, NULL, TRUE);
+
+    if (win_ctx->tabs[new_active].browser) {
       cef_browser_host_t* host = win_ctx->tabs[new_active].browser->get_host(win_ctx->tabs[new_active].browser);
       if (host) {
         host->was_resized(host);
+        host->base.release(&host->base);
+      }
+    }
+    if (win_ctx->tabs[new_active].is_split && win_ctx->tabs[new_active].right_browser) {
+      cef_browser_host_t* r_host = win_ctx->tabs[new_active].right_browser->get_host(win_ctx->tabs[new_active].right_browser);
+      if (r_host) {
+        r_host->was_resized(r_host);
+        r_host->base.release(&r_host->base);
+      }
+    }
+    cef_browser_t* ab = (win_ctx->tabs[new_active].is_split && win_ctx->tabs[new_active].active_split == 1 && win_ctx->tabs[new_active].right_browser)
+                         ? win_ctx->tabs[new_active].right_browser : win_ctx->tabs[new_active].browser;
+    if (ab) {
+      cef_browser_host_t* host = ab->get_host(ab);
+      if (host) {
         host->set_focus(host, 1);
         host->base.release(&host->base);
       }
     }
   }
-
-  win_ctx->tab_count = target_idx + 1;
-  win_ctx->active_tab_index = new_active;
 
   update_ui_tabs(win_ctx);
   update_ui_nav_state(win_ctx);
@@ -3076,6 +3179,10 @@ int CEF_CALLBACK request_handler_on_before_browse(
               }
             }
           }
+        } else if (strcmp(action, "close-active-tab") == 0) {
+          if (win_ctx && win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+            CloseTab(win_ctx, win_ctx->tabs[win_ctx->active_tab_index].tab_id);
+          }
         } else if (strncmp(action, "close-tab?id=", 13) == 0) {
           int target_id = atoi(action + 13);
           CloseTab(win_ctx, target_id);
@@ -4009,6 +4116,69 @@ simple_focus_handler_t *focus_handler_create(simple_handler_t *parent) {
   handler->handler.on_take_focus = NULL;
   handler->handler.on_set_focus = focus_handler_on_set_focus;
   handler->handler.on_got_focus = focus_handler_on_got_focus;
+  handler->parent = parent;
+
+  atomic_store(&handler->ref_count, 1);
+  return handler;
+}
+
+//
+// Keyboard handler implementation.
+//
+
+IMPLEMENT_REFCOUNTING_SIMPLE(simple_keyboard_handler_t, keyboard_handler, ref_count)
+
+int CEF_CALLBACK keyboard_handler_on_pre_key_event(
+    cef_keyboard_handler_t* self,
+    cef_browser_t* browser,
+    const cef_key_event_t* event,
+    cef_event_handle_t os_event,
+    int* is_keyboard_shortcut) {
+  (void)browser;
+  (void)os_event;
+  (void)is_keyboard_shortcut;
+  simple_keyboard_handler_t* handler = (simple_keyboard_handler_t*)self;
+  if (!handler || !handler->parent) return 0;
+  browser_window_t* win_ctx = handler->parent->window_ctx;
+  if (!win_ctx) return 0;
+
+  if (event->type == KEYEVENT_RAWKEYDOWN || event->type == KEYEVENT_KEYDOWN) {
+    int has_ctrl = (event->modifiers & EVENTFLAG_CONTROL_DOWN) && !(event->modifiers & EVENTFLAG_ALT_DOWN);
+    int has_shift = (event->modifiers & EVENTFLAG_SHIFT_DOWN);
+
+    // Ctrl + F4 or Ctrl + W: Close current active tab
+    if (has_ctrl && !has_shift && (event->windows_key_code == VK_F4 || event->windows_key_code == 'W' || event->windows_key_code == 'w')) {
+      if (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+        int target_id = win_ctx->tabs[win_ctx->active_tab_index].tab_id;
+        CloseTab(win_ctx, target_id);
+      }
+      return 1; // Handled! Suppress default Chromium internal accelerator.
+    }
+  }
+
+  return 0;
+}
+
+int CEF_CALLBACK keyboard_handler_on_key_event(
+    cef_keyboard_handler_t* self,
+    cef_browser_t* browser,
+    const cef_key_event_t* event,
+    cef_event_handle_t os_event) {
+  (void)self;
+  (void)browser;
+  (void)event;
+  (void)os_event;
+  return 0;
+}
+
+simple_keyboard_handler_t *keyboard_handler_create(simple_handler_t *parent) {
+  simple_keyboard_handler_t *handler = (simple_keyboard_handler_t *)calloc(1, sizeof(simple_keyboard_handler_t));
+  CHECK(handler);
+
+  INIT_CEF_BASE_REFCOUNTED(&handler->handler.base, cef_keyboard_handler_t, keyboard_handler);
+
+  handler->handler.on_pre_key_event = keyboard_handler_on_pre_key_event;
+  handler->handler.on_key_event = keyboard_handler_on_key_event;
   handler->parent = parent;
 
   atomic_store(&handler->ref_count, 1);

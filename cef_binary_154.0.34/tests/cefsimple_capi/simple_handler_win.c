@@ -31,7 +31,7 @@ void simple_handler_platform_title_change(simple_handler_t* handler,
       }
 
       if (is_active_content) {
-        SetWindowTextW(win_ctx->main_hwnd, title->str);
+        update_window_title(win_ctx);
       } else {
         SetWindowTextW(hwnd, title->str);
       }

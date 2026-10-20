@@ -361,10 +361,12 @@ static LRESULT CALLBACK ChildBorderSubclassProc(
             if (active_tab->is_split) {
               if (root_tab == active_tab->right_hwnd && active_tab->active_split != 1) {
                 active_tab->active_split = 1;
+                update_window_title(win_ctx);
                 update_ui_nav_state(win_ctx);
                 InvalidateRect(main_hwnd, NULL, FALSE);
               } else if (root_tab == active_tab->hwnd && active_tab->active_split != 0) {
                 active_tab->active_split = 0;
+                update_window_title(win_ctx);
                 update_ui_nav_state(win_ctx);
                 InvalidateRect(main_hwnd, NULL, FALSE);
               }
@@ -606,6 +608,7 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
             int target_split = (pt.x < bar_x + split_bar_w / 2) ? 0 : 1;
             if (active_tab->active_split != target_split) {
               active_tab->active_split = target_split;
+              update_window_title(win_ctx);
               update_ui_nav_state(win_ctx);
               InvalidateRect(hwnd, NULL, FALSE);
             }
