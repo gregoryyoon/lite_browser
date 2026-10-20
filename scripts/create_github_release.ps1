@@ -2,8 +2,8 @@
 param(
     [Parameter(Mandatory=$true)]
     [string]$Token,
-    [string]$TagName = "v0.2.3",
-    [string]$ReleaseName = "Lite Browser v0.2.3",
+    [string]$TagName = "v0.2.4",
+    [string]$ReleaseName = "Lite Browser v0.2.4",
     [string]$InstallerPath = "LiteBrowserInstaller.exe",
     [string]$ReleaseBody = ""
 )
@@ -38,8 +38,9 @@ if (-not $ReleaseBody) {
 ## Lite Browser $TagName
 
 ### 주요 변경 사항
-- **무음 사일런트 업데이트 (Zero-UAC) 도입**: Chrome / VS Code 표준의 사용자 단위(Per-User, ``%LOCALAPPDATA%\Programs\LiteBrowser``) 설치 방식으로 전면 개편하여 UAC 승인 창 없는 완전 무음 자동 업데이트 실현
-- **사용자 권한(HKCU) 레지스트리 일원화**: 기본 브라우저 설정 및 앱 등록을 Current User 레지스트리로 일원화하여 관리자 권한 없는 환경에서도 완벽 동작
+- **웹 권한 관리 핸들러(Permission Handler) 도입**: 로컬 네트워크 및 루프백 접근(Local Network Access), 웹 리소스 권한 제어 서브시스템 구축
+- **세션 임시 권한 자동 격리 및 정리**: 브라우저 종료 및 세션 완료 시 허용된 권한을 안전하게 초기화
+- **Per-User (Zero-UAC) 무음 업데이트 파이프라인**: 사용자 계정 컨트롤(UAC) 창 없는 완전 무음 백그라운드 자동 업데이트
 - **보안 및 무결성**: 최신 Authenticode SHA-256 전자 서명 및 DigiCert RFC 3161 공식 타임스탬프 적용
 "@
 }

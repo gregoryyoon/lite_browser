@@ -28,6 +28,7 @@ extern int GetUIHeightForWindow(HWND hwnd);
 #include "tests/cefsimple_capi/simple_utils.h"
 #include "tests/cefsimple_capi/browser_context.h"
 #include "tests/cefsimple_capi/simple_protocol_handler.h"
+#include "tests/cefsimple_capi/simple_permission_handler.h"
 
 //
 // Dedicated Popup Window Context and WndProc
@@ -617,6 +618,7 @@ void CEF_CALLBACK life_span_handler_on_before_close(
 
 #if defined(_WIN32)
   if (g_window_count == 0) {
+    simple_permission_handler_cleanup_session(NULL);
     LogMsg("on_before_close: calling cef_quit_message_loop() because g_window_count == 0\n");
     cef_quit_message_loop();
   }

@@ -23,6 +23,7 @@ typedef struct _simple_context_menu_handler_t simple_context_menu_handler_t;
 typedef struct _simple_download_handler_t simple_download_handler_t;
 typedef struct _simple_focus_handler_t simple_focus_handler_t;
 typedef struct _simple_keyboard_handler_t simple_keyboard_handler_t;
+typedef struct _cef_permission_handler_t cef_permission_handler_t;
 
 typedef enum {
   BROWSER_TYPE_CONTENT = 0,
@@ -49,6 +50,7 @@ typedef struct _simple_handler_t {
   simple_download_handler_t *download_handler;
   simple_focus_handler_t *focus_handler;
   simple_keyboard_handler_t *keyboard_handler;
+  cef_permission_handler_t *permission_handler;
 
   // Pointer to the browser window context this handler belongs to.
   browser_window_t *window_ctx;

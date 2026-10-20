@@ -13,6 +13,7 @@
 #include "tests/cefsimple_capi/simple_app.h"
 #include "tests/cefsimple_capi/simple_ai_proxy.h"
 #include "tests/cefsimple_capi/simple_protocol_handler.h"
+#include "tests/cefsimple_capi/simple_permission_handler.h"
 
 #include <stdarg.h>
 #include <stdatomic.h>
@@ -483,6 +484,10 @@ int CEF_CALLBACK simple_handler_release(cef_base_ref_counted_t *self) {
       handler->keyboard_handler->handler.base.release(
           &handler->keyboard_handler->handler.base);
     }
+    if (handler->permission_handler) {
+      handler->permission_handler->base.release(
+          &handler->permission_handler->base);
+    }
 
     // Destroy the browser list.
     browser_list_destroy(&handler->browser_list);
@@ -596,6 +601,17 @@ simple_handler_get_keyboard_handler(cef_client_t *self) {
   return NULL;
 }
 
+cef_permission_handler_t *CEF_CALLBACK
+simple_handler_get_permission_handler(cef_client_t *self) {
+  simple_handler_t *handler = (simple_handler_t *)self;
+  if (handler->permission_handler) {
+    handler->permission_handler->base.add_ref(
+        &handler->permission_handler->base);
+    return handler->permission_handler;
+  }
+  return NULL;
+}
+
 //
 // Public API implementation.
 //
@@ -620,6 +636,7 @@ simple_handler_t *simple_handler_create(int is_alloy_style) {
   handler->client.get_download_handler = simple_handler_get_download_handler;
   handler->client.get_focus_handler = simple_handler_get_focus_handler;
   handler->client.get_keyboard_handler = simple_handler_get_keyboard_handler;
+  handler->client.get_permission_handler = simple_handler_get_permission_handler;
 
   // Create sub-handlers.
   handler->display_handler = display_handler_create(handler);
@@ -638,6 +655,8 @@ simple_handler_t *simple_handler_create(int is_alloy_style) {
   CHECK(handler->focus_handler);
   handler->keyboard_handler = keyboard_handler_create(handler);
   CHECK(handler->keyboard_handler);
+  handler->permission_handler = simple_permission_handler_create(handler);
+  CHECK(handler->permission_handler);
 
   // Initialize other fields.
   handler->is_alloy_style = is_alloy_style;

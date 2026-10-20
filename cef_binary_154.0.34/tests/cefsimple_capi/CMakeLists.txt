@@ -42,6 +42,8 @@ set(CEFSIMPLE_CAPI_SRCS
   simple_ai_proxy.h
   simple_protocol_handler.c
   simple_protocol_handler.h
+  simple_permission_handler.c
+  simple_permission_handler.h
   )
 set(CEFSIMPLE_CAPI_SRCS_LINUX
   cefsimple_linux.c

@@ -13,6 +13,7 @@
 #include "tests/cefsimple_capi/simple_handler.h"
 #include "tests/cefsimple_capi/simple_ai_proxy.h"
 #include "tests/cefsimple_capi/simple_updater.h"
+#include "tests/cefsimple_capi/simple_permission_handler.h"
 
 static int RunMain(HINSTANCE hInstance,
                    LPTSTR lpCmdLine,
@@ -117,6 +118,7 @@ static int RunMain(HINSTANCE hInstance,
   // called.
   simple_dialog_helper_init();
   cef_run_message_loop();
+  simple_permission_handler_cleanup_session(NULL);
   simple_dialog_helper_cleanup();
   simple_updater_cleanup();
   ai_proxy_shutdown();
