@@ -208,5 +208,5 @@ lite_browser\
 본 프로젝트는 Chromium 및 CEF (Chromium Embedded Framework) 오픈소스 라이선스 규정을 준수합니다.
 
 - **Chromium / CEF**: [BSD 3-Clause License](https://opensource.org/licenses/BSD-3-Clause)
-- **Lite Browser Source Code**: Copyright (C) 2026 Gregory Yoon. All rights reserved.
+- **Lite Browser Source Code**: [BSD 3-Clause License](https://opensource.org/licenses/BSD-3-Clause)
 - 자세한 라이선스 조항은 [`LICENSE`](LICENSE) 및 [`cef_binary_154.0.34/LICENSE.txt`](cef_binary_154.0.34/LICENSE.txt)를 참조하십시오.

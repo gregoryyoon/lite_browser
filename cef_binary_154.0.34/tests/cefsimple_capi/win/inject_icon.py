@@ -11,6 +11,7 @@ shell32 = ctypes.WinDLL('shell32', use_last_error=True)
 # Constants
 RT_ICON = 3
 RT_GROUP_ICON = 14
+RT_VERSION = 16
 SHCNE_ASSOCCHANGED = 0x08000000
 SHCNF_IDLIST = 0
 
@@ -30,6 +31,19 @@ kernel32.UpdateResourceW.restype = wintypes.BOOL
 
 kernel32.EndUpdateResourceW.argtypes = [wintypes.HANDLE, wintypes.BOOL]
 kernel32.EndUpdateResourceW.restype = wintypes.BOOL
+
+kernel32.LoadLibraryExW.restype = ctypes.c_void_p
+kernel32.LoadLibraryExW.argtypes = [wintypes.LPCWSTR, ctypes.c_void_p, wintypes.DWORD]
+kernel32.FindResourceW.restype = ctypes.c_void_p
+kernel32.FindResourceW.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+kernel32.SizeofResource.restype = wintypes.DWORD
+kernel32.SizeofResource.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+kernel32.LoadResource.restype = ctypes.c_void_p
+kernel32.LoadResource.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+kernel32.LockResource.restype = ctypes.c_void_p
+kernel32.LockResource.argtypes = [ctypes.c_void_p]
+kernel32.FreeLibrary.restype = wintypes.BOOL
+kernel32.FreeLibrary.argtypes = [ctypes.c_void_p]
 
 def MAKEINTRESOURCEW(i):
     return ctypes.cast(ctypes.c_void_p(i), wintypes.LPCWSTR)
@@ -71,6 +85,41 @@ def get_existing_icon_ids(pe_path):
     except Exception as e:
         print(f"Warning: Failed to parse existing icons from PE: {e}")
         return []
+
+def inject_version_from_dll(hUpdate, dll_path):
+    """Copy RT_VERSION resource from adjacent lite_browser.dll into executable."""
+    LOAD_LIBRARY_AS_DATAFILE = 0x00000002
+    hMod = kernel32.LoadLibraryExW(dll_path, None, LOAD_LIBRARY_AS_DATAFILE)
+    if not hMod:
+        print(f"Notice: Failed to load {dll_path} as data file: {kernel32.GetLastError()}")
+        return False
+    try:
+        hRes = kernel32.FindResourceW(hMod, ctypes.c_void_p(1), ctypes.c_void_p(RT_VERSION))
+        if not hRes:
+            print(f"Notice: RT_VERSION resource not found in {dll_path}")
+            return False
+        size = kernel32.SizeofResource(hMod, hRes)
+        hGlobal = kernel32.LoadResource(hMod, hRes)
+        ptr = kernel32.LockResource(hGlobal)
+        if not ptr or size == 0:
+            print("Notice: LockResource failed or size 0 for RT_VERSION")
+            return False
+
+        ret = kernel32.UpdateResourceW(
+            hUpdate,
+            MAKEINTRESOURCEW(RT_VERSION),
+            MAKEINTRESOURCEW(1),
+            1033,  # 0x0409 English (US) as defined in cefsimple.rc
+            ctypes.cast(ptr, wintypes.LPVOID),
+            size
+        )
+        if not ret:
+            print(f"Warning: UpdateResourceW for RT_VERSION failed. Error: {kernel32.GetLastError()}")
+            return False
+        print(f"Successfully copied RT_VERSION ({size} bytes) from {os.path.basename(dll_path)} to executable.")
+        return True
+    finally:
+        kernel32.FreeLibrary(hMod)
 
 def inject_ico_to_exe(exe_path, ico_path, primary_group_id=120):
     print(f"Injecting {ico_path} into {exe_path}...")
@@ -193,6 +242,14 @@ def inject_ico_to_exe(exe_path, ico_path, primary_group_id=120):
                 raise Exception(f"Failed to write RT_GROUP_ICON {gid}. Error: {err}")
             print(f"Wrote RT_GROUP_ICON {gid}")
             
+        # Copy version information (RT_VERSION) from adjacent lite_browser.dll into executable
+        dll_path = os.path.join(os.path.dirname(exe_path), "lite_browser.dll")
+        if os.path.exists(dll_path):
+            try:
+                inject_version_from_dll(hUpdate, dll_path)
+            except Exception as e:
+                print(f"Warning: Exception copying RT_VERSION from DLL: {e}")
+
         # End update and write changes to disk
         ret = kernel32.EndUpdateResourceW(hUpdate, False)
         if not ret:

@@ -64,7 +64,7 @@ BEGIN
             VALUE "FileDescription", "Lite Browser"
             VALUE "FileVersion", LITE_BROWSER_VERSION_WIN
             VALUE "InternalName", "lite_browser"
-            VALUE "LegalCopyright", "Copyright (C) 2026 Gregory Yoon. All rights reserved."
+            VALUE "LegalCopyright", "BSD License"
             VALUE "OriginalFilename", "lite_browser.exe"
             VALUE "ProductName", "Lite Browser"
             VALUE "ProductVersion", LITE_BROWSER_VERSION
