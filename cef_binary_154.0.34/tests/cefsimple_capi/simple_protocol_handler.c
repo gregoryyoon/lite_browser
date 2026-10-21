@@ -76,7 +76,7 @@ static void save_allowed_protocol(const char* origin, const char* scheme) {
 static int is_standard_web_scheme(const char* scheme) {
   static const char* kStandardSchemes[] = {
     "http", "https", "file", "chrome", "edge", "lite", "about",
-    "data", "blob", "javascript", "ws", "wss", NULL
+    "data", "blob", "javascript", "ws", "wss", "devtools", "view-source", NULL
   };
   for (int i = 0; kStandardSchemes[i] != NULL; i++) {
     if (_stricmp(scheme, kStandardSchemes[i]) == 0) {
@@ -181,7 +181,10 @@ int HandleExternalProtocolIfNeeded(HWND parent_hwnd, const char* url, const char
 
   wchar_t app_name[256] = {0};
   if (!is_registered_url_protocol(w_scheme, app_name, sizeof(app_name)/sizeof(app_name[0]))) {
-    return 0; // Not a registered URL protocol in Windows, let CEF handle/reject
+    // Protocol is not registered in Windows (e.g. astx://, touchenex:// when not installed).
+    // Silently cancel navigation to prevent Chromium from navigating to ERR_UNKNOWN_URL_SCHEME,
+    // preserving the current page so the user can see download/install instructions.
+    return 1;
   }
 
   // 4. Extract site origin

@@ -190,6 +190,19 @@ lite_browser\
 
 ---
 
+## ⚠️ 알려진 제한 사항 및 호환성 안내 (Known Limitations & Compatibility)
+
+### 🔒 국내 금융·증권사 보안 프로그램 (Kings Online Security 등) 호환성
+- **현상**: 한국투자증권 등 일부 국내 금융 및 증권 포털 접속 시 `Kings Online Security 작동 중 오류가 발생했습니다. (ERROR_PROTECTION_FAILED)` 경고창이 발생하며 로그인/거래 페이지 진입이 불가합니다.
+- **원인 (바이너리 분석 결과)**:
+  - 금융권 키보드 보안 및 프로세스 보호 솔루션인 **Kings Online Security (K-Defense, 킹스정보통신)**의 백그라운드 서비스(`KOSinj.exe`의 `fnMultiBrowserCheck`)는 보호 대상 브라우저 목록을 메이저 브라우저 실행 파일명(`chrome.exe`, `msedge.exe`, `whale.exe`, `opera.exe`, `vivaldi.exe`, `firefox.exe`, `safari.exe`, `msedgewebview2.exe` 등)으로 하드코딩(화이트리스트)하여 검사합니다.
+  - Lite Browser의 실행 파일명인 `lite_browser.exe`는 미지원 브라우저(`Unknown browser type`)로 판정되어 보안 모듈 주입(`fnMultiBroInjection`) 및 메모리 보호 처리가 차단됩니다.
+- **안내 사항**:
+  - Lite Browser는 가볍고 빠른 웹 서핑과 안전한 브라우징 환경을 지향하며, 프로세스 위장이나 비인가 DLL 강제 주입 허용 등 보안 안정성을 해치는 우회 처리는 수행하지 않습니다.
+  - 따라서 해당 보안 프로그램(KOS) 구동이 필수적인 금융 거래 및 증권사 로그인 업무 시에는 **Microsoft Edge** 또는 **Google Chrome** 등 공식 지원 브라우저를 이용해 주시기 바랍니다.
+
+---
+
 ## 📄 라이선스 (License)
 
 본 프로젝트는 Chromium 및 CEF (Chromium Embedded Framework) 오픈소스 라이선스 규정을 준수합니다.
