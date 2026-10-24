@@ -837,14 +837,21 @@ document.addEventListener('DOMContentLoaded', () => {
     };
   }
 
-  // Aside Style Friendly Tool Name Mapping
+  // Aside Style Friendly Tool Name Mapping (No emojis, per AGENTS.md)
   const TOOL_NAME_KO = {
-    browser_navigate: '🌐 웹페이지 이동',
-    browser_get_page_content: '📄 페이지 실시간 분석',
-    browser_click_element: '🖱️ 요소 클릭',
-    browser_type_text: '⌨️ 텍스트 입력',
-    browser_scroll: '📜 화면 스크롤',
-    browser_autofill_login: '🔐 볼트 자동 로그인'
+    browser_navigate: '웹페이지 이동',
+    browser_get_page_content: '페이지 실시간 분석',
+    browser_click_element: '요소 클릭',
+    browser_type_text: '텍스트 입력',
+    browser_scroll: '화면 스크롤',
+    browser_autofill_login: '볼트 자동 로그인',
+    browser_get_tabs: '탭 목록 조회',
+    browser_switch_tab: '탭 전환',
+    browser_reorder_tabs: '탭 순서 재배치 (그룹핑)',
+    browser_get_tab_content: '탭 본문 내용 추출',
+    browser_split_tabs: '분할 화면(Split View) 결합',
+    browser_close_tabs: '탭 닫기',
+    browser_open_tab: '새 탭 열기'
   };
 
   function appendToolCard(toolName, args, result) {
@@ -855,14 +862,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let argSummary = '';
     if (toolName === 'browser_navigate') argSummary = `URL: ${args.url || ''}`;
+    else if (toolName === 'browser_open_tab') argSummary = `URL: ${args.url || '새 탭(lite://favorites)'}${args.activate === false ? ' [백그라운드]' : ''}`;
     else if (toolName === 'browser_click_element') argSummary = `클릭: ${args.text || args.selector || ''}`;
     else if (toolName === 'browser_type_text') argSummary = `입력: "${args.text || ''}" (${args.selector || ''})`;
     else if (toolName === 'browser_get_page_content') argSummary = `본문 추출 (형식: ${args.format || 'summary'})`;
+    else if (toolName === 'browser_get_tabs') argSummary = `열린 탭 전체 목록 조회`;
+    else if (toolName === 'browser_switch_tab') argSummary = `탭 #${args.tab_id} 화면 전환`;
+    else if (toolName === 'browser_reorder_tabs') argSummary = `탭 재배치 순서: [${(args.tab_ids || []).join(' → ')}]`;
+    else if (toolName === 'browser_get_tab_content') argSummary = `탭 본문 추출 (ID: ${args.tab_id})`;
+    else if (toolName === 'browser_split_tabs') argSummary = `좌측(Tab ${args.left_tab_id}) | 우측(Tab ${args.right_tab_id}) 분할 화면`;
+    else if (toolName === 'browser_close_tabs') argSummary = `탭 닫기 대상: [${(args.tab_ids || []).join(', ')}]`;
     else argSummary = JSON.stringify(args);
 
     let resultSummary = '';
     if (toolName === 'browser_get_page_content' && result?.title) {
       resultSummary = `[${result.title}] - ${result.url}\n${(result.bodySnippet || result.markdown || '').slice(0, 400)}...`;
+    } else if (toolName === 'browser_get_tab_content' && result?.title) {
+      resultSummary = `[Tab ${result.tab_id}: ${result.title}] - ${result.url}\n${(result.bodySnippet || '').slice(0, 400)}...`;
+    } else if (toolName === 'browser_get_tabs' && result?.tabs) {
+      resultSummary = `총 ${result.tabs.length}개 탭:\n` + result.tabs.map(t => `- [${t.tab_id}] ${t.title || '새 탭'} (${t.url})${t.is_active ? ' [활성]' : ''}${t.is_split ? ' [분할]' : ''}`).join('\n');
+    } else if (toolName === 'browser_switch_tab' && result?.status === 'success') {
+      resultSummary = `탭 #${args.tab_id} 화면으로 즉시 전환했습니다.`;
+    } else if (toolName === 'browser_open_tab' && result?.status === 'success') {
+      resultSummary = `새 탭(ID: ${result.tab_id}) 열기 완료: ${result.title || '새 탭'} (${result.url})`;
     } else {
       resultSummary = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
     }
@@ -875,7 +897,7 @@ document.addEventListener('DOMContentLoaded', () => {
           </span>
           <span class="step-name">${escapeHtml(friendlyName)}</span>
         </div>
-        <span class="step-status-icon">${isError ? '❌ 실패' : '✓ 완료'}</span>
+        <span class="step-status-icon">${isError ? '실패' : '완료'}</span>
       </div>
       <div class="timeline-step-body">
         <div style="font-weight: 500; margin-bottom: 4px; color: var(--text-primary);">${escapeHtml(argSummary)}</div>
@@ -921,6 +943,7 @@ document.addEventListener('DOMContentLoaded', () => {
   async function handleSendPrompt(customText = null) {
     const prompt = (customText || promptInput.value).trim();
     if (!prompt || isGenerating) return;
+    if (window.sendNativeLog) window.sendNativeLog(`[Sidepanel] User Prompt: "${prompt}"`);
 
     promptInput.value = '';
     appendUserMessage(prompt);
@@ -959,12 +982,18 @@ document.addEventListener('DOMContentLoaded', () => {
         `2. [사용자 지시 준수 및 임의 조작 금지 원칙]: 사용자가 URL 질문, 본문 요약, 내용 설명 등 '조회/질문'을 했을 때는 오직 'browser_get_page_content'로 내용만 확인하고 즉시 답변해야 합니다. 사용자가 명시적으로 검색이나 클릭을 지시하지 않았다면, 화면에 검색창이나 버튼이 보이더라도 절대로 'browser_type_text'나 'browser_click_element'를 임의로 실행하지 마십시오.\n` +
         `3. [실시간 갱신 규칙]: 웹 브라우저는 사용자가 대화 도중에도 수시로 다른 페이지로 이동할 수 있는 동적 환경입니다. 사용자가 새로 질문(새 턴)할 때마다 과거 대화 기록에 의존하지 말고 'browser_get_page_content' 도구를 호출하여 최신 실시간 브라우저 상태를 확인하세요.\n` +
         `4. [도구 완료 후 답변 원칙]: 이번 턴에서 도구를 실행하여 결과를 받았다면 불필요한 추가 조작을 하지 말고, 수신된 최신 URL 및 본문 데이터를 바탕으로 즉시 사용자에게 최종 텍스트 답변을 작성하여 완료하십시오.\n` +
-        `5. 도구 실행 결과를 받으면 그 안의 실제 최신 URL과 본문 내용을 바탕으로 정확하게 답변하세요.\n\n`;
+        `5. 도구 실행 결과를 받으면 그 안의 실제 최신 URL과 본문 내용을 바탕으로 정확하게 답변하세요.\n` +
+        `6. [탭 제어 핵심 기능 규칙]:\n` +
+        `   - 새 탭 열기: 사용자가 '새 탭에 ~ 열어줘', '새로운 탭에서 검색해줘' 등을 요청하면 'browser_open_tab(url, activate)'을 호출하세요. 특정 URL이 없으면 url을 비워두거나 'lite://favorites'로 지정하고, 검색어나 키워드인 경우 구글 검색 URL('https://www.google.com/search?q=...')이나 해당 공식 사이트 주소를 지정하세요. 사용자가 '백그라운드로 열어줘'라고 명시한 경우에만 activate: false로 호출하고 그 외에는 activate: true(기본값)로 호출하세요. 생성 완료 후에는 결과 안내 메시지와 함께 [새 탭으로 이동](lite-tab://switch/새탭ID) 바로가기 링크 카드를 제공하세요.\n` +
+        `   - 탭 찾기: 사용자가 특정 탭을 찾아달라고 하거나 이동을 요청하면 먼저 'browser_get_tabs'로 탭 목록을 조회하세요. 검색어로 1개 탭이 특정되면 'browser_switch_tab(tab_id)'으로 즉시 전환하고 어떤 탭으로 전환했는지 안내하세요. 일치하는 후보가 여러 개이면 전환하지 말고 후보 탭들의 목록을 [탭제목](lite-tab://switch/탭ID) 링크 형식으로 안내하세요.\n` +
+        `   - 탭 그룹핑: 사용자가 탭 정리/그룹핑을 요청하면 'browser_get_tabs'로 전체 탭을 확인한 뒤, 성격/도메인/주제별로 분류하고 'browser_reorder_tabs(tab_ids)'를 호출하여 연관 탭들이 나란히 인접하도록 탭 순서를 정렬하세요. 이후 그룹 목록과 각 탭의 링크를 깔끔하게 브리핑하세요.\n` +
+        `   - 탭 간 비교: 사용자가 탭 간 비교/대조를 요청하면 'browser_get_tabs'로 대상 탭을 파악하고, 각 대상 탭에 대해 'browser_get_tab_content(tab_id)'로 본문 내용을 추출하세요. 비교 대상이 2개 탭인 경우 'browser_split_tabs(left_tab_id, right_tab_id)'를 호출하여 분할 화면으로 띄워 시각적 대조를 지원하고, 사이드패널 답변에 스펙, 가격, 특징, 장단점을 명확하게 정리한 마크다운 비교표(Markdown Table)를 작성하세요.\n` +
+        `   - 탭 닫기: 사용자가 탭을 닫아달라고 하면 'browser_get_tabs'로 대상 탭 ID를 확인한 뒤 'browser_close_tabs(tab_ids)'를 호출하세요. 사용자가 "확인 없이 닫아줘"라고 명시한 경우에만 require_confirmation: false로 호출하고, 그 외에는 require_confirmation: true(기본값)로 안전 확인 카드를 거치도록 하세요.\n\n`;
       const systemPrompt = baseDirective + (settings.systemPrompt || '') + memoryPrompt;
       const tools = window.taskRuntime.getAvailableTools();
 
       let loopCount = 0;
-      const maxLoops = 6;
+      const maxLoops = 8;
       const executedToolsInTurn = new Set();
 
       while (loopCount < maxLoops) {
@@ -972,11 +1001,22 @@ document.addEventListener('DOMContentLoaded', () => {
         const bubble = createStreamingBubble();
         let toolCalls = [];
 
-        // If page content was already retrieved in this turn without subsequent navigation,
-        // filter it out from tools so the model is prompted to produce the final text answer.
+        // Filter out single-shot tools once executed in this turn to prompt final text answer
         let activeTools = tools;
         if (executedToolsInTurn.has('browser_get_page_content') && !executedToolsInTurn.has('browser_navigate')) {
-          activeTools = tools.filter(t => t.name !== 'browser_get_page_content');
+          activeTools = activeTools.filter(t => t.name !== 'browser_get_page_content');
+        }
+        if (executedToolsInTurn.has('browser_reorder_tabs')) {
+          activeTools = activeTools.filter(t => t.name !== 'browser_reorder_tabs');
+        }
+        if (executedToolsInTurn.has('browser_split_tabs')) {
+          activeTools = activeTools.filter(t => t.name !== 'browser_split_tabs');
+        }
+        if (executedToolsInTurn.has('browser_close_tabs')) {
+          activeTools = activeTools.filter(t => t.name !== 'browser_close_tabs');
+        }
+        if (executedToolsInTurn.has('browser_open_tab')) {
+          activeTools = activeTools.filter(t => t.name !== 'browser_open_tab');
         }
 
         await provider.chatStream({
@@ -1003,6 +1043,7 @@ document.addEventListener('DOMContentLoaded', () => {
             chatContainer.scrollTop = chatContainer.scrollHeight;
           },
           onToolCall: (tc) => {
+            if (window.sendNativeLog) window.sendNativeLog(`[Sidepanel] LLM onToolCall: ${tc.name} ${JSON.stringify(tc.args)}`);
             bubble.statusNotice.classList.add('hidden');
             toolCalls.push(tc);
           },
@@ -1058,7 +1099,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Execute tool calls step by step
         for (const tc of toolCalls) {
           executedToolsInTurn.add(tc.name);
-          if (tc.name === 'browser_navigate') {
+          if (tc.name === 'browser_navigate' || tc.name === 'browser_open_tab') {
             executedToolsInTurn.delete('browser_get_page_content');
           }
           try {
@@ -1127,21 +1168,197 @@ document.addEventListener('DOMContentLoaded', () => {
     window.taskRuntime.setState(TaskState.IDLE, '대화 리셋');
   });
 
+  // Global Tab Switch & Link Click Listener
+  messagesList.addEventListener('click', (e) => {
+    const tabEl = e.target.closest('[data-tab-id]');
+    if (tabEl) {
+      const tabId = tabEl.getAttribute('data-tab-id');
+      if (tabId) {
+        if (window.sendUiAction) {
+          window.sendUiAction(`http://ui-action/switch-tab?id=${encodeURIComponent(tabId)}`);
+        } else {
+          window.location.href = `http://ui-action/switch-tab?id=${encodeURIComponent(tabId)}`;
+        }
+      }
+    }
+  });
+
+  // Interactive Tab Close Confirmation Card
+  window.confirmCloseTabsUI = function(tabIds, cachedTabs) {
+    return new Promise((resolve) => {
+      let tabsInfo = [];
+      if (cachedTabs && Array.isArray(cachedTabs)) {
+        tabsInfo = tabIds.map(id => cachedTabs.find(t => t.tab_id === id) || { tab_id: id, title: `탭 #${id}`, url: '' });
+      } else {
+        tabsInfo = tabIds.map(id => ({ tab_id: id, title: `탭 #${id}`, url: '' }));
+      }
+
+      const card = document.createElement('div');
+      card.className = 'interactive-confirm-card';
+      card.innerHTML = `
+        <div class="confirm-header">
+          <svg viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          <span>탭 닫기 확인 (${tabIds.length}개)</span>
+        </div>
+        <p class="confirm-message">아래 탭들을 닫으시겠습니까? 저장되지 않은 작업 내용이 손실될 수 있습니다.</p>
+        <ul class="confirm-tab-list">
+          ${tabsInfo.map(t => `
+            <li class="confirm-tab-item">
+              <div class="confirm-tab-info">
+                <span class="confirm-tab-title" title="${escapeHtml(t.title || '')}">${escapeHtml(t.title || '제목 없는 탭')}</span>
+                ${t.url ? `<span class="confirm-tab-url" title="${escapeHtml(t.url)}">${escapeHtml(t.url)}</span>` : ''}
+              </div>
+              <span class="confirm-tab-id">#${t.tab_id}</span>
+            </li>
+          `).join('')}
+        </ul>
+        <div class="confirm-actions">
+          <button class="confirm-btn danger" id="btn-confirm-close">닫기 승인</button>
+          <button class="confirm-btn cancel" id="btn-cancel-close">취소</button>
+        </div>
+        <div class="confirm-status-resolved hidden" id="confirm-status-label"></div>
+      `;
+
+      messagesList.appendChild(card);
+      chatContainer.scrollTop = chatContainer.scrollHeight;
+
+      const btnConfirm = card.querySelector('#btn-confirm-close');
+      const btnCancel = card.querySelector('#btn-cancel-close');
+      const actionsDiv = card.querySelector('.confirm-actions');
+      const statusLabel = card.querySelector('#confirm-status-label');
+
+      btnConfirm.addEventListener('click', () => {
+        actionsDiv.classList.add('hidden');
+        statusLabel.classList.remove('hidden');
+        statusLabel.className = 'confirm-status-resolved success';
+        statusLabel.textContent = `✓ ${tabIds.length}개 탭 닫기가 승인되었습니다.`;
+        resolve(true);
+      });
+
+      btnCancel.addEventListener('click', () => {
+        actionsDiv.classList.add('hidden');
+        statusLabel.classList.remove('hidden');
+        statusLabel.className = 'confirm-status-resolved cancelled';
+        statusLabel.textContent = '✕ 탭 닫기가 취소되었습니다.';
+        resolve(false);
+      });
+    });
+  };
+
   // Helpers
   function escapeHtml(str) {
     if (!str) return '';
     return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
+  function parseMarkdownTables(md) {
+    const lines = md.split('\n');
+    const out = [];
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i];
+      if (line.trim().startsWith('|') && line.trim().endsWith('|')) {
+        const tableLines = [];
+        while (i < lines.length && lines[i].trim().startsWith('|') && lines[i].trim().endsWith('|')) {
+          tableLines.push(lines[i].trim());
+          i++;
+        }
+        if (tableLines.length >= 2) {
+          const parseRow = (rowStr) => rowStr.slice(1, -1).split('|').map(c => c.trim());
+          const headerCells = parseRow(tableLines[0]);
+          let isTable = false;
+          let bodyStartIndex = 1;
+          if (tableLines.length >= 2 && /^\|(\s*:?-+:?\s*\|)+$/.test(tableLines[1])) {
+            isTable = true;
+            bodyStartIndex = 2;
+          }
+          if (isTable) {
+            let html = '<div class="markdown-table-wrapper"><table class="markdown-table"><thead><tr>';
+            for (const h of headerCells) {
+              html += `<th>${escapeHtml(h)}</th>`;
+            }
+            html += '</tr></thead><tbody>';
+            for (let b = bodyStartIndex; b < tableLines.length; b++) {
+              const cells = parseRow(tableLines[b]);
+              html += '<tr>';
+              for (let c = 0; c < headerCells.length; c++) {
+                html += `<td>${escapeHtml(cells[c] || '')}</td>`;
+              }
+              html += '</tr>';
+            }
+            html += '</tbody></table></div>';
+            out.push(html);
+            continue;
+          }
+        }
+        out.push(...tableLines);
+      } else {
+        out.push(line);
+        i++;
+      }
+    }
+    return out.join('\n');
+  }
+
   function formatMarkdown(text) {
     if (!text) return '';
-    return text
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-      .replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
-      .replace(/`([^`]+)`/g, '<code>$1</code>')
-      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-      .replace(/\*([^*]+)\*/g, '<em>$1</em>')
-      .replace(/\n/g, '<br>');
+
+    // 1. Extract code blocks
+    const codeBlocks = [];
+    text = text.replace(/```([\s\S]*?)```/g, (match, code) => {
+      const idx = codeBlocks.length;
+      codeBlocks.push(`<pre><code>${escapeHtml(code.trim())}</code></pre>`);
+      return `__CODE_BLOCK_${idx}__`;
+    });
+
+    // 2. Extract inline code
+    const inlineCodes = [];
+    text = text.replace(/`([^`]+)`/g, (match, code) => {
+      const idx = inlineCodes.length;
+      inlineCodes.push(`<code>${escapeHtml(code)}</code>`);
+      return `__INLINE_CODE_${idx}__`;
+    });
+
+    // 3. Parse Markdown Tables
+    text = parseMarkdownTables(text);
+
+    // 4. Parse Headers
+    text = text.replace(/^### (.*$)/gim, '<h4 style="margin: 8px 0 4px; font-size: 13px; font-weight: 600; color: var(--text-primary);">$1</h4>');
+    text = text.replace(/^## (.*$)/gim, '<h3 style="margin: 10px 0 6px; font-size: 14px; font-weight: 700; color: var(--text-primary);">$1</h3>');
+    text = text.replace(/^# (.*$)/gim, '<h2 style="margin: 12px 0 8px; font-size: 15px; font-weight: 700; color: var(--text-primary);">$1</h2>');
+
+    // 5. Bold & Italic
+    text = text.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+    text = text.replace(/(?<!\*)\*([^*\n\s][^*\n]*[^*\n\s]|\S)\*(?!\*)/g, '<em>$1</em>');
+
+    // 6. Links (including lite-tab://switch/...)
+    text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, label, href) => {
+      if (href.startsWith('lite-tab://switch/')) {
+        const tabId = href.replace('lite-tab://switch/', '').trim();
+        return `<a href="javascript:void(0)" class="tab-link" data-tab-id="${tabId}"><svg class="icon-inline" viewBox="0 0 24 24" style="width:12px;height:12px;vertical-align:-1px;margin-right:3px;stroke:currentColor;fill:none;"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>${escapeHtml(label)}</a>`;
+      }
+      return `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`;
+    });
+
+    // 7. Restore code blocks
+    codeBlocks.forEach((block, idx) => {
+      text = text.replace(`__CODE_BLOCK_${idx}__`, block);
+    });
+    inlineCodes.forEach((code, idx) => {
+      text = text.replace(`__INLINE_CODE_${idx}__`, code);
+    });
+
+    // 8. Line breaks (protect table wrappers, headers, and pre blocks from unnecessary <br>)
+    const parts = text.split(/(<div class="markdown-table-wrapper">[\s\S]*?<\/div>|<pre><code>[\s\S]*?<\/code><\/pre>)/g);
+    text = parts.map(part => {
+      if (part.startsWith('<div class="markdown-table-wrapper">') || part.startsWith('<pre><code>')) {
+        return part;
+      }
+      return part.replace(/<\/h[234]>\n?/g, (m) => m.slice(0, 5))
+                 .replace(/\n/g, '<br>');
+    }).join('');
+
+    return text;
   }
 
   // Initial UI Setup

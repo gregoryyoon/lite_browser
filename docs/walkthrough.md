@@ -2814,4 +2814,73 @@ Chromium의 불완전한 내부 탭 종료 동작을 차단하고, `Ctrl + F4` �
   - 마우스 클릭 및 `Ctrl + S` 단축키 입력 시 파일 저장 대화상자가 표시되며, URL 확장자/제목에 따른 기본 파일명이 정확히 제안됨을 확인.
   - 파일 저장 시 상단 다운로드 배지 및 팝업에 정상 등록되고 파일 내용이 원본 그대로 다운로드됨을 확인.
 
+---
+
+## 76. AI 에이전트 자율 탭 제어 서브시스템 및 새 탭 생성 파이프라인 (AI Agent Autonomous Tab Control & Open Tab Pipeline)
+
+### 76.1 개요
+사용자가 사이드패널 AI 에이전트와의 자연어 대화를 통해 열려 있는 브라우저 탭들을 지능적으로 제어(탭 검색 및 즉시 전환, 도메인/주제별 탭 그룹핑 재배치, 다중 탭 본문 실시간 추출 및 분할 화면 비교 대조, 안전 확인 다중 탭 닫기, 자연어 새 탭 생성 및 백그라운드 로드)할 수 있는 자율 브라우저 탭 제어 아키텍처를 구현했습니다.  
+또한 CEF C API 요청 처리 중 발생할 수 있는 스택 오버플로우(`0xC00000FD`)를 원천 방지하는 지연 내비게이션 파이프라인(`PostDeferredNavigation`)과 히든 iframe 기반 IPC 통신 브릿지(`sendUiAction`), 그리고 최신 Gemini 4 / 3.8 모델 라인업 및 할당량 초과(429) 복원력 개선을 완료했습니다.
+
+### 76.2 주요 기능 및 툴체인 (Autonomous Toolchain)
+1. **탭 목록 조회 (`browser_get_tabs`)**:
+   - 현재 브라우저 창의 전체 탭 상태(`tab_id`, `title`, `url`, `is_active`, `is_split`)를 실시간 JSON 배열로 추출.
+   - 검색, 그룹핑, 비교, 닫기 등 모든 탭 관련 액션 수행 전 사전 상태 파악의 기반 데이터로 사용.
+2. **탭 검색 및 화면 전환 (`browser_switch_tab`)**:
+   - 검색어나 사용자 질의로 특정된 1개 탭으로 즉시 활성 화면 전환.
+   - 일치하는 후보가 여러 개인 경우 강제 전환 대신 `[탭제목](lite-tab://switch/탭ID)` 마크다운 링크 목록 카드를 제공하여 사용자가 직접 원클릭으로 선택할 수 있도록 지원.
+3. **도메인 및 주제별 탭 그룹핑 (`browser_reorder_tabs`)**:
+   - LLM이 열린 탭들의 도메인과 맥락(업무, 쇼핑, 뉴스, 개발 등)을 분석하여 유사한 탭들이 탭 바에서 나란히 인접하도록 순서(`tab_ids` 배열)를 자동 재배치.
+   - 그룹별 구성 내역과 각 탭의 다이렉트 링크를 사이드패널에 브리핑.
+4. **탭 간 내용 비교 및 분할 화면 연동 (`browser_get_tab_content` & `browser_split_tabs`)**:
+   - 사용자가 두 개 이상의 탭 비교를 요청할 경우, 각 탭의 활성 전환 없이 백그라운드에서 비동기로 DOM 본문을 추출(`browser_get_tab_content`).
+   - 비교 대상이 2개 탭인 경우 `browser_split_tabs`를 호출하여 듀얼 분할 화면(Dual Split View) 좌/우에 나란히 배치해 시각적 대조를 지원.
+   - 사이드패널 대화창에 스펙, 가격, 특징, 장단점을 명확하게 정리한 마크다운 비교표(Markdown Table)를 최종 렌더링.
+5. **안전 확인 기반 탭 닫기 (`browser_close_tabs`)**:
+   - 대상 탭 ID 목록을 닫기 전 사용자 데이터 유실을 방지하기 위해 사이드패널에 인터랙티브 확인 카드(`confirmCloseTabsUI`)를 노출.
+   - 사용자가 명시적으로 "확인 없이 닫아줘"라고 요청한 경우에만 `require_confirmation: false`로 즉시 일괄 종료.
+6. **자연어 새 탭 생성 및 웹페이지 로드 (`browser_open_tab`)**:
+   - "새 탭에 github 열어줘", "새 탭에서 오늘 날씨 검색해줘" 등의 요청 수신 시 새 탭을 생성하고 URL/검색어를 로드.
+   - URL 스키마 자동 보정(도메인 형식은 `https://`, 일반 검색어는 Google Search URL로 확장).
+   - "백그라운드로 열어줘" 요청 시 `activate: false`를 전달하여 현재 작업 중인 탭의 포커스를 유지한 채 백그라운드에서 탭 생성 및 로드 지원.
+   - 완료 후 사이드패널에 결과 카드와 함께 `[새 탭으로 이동](lite-tab://switch/새탭ID)` 바로가기 링크를 제공.
+
+### 76.3 C 백엔드 및 네비게이션 안정성 개선 (C API Architecture & Stability)
+1. **지연 내비게이션 태스크를 통한 CEF 스택 오버플로우(`0xC00000FD`) 해결**:
+   - `on_before_browse` 콜백 내부에서 동기식으로 `main_frame->load_url()`을 호출할 경우 Chromium NavigationThrottle 파이프라인이 재진입(Re-entrancy)되면서 `libcef.dll` 내부 스택 한도 초과(`STATUS_STACK_OVERFLOW`)로 프로세스가 즉시 비정상 종료되던 문제를 식별.
+   - `deferred_navigate_task_t` 구조체와 `IMPLEMENT_REFCOUNTING_MANUAL` 매크로 기반의 CEF 커스텀 태스크를 구현하고, `cef_post_task(TID_UI, &task->task)`를 통해 UI 스레드 메시지 루프의 다음 턴에서 안전하게 `load_url`이 수행되도록 비동기 지연 실행 파이프라인(`PostDeferredNavigation`)으로 분리.
+2. **사이드패널 히든 iframe 통신 브릿지 (`sendUiAction`)**:
+   - 사이드패널 웹뷰 내부에서 `window.location.href = 'http://ui-action/...'` 형태로 C 백엔드에 명령을 전송할 경우, 사이드패널 자체의 프레임 내비게이션이 유발되어 진행 중인 LLM Fetch 스트리밍이 취소되거나 렌더러 상태가 오염되는 현상을 방지.
+   - `ui/task_runtime.js`에 비가시 iframe을 동적으로 생성/교체하는 `sendUiAction()`을 도입하고, 모든 C 백엔드 IPC 액션(`ai-open-tab`, `ai-get-tabs`, `ai-get-tab-dom`, `ai-split-tabs`, `ai-close-tabs` 등)을 iframe 브릿지로 격리.
+3. **C API 탭 액션 핸들러 구현 (`simple_handler.c`)**:
+   - `ai-open-tab?url=...&activate=...`: `CreateNewTabEx2(win_ctx, target_url, 1, in_background)`를 호출하여 탭 생성 후, 사이드패널 메인 프레임에 `window.onAgentTabOpened({ success, tab_id, title, url })` 자바스크립트 콜백을 전달.
+   - `ai-get-tabs`: 열려 있는 모든 탭의 ID, 제목, URL, 활성/분할 여부를 JSON으로 직렬화하여 전달.
+   - `ai-reorder-tabs`: 탭 인덱스 매핑을 재배열하고 `update_ui_tabs`를 호출하여 상단 탭 바 레이아웃 실시간 갱신.
+   - `ai-get-tab-dom`: 지정 탭의 메인 프레임에 본문 추출 스크립트를 주입하고 마크다운/텍스트 요약본을 수집하여 반환.
+   - `ai-split-tabs`: `CreateRightSplitBrowser` 및 `split_ratio = 0.5f`를 적용하여 듀얼 분할 뷰 즉시 구성.
+   - `ai-close-tabs`: 탭 목록 역순 순회로 인덱스 붕괴 없이 지정된 탭들을 일괄 정리하고 인접 탭을 활성화.
+4. **치명적 예외 핸들러 및 콘솔 로깅 (`cefsimple_win.c`)**:
+   - `SetUnhandledExceptionFilter`를 통해 크래시 발생 시 ExceptionCode, ExceptionAddress, Faulting Module 및 32프레임 스택 트레이스를 `debug_c.txt` 파일 및 디버그 콘솔에 즉시 플러시하여 원인 규명 속도를 극대화.
+
+### 76.4 Gemini 모델 라인업 최신화 및 429 복원력 강화
+- **모델 옵션 최적화**: Google Gemini 4세대 및 3.8세대 공식 최신 모델인 `gemini-4-argon` 및 `gemini-3.8-flash`를 메인 모델로 지정.
+- **Quota Exceeded(429) 재시도 및 실시간 알림**: 무료 티어 및 분당 요청 한도 초과 시 에이전트가 즉각 크래시되거나 실패하지 않고, `details.RetryInfo`의 `retryDelay`를 파싱하여 상태 버블에 카운트다운을 표시하며 안전하게 대기 후 자동 재시도하는 복원 파이프라인 구축.
+
+### 76.5 관련 소스 코드
+- [`cef_binary_154.0.34/tests/cefsimple_capi/cefsimple_win.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/cefsimple_win.c)
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.c)
+- [`ui/task_runtime.js`](file:///c:/projects/lite_browser/ui/task_runtime.js)
+- [`ui/sidepanel.js`](file:///c:/projects/lite_browser/ui/sidepanel.js)
+- [`ui/sidepanel.html`](file:///c:/projects/lite_browser/ui/sidepanel.html)
+- [`ui/sidepanel.css`](file:///c:/projects/lite_browser/ui/sidepanel.css)
+
+### 76.6 빌드 및 검증 결과
+- **디버그 빌드**: `cef_binary_154.0.34` MSBuild Debug 타깃 빌드 성공 (`Exit code 0, 경고 0개, 오류 0개`).
+- **실기 검증**:
+  - "네이버 열어줘" 입력 시 브라우저 강제 종료 현상이 완벽히 해결되고 정상 탐색 및 본문 분석 완료 확인.
+  - "새로운 탭에 github 열어줘" 입력 시 새 탭 생성 및 GitHub 로드, 사이드패널에 `[새 탭으로 이동]` 바로가기 카드 렌더링 확인.
+  - "백그라운드 새 탭에 검색해줘" 질의 시 활성 탭 전환 없이 백그라운드 탭 생성 동작 확인.
+  - 탭 검색, 탭 그룹핑(재배치), 탭 간 비교(본문 추출 및 분할 화면 결합), 탭 닫기(확인 카드 팝업 후 안전 닫기) 전체 시나리오 정상 동작 최종 확인.
+
+
 

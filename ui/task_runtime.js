@@ -13,6 +13,34 @@ const TaskState = {
   DONE: 'DONE'
 };
 
+function sendNativeLog(msg) {
+  console.log(msg);
+  try {
+    let bridge = document.getElementById('debug-log-bridge');
+    if (!bridge) {
+      bridge = document.createElement('iframe');
+      bridge.id = 'debug-log-bridge';
+      bridge.style.display = 'none';
+      document.body.appendChild(bridge);
+    }
+    bridge.src = 'http://ui-action/log?msg=' + encodeURIComponent(msg);
+  } catch (e) {}
+}
+window.sendNativeLog = sendNativeLog;
+
+function sendUiAction(url) {
+  let bridge = document.getElementById('ui-action-bridge');
+  if (bridge) {
+    bridge.remove();
+  }
+  bridge = document.createElement('iframe');
+  bridge.id = 'ui-action-bridge';
+  bridge.style.display = 'none';
+  bridge.src = url;
+  document.body.appendChild(bridge);
+}
+window.sendUiAction = sendUiAction;
+
 class TaskRuntime {
   constructor() {
     this.state = TaskState.IDLE;
@@ -112,12 +140,100 @@ class TaskRuntime {
             domain: { type: 'string', description: '로그인 대상 도메인' }
           }
         }
+      },
+      {
+        name: 'browser_get_tabs',
+        description: '현재 브라우저 창에 열려 있는 모든 탭의 실시간 목록(tab_id, title, url, is_active, is_split)을 조회합니다. 탭 찾기, 탭 그룹핑, 탭 간 비교, 탭 닫기 전 대상 탭을 파악하기 위해 반드시 먼저 호출해야 합니다.',
+        parameters: {
+          type: 'object',
+          properties: {}
+        }
+      },
+      {
+        name: 'browser_switch_tab',
+        description: '지정한 tab_id의 탭으로 브라우저 활성 화면을 즉시 전환합니다. 검색어나 자연어 질의로 단 하나의 대상 탭이 명확히 특정되었을 때 화면 전환을 위해 호출합니다.',
+        parameters: {
+          type: 'object',
+          properties: {
+            tab_id: { type: 'number', description: '전환할 대상 탭의 ID (예: 1)' }
+          },
+          required: ['tab_id']
+        }
+      },
+      {
+        name: 'browser_reorder_tabs',
+        description: '열려 있는 탭들의 표시 순서를 주어진 tab_ids 배열 순서대로 일괄 재배치합니다. 탭 그룹핑 시 도메인 및 주제가 유사한 탭들이 탭 바에서 나란히 인접하도록 모을 때 사용합니다.',
+        parameters: {
+          type: 'object',
+          properties: {
+            tab_ids: {
+              type: 'array',
+              items: { type: 'number' },
+              description: '원하는 순서대로 정렬된 탭 ID 배열 (예: [3, 1, 4, 2])'
+            }
+          },
+          required: ['tab_ids']
+        }
+      },
+      {
+        name: 'browser_get_tab_content',
+        description: '특정 tab_id 탭의 웹페이지 제목, URL 및 상세 본문 텍스트(DOM)를 백그라운드에서 비동기로 추출합니다. 탭 간 내용/스펙/가격 비교를 수행할 때 각 대상 탭의 정보를 가져오기 위해 호출합니다.',
+        parameters: {
+          type: 'object',
+          properties: {
+            tab_id: { type: 'number', description: '본문 내용을 추출할 대상 탭의 ID' }
+          },
+          required: ['tab_id']
+        }
+      },
+      {
+        name: 'browser_split_tabs',
+        description: '두 개의 탭(left_tab_id, right_tab_id)을 브라우저의 분할 화면(Dual Split View)으로 좌/우에 나란히 배치하여 시각적 대조를 지원합니다. 사용자가 2개 탭의 비교를 요청했을 때 유용합니다.',
+        parameters: {
+          type: 'object',
+          properties: {
+            left_tab_id: { type: 'number', description: '좌측 창에 표시할 기본 탭의 ID' },
+            right_tab_id: { type: 'number', description: '우측 창에 분할로 띄울 탭의 ID' }
+          },
+          required: ['left_tab_id', 'right_tab_id']
+        }
+      },
+      {
+        name: 'browser_close_tabs',
+        description: '지정한 tab_ids에 해당하는 탭들을 닫습니다. 데이터 유실 방지를 위해 다중 탭 닫기 시 기본적으로 사이드패널에 사용자 확인 카드를 표시하며, 사용자가 "확인 없이 닫아줘"라고 명시한 경우에만 require_confirmation을 false로 지정합니다.',
+        parameters: {
+          type: 'object',
+          properties: {
+            tab_ids: {
+              type: 'array',
+              items: { type: 'number' },
+              description: '닫을 대상 탭 ID 목록'
+            },
+            require_confirmation: {
+              type: 'boolean',
+              description: '닫기 전 사용자 확인 카드 표시 여부 (다중 탭 닫기 시 기본값 true)'
+            }
+          },
+          required: ['tab_ids']
+        }
+      },
+      {
+        name: 'browser_open_tab',
+        description: '웹 브라우저에 새로운 탭을 추가로 생성하고 지정한 웹 페이지 또는 검색 결과 페이지를 로드합니다. 사용자가 "새 탭에 ~ 열어줘", "새 탭에서 검색해줘" 등을 요청했을 때 호출합니다.',
+        parameters: {
+          type: 'object',
+          properties: {
+            url: { type: 'string', description: '새 탭에 로드할 웹 URL 또는 검색 URL (예: https://github.com, https://www.google.com/search?q=... 미지정 시 기본 새 탭 lite://favorites)' },
+            activate: { type: 'boolean', description: '생성 후 새 탭으로 즉시 화면을 전환할지 여부 (기본값: true, 백그라운드 생성 요청 시: false)' }
+          }
+        }
       }
     ];
   }
 
   // Execute a single browser action
   async executeToolAction(name, args) {
+    sendNativeLog(`[TaskRuntime] executeToolAction: ${name} ${JSON.stringify(args)}`);
     this.addLog(`도구 실행: ${name} (${JSON.stringify(args)})`, 'action');
 
     // Check pause/interrupt guards
@@ -137,15 +253,64 @@ class TaskRuntime {
         switch (name) {
           case 'browser_navigate': {
             const url = args.url || '';
-            window.location.href = `http://ui-action/load?url=${encodeURIComponent(url)}`;
+            sendUiAction(`http://ui-action/load?url=${encodeURIComponent(url)}`);
             await new Promise(r => setTimeout(r, 1500)); // wait for navigation
             return { status: 'success', message: `Navigated to ${url}` };
+          }
+
+          case 'browser_open_tab': {
+            const rawUrl = (args.url || '').trim();
+            const activate = (args.activate !== false);
+            let targetUrl = rawUrl;
+            if (!targetUrl) {
+              targetUrl = 'lite://favorites';
+            } else if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://') && !targetUrl.startsWith('lite://') && !targetUrl.startsWith('file://')) {
+              if (targetUrl.includes('.') && !targetUrl.includes(' ')) {
+                targetUrl = 'https://' + targetUrl;
+              } else {
+                targetUrl = 'https://www.google.com/search?q=' + encodeURIComponent(targetUrl);
+              }
+            }
+
+            const openResult = await new Promise((resolve) => {
+              this.pendingOpenTabCallback = resolve;
+              window.onAgentTabOpened = (res) => {
+                if (this.pendingOpenTabCallback) {
+                  const cb = this.pendingOpenTabCallback;
+                  this.pendingOpenTabCallback = null;
+                  cb(res);
+                }
+              };
+              sendUiAction(`http://ui-action/ai-open-tab?url=${encodeURIComponent(targetUrl)}&activate=${activate ? '1' : '0'}`);
+              setTimeout(() => {
+                if (this.pendingOpenTabCallback) {
+                  this.pendingOpenTabCallback = null;
+                  resolve({ success: false, message: '새 탭 생성 응답 시간 초과' });
+                }
+              }, 4000);
+            });
+
+            if (openResult && openResult.success) {
+              return {
+                status: 'success',
+                tab_id: openResult.tab_id,
+                url: openResult.url || targetUrl,
+                title: openResult.title || '새 탭',
+                activated: activate,
+                message: `새 탭(ID: ${openResult.tab_id})에 ${openResult.url || targetUrl}을 열었습니다.`
+              };
+            } else {
+              return {
+                status: 'failed',
+                message: openResult?.message || '새 탭을 생성하지 못했습니다 (최대 탭 수 초과 가능).'
+              };
+            }
           }
 
           case 'browser_get_page_content': {
             const domData = await new Promise((resolve) => {
               this.pendingDomCallback = resolve;
-              window.location.href = 'http://ui-action/ai-get-dom-summary';
+              sendUiAction('http://ui-action/ai-get-dom-summary');
               setTimeout(() => {
                 if (this.pendingDomCallback) {
                   this.pendingDomCallback = null;
@@ -167,10 +332,10 @@ class TaskRuntime {
             const selector = args.selector || '';
             const text = args.text || '';
             if (selector) {
-              window.location.href = `http://ui-action/ai-highlight-element?selector=${encodeURIComponent(selector)}`;
+              sendUiAction(`http://ui-action/ai-highlight-element?selector=${encodeURIComponent(selector)}`);
               await new Promise(r => setTimeout(r, 200));
             }
-            window.location.href = `http://ui-action/ai-click-element?selector=${encodeURIComponent(selector)}&text=${encodeURIComponent(text)}`;
+            sendUiAction(`http://ui-action/ai-click-element?selector=${encodeURIComponent(selector)}&text=${encodeURIComponent(text)}`);
             await new Promise(r => setTimeout(r, 600));
             return { status: 'success', message: `Clicked element: ${selector || text}` };
           }
@@ -180,10 +345,10 @@ class TaskRuntime {
             const text = args.text || '';
             const enter = args.press_enter ? '1' : '0';
             if (selector) {
-              window.location.href = `http://ui-action/ai-highlight-element?selector=${encodeURIComponent(selector)}`;
+              sendUiAction(`http://ui-action/ai-highlight-element?selector=${encodeURIComponent(selector)}`);
               await new Promise(r => setTimeout(r, 200));
             }
-            window.location.href = `http://ui-action/ai-type-element?selector=${encodeURIComponent(selector)}&text=${encodeURIComponent(text)}&enter=${enter}`;
+            sendUiAction(`http://ui-action/ai-type-element?selector=${encodeURIComponent(selector)}&text=${encodeURIComponent(text)}&enter=${enter}`);
             await new Promise(r => setTimeout(r, 600));
             return { status: 'success', message: `Typed into ${selector}` };
           }
@@ -191,7 +356,7 @@ class TaskRuntime {
           case 'browser_scroll': {
             const dir = args.direction || 'down';
             const amount = args.amount || 500;
-            window.location.href = `http://ui-action/ai-scroll?direction=${encodeURIComponent(dir)}&amount=${amount}`;
+            sendUiAction(`http://ui-action/ai-scroll?direction=${encodeURIComponent(dir)}&amount=${amount}`);
             await new Promise(r => setTimeout(r, 400));
             return { status: 'success', message: `Scrolled ${dir}` };
           }
@@ -200,7 +365,7 @@ class TaskRuntime {
             const domain = args.domain || '';
             const result = await new Promise((resolve) => {
               window.onVaultAutofillResult = (res) => resolve(res);
-              window.location.href = `http://ui-action/vault-autofill?domain=${encodeURIComponent(domain)}`;
+              sendUiAction(`http://ui-action/vault-autofill?domain=${encodeURIComponent(domain)}`);
               setTimeout(() => resolve(false), 2500);
             });
             if (result) {
@@ -210,6 +375,119 @@ class TaskRuntime {
             }
           }
 
+          case 'browser_get_tabs': {
+            const tabs = await new Promise((resolve) => {
+              this.pendingTabsCallback = resolve;
+              sendUiAction('http://ui-action/ai-get-tabs');
+              setTimeout(() => {
+                if (this.pendingTabsCallback) {
+                  this.pendingTabsCallback = null;
+                  resolve([]);
+                }
+              }, 4000);
+            });
+            this.cachedTabs = tabs;
+            return { status: 'success', tabs };
+          }
+
+          case 'browser_switch_tab': {
+            const tabId = Number(args.tab_id);
+            sendUiAction(`http://ui-action/switch-tab?id=${tabId}`);
+            await new Promise(r => setTimeout(r, 400));
+            return { status: 'success', message: `Switched to tab ${tabId}`, tab_id: tabId };
+          }
+
+          case 'browser_reorder_tabs': {
+            const tabIds = args.tab_ids || [];
+            if (!Array.isArray(tabIds) || tabIds.length === 0) {
+              return { status: 'failed', message: 'No tab_ids provided for reorder' };
+            }
+            const idsParam = tabIds.join(',');
+            await new Promise((resolve) => {
+              this.pendingReorderCallback = resolve;
+              sendUiAction(`http://ui-action/ai-reorder-tabs?ids=${encodeURIComponent(idsParam)}`);
+              setTimeout(() => {
+                if (this.pendingReorderCallback) {
+                  this.pendingReorderCallback = null;
+                  resolve(true);
+                }
+              }, 2000);
+            });
+            return { status: 'success', message: 'Tabs reordered successfully', tab_ids: tabIds };
+          }
+
+          case 'browser_get_tab_content': {
+            const tabId = Number(args.tab_id);
+            if (!this.pendingTabDomCallbacks) this.pendingTabDomCallbacks = {};
+            const domData = await new Promise((resolve) => {
+              this.pendingTabDomCallbacks[tabId] = resolve;
+              sendUiAction(`http://ui-action/ai-get-tab-dom?id=${tabId}`);
+              setTimeout(() => {
+                if (this.pendingTabDomCallbacks && this.pendingTabDomCallbacks[tabId]) {
+                  delete this.pendingTabDomCallbacks[tabId];
+                  resolve({ tab_id: tabId, title: '', url: '', bodySnippet: '타임아웃: 본문을 추출할 수 없습니다.' });
+                }
+              }, 6000);
+            });
+            return {
+              status: 'success',
+              tab_id: domData?.tab_id || tabId,
+              title: domData?.title || '',
+              url: domData?.url || '',
+              bodySnippet: domData?.bodySnippet || domData?.markdown || ''
+            };
+          }
+
+          case 'browser_split_tabs': {
+            const leftId = Number(args.left_tab_id);
+            const rightId = Number(args.right_tab_id);
+            await new Promise((resolve) => {
+              this.pendingSplitCallback = resolve;
+              sendUiAction(`http://ui-action/ai-split-tabs?left=${leftId}&right=${rightId}`);
+              setTimeout(() => {
+                if (this.pendingSplitCallback) {
+                  this.pendingSplitCallback = null;
+                  resolve(true);
+                }
+              }, 2000);
+            });
+            return { status: 'success', message: `Split view enabled for tabs ${leftId} and ${rightId}`, left_tab_id: leftId, right_tab_id: rightId };
+          }
+
+          case 'browser_close_tabs': {
+            const tabIds = (args.tab_ids || []).map(Number).filter(n => !isNaN(n));
+            if (tabIds.length === 0) {
+              return { status: 'success', closed_tab_ids: [] };
+            }
+            if (!this.cachedTabs || this.cachedTabs.length === 0) {
+              try {
+                const res = await this.executeToolAction('browser_get_tabs', {});
+                if (res && res.tabs) this.cachedTabs = res.tabs;
+              } catch (e) {}
+            }
+            const requireConfirmation = args.require_confirmation !== undefined
+              ? Boolean(args.require_confirmation)
+              : (tabIds.length > 1);
+            if (requireConfirmation && window.confirmCloseTabsUI) {
+              const confirmed = await window.confirmCloseTabsUI(tabIds, this.cachedTabs);
+              if (!confirmed) {
+                return { status: 'cancelled', message: '사용자가 탭 닫기 확인 창에서 작업을 취소했습니다.', closed_tab_ids: [] };
+              }
+            }
+            const idsParam = tabIds.join(',');
+            await new Promise((resolve) => {
+              this.pendingCloseCallback = resolve;
+              sendUiAction(`http://ui-action/ai-close-tabs?ids=${encodeURIComponent(idsParam)}`);
+              setTimeout(() => {
+                if (this.pendingCloseCallback) {
+                  this.pendingCloseCallback = null;
+                  resolve(true);
+                }
+              }, 2000);
+            });
+            return { status: 'success', message: `${tabIds.length}개 탭을 성공적으로 닫았습니다.`, closed_tab_ids: tabIds };
+          }
+
           default:
             return { status: 'unknown_tool', message: `Tool ${name} is not supported` };
         }
@@ -217,7 +495,7 @@ class TaskRuntime {
         retryCount++;
         this.setState(TaskState.STUCK, `오류 발생: ${err.message} (자율 복구 재시도 ${retryCount}/${maxRetries})`);
         // Self-recovery: try scrolling slightly and waiting
-        window.location.href = 'http://ui-action/ai-scroll?direction=down&amount=200';
+        sendUiAction('http://ui-action/ai-scroll?direction=down&amount=200');
         await new Promise(r => setTimeout(r, 800));
 
         if (retryCount > maxRetries) {
@@ -232,6 +510,41 @@ class TaskRuntime {
     if (this.pendingDomCallback) {
       this.pendingDomCallback(domData);
       this.pendingDomCallback = null;
+    }
+  }
+
+  handleTabsListReceived(tabs) {
+    if (this.pendingTabsCallback) {
+      this.pendingTabsCallback(tabs);
+      this.pendingTabsCallback = null;
+    }
+  }
+
+  handleTabReordered(success) {
+    if (this.pendingReorderCallback) {
+      this.pendingReorderCallback(success);
+      this.pendingReorderCallback = null;
+    }
+  }
+
+  handleTabDomExtracted(tabId, data) {
+    if (this.pendingTabDomCallbacks && this.pendingTabDomCallbacks[tabId]) {
+      this.pendingTabDomCallbacks[tabId](data);
+      delete this.pendingTabDomCallbacks[tabId];
+    }
+  }
+
+  handleTabSplitCompleted(success) {
+    if (this.pendingSplitCallback) {
+      this.pendingSplitCallback(success);
+      this.pendingSplitCallback = null;
+    }
+  }
+
+  handleTabsClosed(success) {
+    if (this.pendingCloseCallback) {
+      this.pendingCloseCallback(success);
+      this.pendingCloseCallback = null;
     }
   }
 
@@ -261,9 +574,39 @@ window.TaskRuntime = TaskRuntime;
 window.TaskState = TaskState;
 window.taskRuntime = new TaskRuntime();
 
-// C backend callback bridge for DOM extraction
+// C backend callback bridges
 window.onAgentDomExtracted = function(data) {
   if (window.taskRuntime) {
     window.taskRuntime.handleDomExtracted(data);
+  }
+};
+
+window.onAgentTabsListReceived = function(tabs) {
+  if (window.taskRuntime) {
+    window.taskRuntime.handleTabsListReceived(tabs);
+  }
+};
+
+window.onAgentTabReordered = function(res) {
+  if (window.taskRuntime) {
+    window.taskRuntime.handleTabReordered(res);
+  }
+};
+
+window.onAgentTabDomExtracted = function(tabId, data) {
+  if (window.taskRuntime) {
+    window.taskRuntime.handleTabDomExtracted(tabId, data);
+  }
+};
+
+window.onAgentTabSplitCompleted = function(res) {
+  if (window.taskRuntime) {
+    window.taskRuntime.handleTabSplitCompleted(res);
+  }
+};
+
+window.onAgentTabsClosed = function(res) {
+  if (window.taskRuntime) {
+    window.taskRuntime.handleTabsClosed(res);
   }
 };

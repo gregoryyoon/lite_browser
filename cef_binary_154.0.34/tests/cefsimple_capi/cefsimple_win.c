@@ -15,6 +15,48 @@
 #include "tests/cefsimple_capi/simple_updater.h"
 #include "tests/cefsimple_capi/simple_permission_handler.h"
 
+static LONG WINAPI CrashExceptionHandler(EXCEPTION_POINTERS* ep) {
+  LogMsg("\n\n=======================================================\n");
+  LogMsg("[CRASH DETECTED] ExceptionCode = 0x%08lX\n", ep->ExceptionRecord->ExceptionCode);
+  LogMsg("[CRASH DETECTED] ExceptionAddress = %p\n", ep->ExceptionRecord->ExceptionAddress);
+
+  HMODULE hMod = NULL;
+  if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                         (LPCSTR)ep->ExceptionRecord->ExceptionAddress, &hMod)) {
+    char modName[MAX_PATH];
+    GetModuleFileNameA(hMod, modName, sizeof(modName));
+    LogMsg("[CRASH DETECTED] Faulting Module: %s (Base: %p, Offset: 0x%llX)\n",
+           modName, (void*)hMod, (ULONG_PTR)ep->ExceptionRecord->ExceptionAddress - (ULONG_PTR)hMod);
+  }
+
+  if (ep->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION &&
+      ep->ExceptionRecord->NumberParameters >= 2) {
+    ULONG_PTR access_type = ep->ExceptionRecord->ExceptionInformation[0];
+    ULONG_PTR target_addr = ep->ExceptionRecord->ExceptionInformation[1];
+    LogMsg("[CRASH DETECTED] Access Violation: Attempted to %s address %p\n",
+           access_type == 0 ? "read" : (access_type == 1 ? "write" : "execute"),
+           (void*)target_addr);
+  }
+
+  PVOID stack[32];
+  USHORT frames = CaptureStackBackTrace(0, 32, stack, NULL);
+  LogMsg("[CRASH DETECTED] Stack trace (%d frames):\n", frames);
+  for (USHORT i = 0; i < frames; i++) {
+    HMODULE hm = NULL;
+    char mName[MAX_PATH] = "unknown";
+    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           (LPCSTR)stack[i], &hm)) {
+      GetModuleFileNameA(hm, mName, sizeof(mName));
+      char* p = strrchr(mName, '\\');
+      if (p) memmove(mName, p + 1, strlen(p));
+    }
+    LogMsg("  #%02d: %p (%s + 0x%llX)\n", i, stack[i], mName, (ULONG_PTR)stack[i] - (ULONG_PTR)hm);
+  }
+
+  LogMsg("=======================================================\n\n");
+  return EXCEPTION_CONTINUE_SEARCH;
+}
+
 static int RunMain(HINSTANCE hInstance,
                    LPTSTR lpCmdLine,
                    int nCmdShow,
@@ -48,6 +90,17 @@ static int RunMain(HINSTANCE hInstance,
     app->app.base.release(&app->app.base);
     return exit_code;
   }
+
+  ULONG stackGuarantee = 64 * 1024;
+  SetThreadStackGuarantee(&stackGuarantee);
+  SetUnhandledExceptionFilter(CrashExceptionHandler);
+
+  if (AttachConsole(ATTACH_PARENT_PROCESS)) {
+    freopen("CONOUT$", "w", stdout);
+    freopen("CONOUT$", "w", stderr);
+  }
+
+  LogMsg("\n==================== LiteBrowser Start (PID: %lu) ====================\n", GetCurrentProcessId());
 
   // Specify CEF global settings here.
   cef_settings_t settings = {};

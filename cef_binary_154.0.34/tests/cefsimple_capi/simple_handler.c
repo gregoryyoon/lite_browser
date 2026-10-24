@@ -305,7 +305,44 @@ static void scan_directory_recursive(const char* dir_path, char** json_ptr, size
 #endif
 
 void LogMsg(const char *format, ...) {
-  (void)format;
+  static CRITICAL_SECTION cs;
+  static int cs_init = 0;
+  if (!cs_init) {
+    InitializeCriticalSection(&cs);
+    cs_init = 1;
+  }
+  EnterCriticalSection(&cs);
+
+  SYSTEMTIME st;
+  GetLocalTime(&st);
+  char prefix[64];
+  snprintf(prefix, sizeof(prefix), "[%02d:%02d:%02d.%03d] ",
+           st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
+
+  char buffer[4096];
+  va_list args;
+  va_start(args, format);
+  vsnprintf(buffer, sizeof(buffer), format, args);
+  va_end(args);
+
+  // 1. OutputDebugString for DebugView / VS
+  OutputDebugStringA(prefix);
+  OutputDebugStringA(buffer);
+
+  // 2. Console output
+  printf("%s%s", prefix, buffer);
+  fflush(stdout);
+
+  // 3. Persistent debug file (immediate flush)
+  FILE *f = fopen("C:\\projects\\lite_browser\\debug_c.txt", "a");
+  if (f) {
+    fputs(prefix, f);
+    fputs(buffer, f);
+    fflush(f);
+    fclose(f);
+  }
+
+  LeaveCriticalSection(&cs);
 }
 
 static const char base64_table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -719,6 +756,60 @@ void CEF_CALLBACK close_browsers_task_execute(cef_task_t *self) {
   }
 }
 
+typedef struct _deferred_navigate_task_t {
+  cef_task_t task;
+  atomic_int ref_count;
+  cef_browser_t* browser;
+  char url[2048];
+} deferred_navigate_task_t;
+
+IMPLEMENT_REFCOUNTING_MANUAL(deferred_navigate_task_t, deferred_navigate_task, ref_count)
+
+int CEF_CALLBACK deferred_navigate_task_release(cef_base_ref_counted_t *self) {
+  deferred_navigate_task_t *task = (deferred_navigate_task_t *)self;
+  int count = atomic_fetch_sub(&task->ref_count, 1) - 1;
+  if (count == 0) {
+    if (task->browser) {
+      task->browser->base.release(&task->browser->base);
+    }
+    free(task);
+    return 1;
+  }
+  return 0;
+}
+
+void CEF_CALLBACK deferred_navigate_task_execute(cef_task_t *self) {
+  deferred_navigate_task_t *task = (deferred_navigate_task_t *)self;
+  if (task && task->browser && task->url[0]) {
+    LogMsg("[NAV-TASK] Executing deferred navigation: %s on browser=%p\n", task->url, (void*)task->browser);
+    cef_frame_t* mf = task->browser->get_main_frame(task->browser);
+    if (mf) {
+      cef_string_t cef_url = {};
+      cef_string_from_utf8(task->url, strlen(task->url), &cef_url);
+      mf->load_url(mf, &cef_url);
+      cef_string_clear(&cef_url);
+      mf->base.release(&mf->base);
+      LogMsg("[NAV-TASK] Deferred load_url completed successfully!\n");
+    }
+  }
+}
+
+static void PostDeferredNavigation(cef_browser_t* browser, const char* url) {
+  if (!browser || !url || !*url) return;
+  deferred_navigate_task_t* task = (deferred_navigate_task_t*)calloc(1, sizeof(deferred_navigate_task_t));
+  if (!task) return;
+
+  INIT_CEF_BASE_REFCOUNTED(&task->task.base, cef_task_t, deferred_navigate_task);
+  task->task.execute = deferred_navigate_task_execute;
+  task->browser = browser;
+  browser->base.add_ref(&browser->base);
+  strncpy(task->url, url, sizeof(task->url) - 1);
+  task->url[sizeof(task->url) - 1] = '\0';
+  atomic_store(&task->ref_count, 1);
+
+  cef_post_task(TID_UI, &task->task);
+}
+
 void simple_handler_close_all_browsers(simple_handler_t *handler,
                                        int force_close) {
   CHECK(handler);
@@ -775,6 +866,10 @@ void simple_handler_platform_show_window(simple_handler_t *handler,
 #endif
 
 static void EscapeJsonString(const char* src, char* dest, size_t dest_len) {
+  if (!src) {
+    if (dest && dest_len > 0) dest[0] = '\0';
+    return;
+  }
   size_t j = 0;
   for (size_t i = 0; src[i] != '\0' && j < dest_len - 3; i++) {
     if (src[i] == '"') {
@@ -1079,6 +1174,94 @@ void RemoveTabAt(browser_window_t* win_ctx, int remove_idx, int close_cef_browse
         host->set_focus(host, 1);
         host->base.release(&host->base);
       }
+    }
+  }
+
+  update_ui_tabs(win_ctx);
+  update_ui_nav_state(win_ctx);
+}
+
+static void SwitchToTabIndex(browser_window_t* win_ctx, int found_idx) {
+  if (!win_ctx || found_idx < 0 || found_idx >= win_ctx->tab_count) return;
+  if (found_idx == win_ctx->active_tab_index) {
+    tab_info_t* cur_tab = &win_ctx->tabs[found_idx];
+    cef_browser_t* cur_b = (cur_tab->is_split && cur_tab->active_split == 1 && cur_tab->right_browser)
+                           ? cur_tab->right_browser : cur_tab->browser;
+    if (cur_b) {
+      cef_browser_host_t* host = cur_b->get_host(cur_b);
+      if (host) {
+        host->set_focus(host, 1);
+        host->base.release(&host->base);
+      }
+    }
+    return;
+  }
+
+  int old_idx = win_ctx->active_tab_index;
+
+  // 1. Release focus on previous tab
+  if (old_idx >= 0 && old_idx < win_ctx->tab_count) {
+    if (win_ctx->tabs[old_idx].browser) {
+      cef_browser_host_t* prev_h = win_ctx->tabs[old_idx].browser->get_host(win_ctx->tabs[old_idx].browser);
+      if (prev_h) {
+        prev_h->set_focus(prev_h, 0);
+        prev_h->base.release(&prev_h->base);
+      }
+    }
+    if (win_ctx->tabs[old_idx].right_browser) {
+      cef_browser_host_t* prev_rh = win_ctx->tabs[old_idx].right_browser->get_host(win_ctx->tabs[old_idx].right_browser);
+      if (prev_rh) {
+        prev_rh->set_focus(prev_rh, 0);
+        prev_rh->base.release(&prev_rh->base);
+      }
+    }
+  }
+
+  win_ctx->active_tab_index = found_idx;
+  win_ctx->tabs[found_idx].is_loaded = 1;
+
+  // 2. Show new tab FIRST (placed right behind ui_hwnd, seamlessly over old tab)
+  if (win_ctx->tabs[found_idx].hwnd) {
+    HWND insert_after = (win_ctx->ui_hwnd && IsWindow(win_ctx->ui_hwnd)) ? win_ctx->ui_hwnd : HWND_TOP;
+    SetWindowPos(win_ctx->tabs[found_idx].hwnd, insert_after, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW | SWP_NOACTIVATE);
+    if (win_ctx->tabs[found_idx].is_split && win_ctx->tabs[found_idx].right_hwnd) {
+      SetWindowPos(win_ctx->tabs[found_idx].right_hwnd, win_ctx->tabs[found_idx].hwnd, 0, 0, 0, 0,
+                   SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW | SWP_NOACTIVATE);
+    }
+
+    RECT rect;
+    GetClientRect(win_ctx->main_hwnd, &rect);
+    PostMessage(win_ctx->main_hwnd, WM_SIZE, 0, MAKELPARAM(rect.right, rect.bottom));
+
+    cef_browser_host_t* host = win_ctx->tabs[found_idx].browser ? win_ctx->tabs[found_idx].browser->get_host(win_ctx->tabs[found_idx].browser) : NULL;
+    if (host) {
+      host->was_resized(host);
+      host->base.release(&host->base);
+    }
+    if (win_ctx->tabs[found_idx].is_split && win_ctx->tabs[found_idx].right_browser) {
+      cef_browser_host_t* r_host = win_ctx->tabs[found_idx].right_browser->get_host(win_ctx->tabs[found_idx].right_browser);
+      if (r_host) {
+        r_host->was_resized(r_host);
+        r_host->base.release(&r_host->base);
+      }
+    }
+    cef_browser_t* ab = (win_ctx->tabs[found_idx].is_split && win_ctx->tabs[found_idx].active_split == 1 && win_ctx->tabs[found_idx].right_browser)
+                         ? win_ctx->tabs[found_idx].right_browser : win_ctx->tabs[found_idx].browser;
+    if (ab) {
+      cef_browser_host_t* ab_host = ab->get_host(ab);
+      if (ab_host) {
+        ab_host->set_focus(ab_host, 1);
+        ab_host->base.release(&ab_host->base);
+      }
+    }
+  }
+
+  // 3. NOW hide previously active tab(s) - no blank gap!
+  for (int k = 0; k < win_ctx->tab_count; k++) {
+    if (k != found_idx) {
+      if (win_ctx->tabs[k].hwnd && IsWindowVisible(win_ctx->tabs[k].hwnd)) ShowWindow(win_ctx->tabs[k].hwnd, SW_HIDE);
+      if (win_ctx->tabs[k].right_hwnd && IsWindowVisible(win_ctx->tabs[k].right_hwnd)) ShowWindow(win_ctx->tabs[k].right_hwnd, SW_HIDE);
     }
   }
 
@@ -2286,6 +2469,469 @@ int CEF_CALLBACK request_handler_on_before_browse(
             }
             free(data_b64);
           }
+        } else if (strcmp(action, "ai-get-tabs") == 0) {
+          if (win_ctx) {
+            char* json = (char*)malloc(65536);
+            if (json) {
+              strcpy(json, "[");
+              for (int i = 0; i < win_ctx->tab_count; i++) {
+                if (win_ctx->tabs[i].url[0] == '\0' && win_ctx->tabs[i].browser) {
+                  cef_frame_t* mf = win_ctx->tabs[i].browser->get_main_frame(win_ctx->tabs[i].browser);
+                  if (mf) {
+                    cef_string_userfree_t cur_u = mf->get_url(mf);
+                    if (cur_u && cur_u->length > 0) {
+                      cef_string_utf8_t u8 = {};
+                      cef_string_to_utf8(cur_u->str, cur_u->length, &u8);
+                      if (u8.str && u8.length > 0) {
+                        strncpy(win_ctx->tabs[i].url, u8.str, sizeof(win_ctx->tabs[i].url) - 1);
+                        win_ctx->tabs[i].url[sizeof(win_ctx->tabs[i].url) - 1] = '\0';
+                      }
+                      cef_string_utf8_clear(&u8);
+                      cef_string_userfree_free(cur_u);
+                    }
+                    mf->base.release(&mf->base);
+                  }
+                }
+
+                char escaped_title[1024] = {0};
+                char escaped_url[4096] = {0};
+                if (win_ctx->tabs[i].is_split) {
+                  const char* t1 = win_ctx->tabs[i].title[0] ? win_ctx->tabs[i].title : "새 탭";
+                  const char* t2 = win_ctx->tabs[i].right_title[0] ? win_ctx->tabs[i].right_title : "";
+                  char combo_title[1024];
+                  if (t2[0]) {
+                    snprintf(combo_title, sizeof(combo_title), "%s | %s", t1, t2);
+                  } else {
+                    strncpy(combo_title, t1, sizeof(combo_title) - 1);
+                    combo_title[sizeof(combo_title) - 1] = '\0';
+                  }
+                  EscapeJsonString(combo_title, escaped_title, sizeof(escaped_title));
+                } else {
+                  EscapeJsonString(win_ctx->tabs[i].title, escaped_title, sizeof(escaped_title));
+                }
+                EscapeJsonString(win_ctx->tabs[i].url, escaped_url, sizeof(escaped_url));
+                int is_active = (i == win_ctx->active_tab_index) ? 1 : 0;
+                char tab_str[6000];
+                snprintf(tab_str, sizeof(tab_str),
+                         "{\"tab_id\":%d,\"title\":\"%s\",\"url\":\"%s\",\"is_active\":%s,\"is_split\":%s}%s",
+                         win_ctx->tabs[i].tab_id,
+                         escaped_title,
+                         escaped_url,
+                         is_active ? "true" : "false",
+                         win_ctx->tabs[i].is_split ? "true" : "false",
+                         (i == win_ctx->tab_count - 1) ? "" : ",");
+                if (strlen(json) + strlen(tab_str) < 65530) {
+                  strcat(json, tab_str);
+                }
+              }
+              strcat(json, "]");
+
+              cef_frame_t* rf = NULL;
+              if (win_ctx->sidepanel_browser) {
+                rf = win_ctx->sidepanel_browser->get_main_frame(win_ctx->sidepanel_browser);
+              } else if (frame) {
+                rf = frame;
+                rf->base.add_ref(&rf->base);
+              }
+              if (rf) {
+                char* js_code = (char*)malloc(70000);
+                if (js_code) {
+                  snprintf(js_code, 70000, "if (window.onAgentTabsListReceived) { window.onAgentTabsListReceived(%s); }", json);
+                  cef_string_t js_str = {};
+                  cef_string_from_utf8(js_code, strlen(js_code), &js_str);
+                  rf->execute_java_script(rf, &js_str, NULL, 0);
+                  cef_string_clear(&js_str);
+                  free(js_code);
+                }
+                rf->base.release(&rf->base);
+              }
+              free(json);
+            }
+          }
+        } else if (strncmp(action, "ai-reorder-tabs?", 16) == 0) {
+          const char* query = action + 16;
+          char* ids_str = get_query_param(query, "ids");
+          if (ids_str && win_ctx && win_ctx->tab_count > 0) {
+            int new_ids[MAX_TABS];
+            int new_id_count = 0;
+            char* token = strtok(ids_str, ",");
+            while (token && new_id_count < MAX_TABS) {
+              new_ids[new_id_count++] = atoi(token);
+              token = strtok(NULL, ",");
+            }
+
+            int active_id = (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count)
+                            ? win_ctx->tabs[win_ctx->active_tab_index].tab_id : -1;
+            tab_info_t reordered_tabs[MAX_TABS];
+            int placed[MAX_TABS] = {0};
+            int out_idx = 0;
+
+            for (int i = 0; i < new_id_count; i++) {
+              for (int j = 0; j < win_ctx->tab_count; j++) {
+                if (!placed[j] && win_ctx->tabs[j].tab_id == new_ids[i]) {
+                  reordered_tabs[out_idx++] = win_ctx->tabs[j];
+                  placed[j] = 1;
+                  break;
+                }
+              }
+            }
+            for (int j = 0; j < win_ctx->tab_count; j++) {
+              if (!placed[j]) {
+                reordered_tabs[out_idx++] = win_ctx->tabs[j];
+                placed[j] = 1;
+              }
+            }
+
+            for (int i = 0; i < win_ctx->tab_count; i++) {
+              win_ctx->tabs[i] = reordered_tabs[i];
+            }
+
+            for (int i = 0; i < win_ctx->tab_count; i++) {
+              if (win_ctx->tabs[i].tab_id == active_id) {
+                win_ctx->active_tab_index = i;
+                break;
+              }
+            }
+
+            update_ui_tabs(win_ctx);
+            update_ui_nav_state(win_ctx);
+
+            cef_frame_t* rf = NULL;
+            if (win_ctx->sidepanel_browser) {
+              rf = win_ctx->sidepanel_browser->get_main_frame(win_ctx->sidepanel_browser);
+            } else if (frame) {
+              rf = frame;
+              rf->base.add_ref(&rf->base);
+            }
+            if (rf) {
+              cef_string_t js_str = {};
+              cef_string_from_utf8("if (window.onAgentTabReordered) { window.onAgentTabReordered(true); }", 64, &js_str);
+              rf->execute_java_script(rf, &js_str, NULL, 0);
+              cef_string_clear(&js_str);
+              rf->base.release(&rf->base);
+            }
+          }
+          if (ids_str) free(ids_str);
+        } else if (strncmp(action, "ai-get-tab-dom?", 15) == 0) {
+          const char* query = action + 15;
+          char* id_str = get_query_param(query, "id");
+          int target_id = id_str ? atoi(id_str) : -1;
+          if (id_str) free(id_str);
+
+          int found_idx = -1;
+          if (win_ctx && target_id != -1) {
+            for (int i = 0; i < win_ctx->tab_count; i++) {
+              if (win_ctx->tabs[i].tab_id == target_id) {
+                found_idx = i;
+                break;
+              }
+            }
+          }
+
+          if (win_ctx && found_idx != -1) {
+            tab_info_t* cur_tab = &win_ctx->tabs[found_idx];
+            cef_browser_t* target_b = (cur_tab->is_split && cur_tab->active_split == 1 && cur_tab->right_browser)
+                                      ? cur_tab->right_browser : cur_tab->browser;
+            if (target_b) {
+              const char* script_fmt =
+                "(function() {"
+                "  try {"
+                "    function getMeta(prop) {"
+                "      const el = document.querySelector('meta[property=\"' + prop + '\"], meta[name=\"' + prop + '\"], meta[itemprop=\"' + prop + '\"]');"
+                "      return el ? (el.getAttribute('content') || '').trim() : '';"
+                "    }"
+                "    const selList = ['article', 'main', '[role=\"main\"]', '#content', '.content-body', '#article', '.se-main-container', '#dic_area', '#articleBody', '.article_view', '.news_body', '.entry-content', '.post-content', '.article-body'];"
+                "    let articleEl = null;"
+                "    for (let s of selList) {"
+                "      const el = document.querySelector(s);"
+                "      if (el && el.innerText && el.innerText.trim().length > 100) { articleEl = el; break; }"
+                "    }"
+                "    if (!articleEl) articleEl = document.body || document.documentElement;"
+                "    let text = (articleEl ? articleEl.innerText : document.title) || '';"
+                "    if (text.length > 5000) text = text.slice(0, 5000) + '...';"
+                "    const data = {"
+                "      tab_id: %d,"
+                "      title: document.title || '',"
+                "      url: window.location.href,"
+                "      description: getMeta('og:description') || getMeta('description'),"
+                "      bodySnippet: text,"
+                "      markdown: text"
+                "    };"
+                "    const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(data))));"
+                "    window.location.href = 'http://ui-action/ai-tab-dom-result?tab_id=%d&data=' + encodeURIComponent(b64);"
+                "  } catch(e) {"
+                "    window.location.href = 'http://ui-action/ai-tab-dom-result?tab_id=%d&data=';"
+                "  }"
+                "})();";
+
+              char* script = (char*)malloc(4096);
+              if (script) {
+                snprintf(script, 4096, script_fmt, target_id, target_id, target_id);
+                cef_frame_t* f = target_b->get_main_frame(target_b);
+                if (f) {
+                  cef_string_t js_str = {};
+                  cef_string_from_utf8(script, strlen(script), &js_str);
+                  f->execute_java_script(f, &js_str, NULL, 0);
+                  cef_string_clear(&js_str);
+                  f->base.release(&f->base);
+                }
+                free(script);
+              }
+            } else {
+              cef_frame_t* rf = NULL;
+              if (win_ctx->sidepanel_browser) {
+                rf = win_ctx->sidepanel_browser->get_main_frame(win_ctx->sidepanel_browser);
+              } else if (frame) {
+                rf = frame;
+                rf->base.add_ref(&rf->base);
+              }
+              if (rf) {
+                char js_code[128];
+                snprintf(js_code, sizeof(js_code), "if (window.onAgentTabDomExtracted) { window.onAgentTabDomExtracted(%d, null); }", target_id);
+                cef_string_t js_str = {};
+                cef_string_from_utf8(js_code, strlen(js_code), &js_str);
+                rf->execute_java_script(rf, &js_str, NULL, 0);
+                cef_string_clear(&js_str);
+                rf->base.release(&rf->base);
+              }
+            }
+          } else {
+            cef_frame_t* rf = NULL;
+            if (win_ctx && win_ctx->sidepanel_browser) {
+              rf = win_ctx->sidepanel_browser->get_main_frame(win_ctx->sidepanel_browser);
+            } else if (frame) {
+              rf = frame;
+              rf->base.add_ref(&rf->base);
+            }
+            if (rf) {
+              char js_code[128];
+              snprintf(js_code, sizeof(js_code), "if (window.onAgentTabDomExtracted) { window.onAgentTabDomExtracted(%d, null); }", target_id);
+              cef_string_t js_str = {};
+              cef_string_from_utf8(js_code, strlen(js_code), &js_str);
+              rf->execute_java_script(rf, &js_str, NULL, 0);
+              cef_string_clear(&js_str);
+              rf->base.release(&rf->base);
+            }
+          }
+        } else if (strncmp(action, "ai-tab-dom-result?", 18) == 0) {
+          const char* query = action + 18;
+          char* tab_id_str = get_query_param(query, "tab_id");
+          char* data_b64 = get_query_param(query, "data");
+          int res_tab_id = tab_id_str ? atoi(tab_id_str) : 0;
+          if (data_b64 && strlen(data_b64) > 0) {
+            for (char* p = data_b64; *p; p++) {
+              if (*p == ' ') *p = '+';
+            }
+            size_t decoded_len = 0;
+            unsigned char* decoded = base64_decode(data_b64, &decoded_len);
+            if (decoded) {
+              cef_browser_t* target_b = win_ctx ? win_ctx->sidepanel_browser : NULL;
+              if (target_b) {
+                char* js_code = (char*)malloc(decoded_len + 128);
+                if (js_code) {
+                  snprintf(js_code, decoded_len + 128, "if (window.onAgentTabDomExtracted) { window.onAgentTabDomExtracted(%d, %s); }", res_tab_id, (char*)decoded);
+                  cef_frame_t* rf = target_b->get_main_frame(target_b);
+                  if (rf) {
+                    cef_string_t js_str = {};
+                    cef_string_from_utf8(js_code, strlen(js_code), &js_str);
+                    rf->execute_java_script(rf, &js_str, NULL, 0);
+                    cef_string_clear(&js_str);
+                    rf->base.release(&rf->base);
+                  }
+                  free(js_code);
+                }
+              }
+              free(decoded);
+            } else {
+              cef_browser_t* target_b = win_ctx ? win_ctx->sidepanel_browser : NULL;
+              if (target_b) {
+                char js_code[128];
+                snprintf(js_code, sizeof(js_code), "if (window.onAgentTabDomExtracted) { window.onAgentTabDomExtracted(%d, null); }", res_tab_id);
+                cef_frame_t* rf = target_b->get_main_frame(target_b);
+                if (rf) {
+                  cef_string_t js_str = {};
+                  cef_string_from_utf8(js_code, strlen(js_code), &js_str);
+                  rf->execute_java_script(rf, &js_str, NULL, 0);
+                  cef_string_clear(&js_str);
+                  rf->base.release(&rf->base);
+                }
+              }
+            }
+          } else {
+            cef_browser_t* target_b = win_ctx ? win_ctx->sidepanel_browser : NULL;
+            if (target_b) {
+              char js_code[128];
+              snprintf(js_code, sizeof(js_code), "if (window.onAgentTabDomExtracted) { window.onAgentTabDomExtracted(%d, null); }", res_tab_id);
+              cef_frame_t* rf = target_b->get_main_frame(target_b);
+              if (rf) {
+                cef_string_t js_str = {};
+                cef_string_from_utf8(js_code, strlen(js_code), &js_str);
+                rf->execute_java_script(rf, &js_str, NULL, 0);
+                cef_string_clear(&js_str);
+                rf->base.release(&rf->base);
+              }
+            }
+          }
+          if (tab_id_str) free(tab_id_str);
+          if (data_b64) free(data_b64);
+        } else if (strncmp(action, "ai-split-tabs?", 14) == 0) {
+          const char* query = action + 14;
+          char* left_str = get_query_param(query, "left");
+          char* right_str = get_query_param(query, "right");
+          int left_id = left_str ? atoi(left_str) : -1;
+          int right_id = right_str ? atoi(right_str) : -1;
+          if (left_str) free(left_str);
+          if (right_str) free(right_str);
+
+          if (win_ctx && left_id != -1 && right_id != -1) {
+            int left_idx = -1;
+            int right_idx = -1;
+            for (int i = 0; i < win_ctx->tab_count; i++) {
+              if (win_ctx->tabs[i].tab_id == left_id) left_idx = i;
+              if (win_ctx->tabs[i].tab_id == right_id) right_idx = i;
+            }
+
+            if (left_idx != -1 && right_idx != -1) {
+              // 1. Activate left tab
+              SwitchToTabIndex(win_ctx, left_idx);
+
+              // 2. Setup right split with right tab's URL and title
+              tab_info_t* left_tab = &win_ctx->tabs[left_idx];
+              const char* right_url = win_ctx->tabs[right_idx].url;
+              const char* right_title = win_ctx->tabs[right_idx].title;
+              if (!left_tab->is_split) {
+                CreateRightSplitBrowser(win_ctx, left_tab, right_url);
+              } else {
+                if (left_tab->right_browser) {
+                  cef_frame_t* rf = left_tab->right_browser->get_main_frame(left_tab->right_browser);
+                  if (rf) {
+                    cef_string_t u = {};
+                    cef_string_from_utf8(right_url, strlen(right_url), &u);
+                    rf->load_url(rf, &u);
+                    cef_string_clear(&u);
+                    rf->base.release(&rf->base);
+                  }
+                } else {
+                  CreateRightSplitBrowser(win_ctx, left_tab, right_url);
+                }
+              }
+              if (right_title && right_title[0]) {
+                strncpy(left_tab->right_title, right_title, sizeof(left_tab->right_title) - 1);
+                left_tab->right_title[sizeof(left_tab->right_title) - 1] = '\0';
+              }
+              if (right_url && right_url[0]) {
+                strncpy(left_tab->right_url, right_url, sizeof(left_tab->right_url) - 1);
+                left_tab->right_url[sizeof(left_tab->right_url) - 1] = '\0';
+              }
+              update_ui_tabs(win_ctx);
+              update_ui_nav_state(win_ctx);
+
+              cef_frame_t* sf = win_ctx->sidepanel_browser ? win_ctx->sidepanel_browser->get_main_frame(win_ctx->sidepanel_browser) : NULL;
+              if (sf) {
+                cef_string_t js_str = {};
+                cef_string_from_utf8("if (window.onAgentTabSplitCompleted) { window.onAgentTabSplitCompleted(true); }", 73, &js_str);
+                sf->execute_java_script(sf, &js_str, NULL, 0);
+                cef_string_clear(&js_str);
+                sf->base.release(&sf->base);
+              }
+            }
+          }
+        } else if (strncmp(action, "ai-close-tabs?", 14) == 0) {
+          const char* query = action + 14;
+          char* ids_str = get_query_param(query, "ids");
+          if (ids_str && win_ctx) {
+            char* token = strtok(ids_str, ",");
+            while (token) {
+              int close_id = atoi(token);
+              if (win_ctx->tab_count == 1 && win_ctx->tabs[0].tab_id == close_id) {
+                // If closing the last remaining tab in the browser, open a new blank tab first
+                CreateNewTabEx(win_ctx, "lite://favorites", 1);
+              }
+              CloseTab(win_ctx, close_id);
+              token = strtok(NULL, ",");
+            }
+            cef_frame_t* sf = win_ctx->sidepanel_browser ? win_ctx->sidepanel_browser->get_main_frame(win_ctx->sidepanel_browser) : NULL;
+            if (sf) {
+              cef_string_t js_str = {};
+              cef_string_from_utf8("if (window.onAgentTabsClosed) { window.onAgentTabsClosed(true); }", 59, &js_str);
+              sf->execute_java_script(sf, &js_str, NULL, 0);
+              cef_string_clear(&js_str);
+              sf->base.release(&sf->base);
+            }
+          }
+          if (ids_str) free(ids_str);
+        } else if (strncmp(action, "ai-open-tab?", 12) == 0) {
+          const char* query = action + 12;
+          char* url_param = get_query_param(query, "url");
+          char* act_param = get_query_param(query, "activate");
+          int activate = (act_param && strcmp(act_param, "0") == 0) ? 0 : 1;
+          const char* target_url = (url_param && url_param[0]) ? url_param : "lite://favorites";
+
+          LogMsg("[AI-OPEN-TAB] url='%s', activate=%d\n", target_url, activate);
+
+          int success = 0;
+          int new_tab_id = -1;
+          char final_title[512] = "새 탭";
+          char final_url[2048] = "lite://favorites";
+
+          if (win_ctx) {
+            if (win_ctx->tab_count >= MAX_TABS) {
+              LogMsg("[AI-OPEN-TAB] Max tabs limit reached (%d)\n", MAX_TABS);
+            } else {
+              int in_background = activate ? 0 : 1;
+              CreateNewTabEx2(win_ctx, target_url, 1, in_background);
+              int created_idx = win_ctx->tab_count - 1;
+              if (created_idx >= 0 && created_idx < win_ctx->tab_count) {
+                new_tab_id = win_ctx->tabs[created_idx].tab_id;
+                strncpy(final_title, win_ctx->tabs[created_idx].title, sizeof(final_title) - 1);
+                strncpy(final_url, win_ctx->tabs[created_idx].url, sizeof(final_url) - 1);
+                success = 1;
+              }
+            }
+
+            cef_frame_t* sf = win_ctx->sidepanel_browser ? win_ctx->sidepanel_browser->get_main_frame(win_ctx->sidepanel_browser) : NULL;
+            if (sf) {
+              char escaped_title[1024] = {0};
+              char escaped_url[4096] = {0};
+              EscapeJsonString(final_title, escaped_title, sizeof(escaped_title));
+              EscapeJsonString(final_url, escaped_url, sizeof(escaped_url));
+
+              char js_call[6000];
+              snprintf(js_call, sizeof(js_call),
+                       "if (window.onAgentTabOpened) { window.onAgentTabOpened({ success: %s, tab_id: %d, title: \"%s\", url: \"%s\" }); }",
+                       success ? "true" : "false", new_tab_id, escaped_title, escaped_url);
+              cef_string_t js_str = {};
+              cef_string_from_utf8(js_call, strlen(js_call), &js_str);
+              sf->execute_java_script(sf, &js_str, NULL, 0);
+              cef_string_clear(&js_str);
+              sf->base.release(&sf->base);
+            }
+          }
+
+          if (url_param) free(url_param);
+          if (act_param) free(act_param);
+        } else if (strncmp(action, "log?msg=", 8) == 0) {
+          const char* encoded_msg = action + 8;
+          char* decoded = (char*)malloc(strlen(encoded_msg) + 1);
+          if (decoded) {
+            size_t i = 0, j = 0;
+            while (encoded_msg[i]) {
+              if (encoded_msg[i] == '%' && encoded_msg[i + 1] && encoded_msg[i + 2]) {
+                char hex[3] = {encoded_msg[i + 1], encoded_msg[i + 2], '\0'};
+                decoded[j++] = (char)strtol(hex, NULL, 16);
+                i += 3;
+              } else if (encoded_msg[i] == '+') {
+                decoded[j++] = ' ';
+                i++;
+              } else {
+                decoded[j++] = encoded_msg[i];
+                i++;
+              }
+            }
+            decoded[j] = '\0';
+            LogMsg("[UI-JS] %s\n", decoded);
+            free(decoded);
+          }
         } else if (strcmp(action, "back") == 0) {
           if (cb) cb->go_back(cb);
         } else if (strcmp(action, "forward") == 0) {
@@ -2678,6 +3324,7 @@ int CEF_CALLBACK request_handler_on_before_browse(
         } else if (strcmp(action, "window-close") == 0) {
           PostMessage(win_ctx->main_hwnd, WM_CLOSE, 0, 0);
         } else if (strncmp(action, "load?url=", 9) == 0) {
+          LogMsg("[UI-ACTION] load?url= intercepted, cb=%p\n", (void*)cb);
           if (cb) {
             const char *encoded_url = action + 9;
             char *decoded = (char *)malloc(strlen(encoded_url) + 1);
@@ -2697,18 +3344,12 @@ int CEF_CALLBACK request_handler_on_before_browse(
                 }
               }
               decoded[j] = '\0';
-
-              cef_string_t cef_url = {};
-              cef_string_from_utf8(decoded, strlen(decoded), &cef_url);
-
-              cef_frame_t *main_frame = cb->get_main_frame(cb);
-              if (main_frame) {
-                main_frame->load_url(main_frame, &cef_url);
-                main_frame->base.release(&main_frame->base);
-              }
-              cef_string_clear(&cef_url);
+              LogMsg("[LOAD] Decoded URL: '%s' -> Posting deferred navigation to cb=%p\n", decoded, (void*)cb);
+              PostDeferredNavigation(cb, decoded);
               free(decoded);
             }
+          } else {
+            LogMsg("[LOAD] WARNING: cb is NULL!\n");
           }
         } else if (strncmp(action, "expand-ui?", 10) == 0) {
           int h = 500;
@@ -3116,62 +3757,8 @@ int CEF_CALLBACK request_handler_on_before_browse(
               break;
             }
           }
-          if (found_idx != -1 && found_idx != win_ctx->active_tab_index) {
-            int old_idx = win_ctx->active_tab_index;
-
-            // 1. Release focus on previous tab
-            if (old_idx >= 0 && old_idx < win_ctx->tab_count) {
-              if (win_ctx->tabs[old_idx].browser) {
-                cef_browser_host_t* prev_h = win_ctx->tabs[old_idx].browser->get_host(win_ctx->tabs[old_idx].browser);
-                if (prev_h) {
-                  prev_h->set_focus(prev_h, 0);
-                  prev_h->base.release(&prev_h->base);
-                }
-              }
-              if (win_ctx->tabs[old_idx].right_browser) {
-                cef_browser_host_t* prev_rh = win_ctx->tabs[old_idx].right_browser->get_host(win_ctx->tabs[old_idx].right_browser);
-                if (prev_rh) {
-                  prev_rh->set_focus(prev_rh, 0);
-                  prev_rh->base.release(&prev_rh->base);
-                }
-              }
-            }
-
-            win_ctx->active_tab_index = found_idx;
-            win_ctx->tabs[found_idx].is_loaded = 1;
-
-            // 2. Show new tab FIRST (placed right behind ui_hwnd, seamlessly over old tab)
-            if (win_ctx->tabs[found_idx].hwnd) {
-              HWND insert_after = (win_ctx->ui_hwnd && IsWindow(win_ctx->ui_hwnd)) ? win_ctx->ui_hwnd : HWND_TOP;
-              SetWindowPos(win_ctx->tabs[found_idx].hwnd, insert_after, 0, 0, 0, 0,
-                           SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW | SWP_NOACTIVATE);
-              if (win_ctx->tabs[found_idx].is_split && win_ctx->tabs[found_idx].right_hwnd) {
-                SetWindowPos(win_ctx->tabs[found_idx].right_hwnd, win_ctx->tabs[found_idx].hwnd, 0, 0, 0, 0,
-                             SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW | SWP_NOACTIVATE);
-              }
-
-              RECT rect;
-              GetClientRect(win_ctx->main_hwnd, &rect);
-              PostMessage(win_ctx->main_hwnd, WM_SIZE, 0, MAKELPARAM(rect.right, rect.bottom));
-
-              cef_browser_host_t* host = win_ctx->tabs[found_idx].browser ? win_ctx->tabs[found_idx].browser->get_host(win_ctx->tabs[found_idx].browser) : NULL;
-              if (host) {
-                host->was_resized(host);
-                host->set_focus(host, 1);
-                host->base.release(&host->base);
-              }
-            }
-
-            // 3. NOW hide previously active tab(s) - no blank gap!
-            for (int k = 0; k < win_ctx->tab_count; k++) {
-              if (k != found_idx) {
-                if (win_ctx->tabs[k].hwnd && IsWindowVisible(win_ctx->tabs[k].hwnd)) ShowWindow(win_ctx->tabs[k].hwnd, SW_HIDE);
-                if (win_ctx->tabs[k].right_hwnd && IsWindowVisible(win_ctx->tabs[k].right_hwnd)) ShowWindow(win_ctx->tabs[k].right_hwnd, SW_HIDE);
-              }
-            }
-
-            update_ui_tabs(win_ctx);
-            update_ui_nav_state(win_ctx);
+          if (found_idx != -1) {
+            SwitchToTabIndex(win_ctx, found_idx);
           }
         } else if (strcmp(action, "trigger-find") == 0) {
           if (win_ctx && win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
@@ -3670,8 +4257,6 @@ void CEF_CALLBACK context_menu_on_before_context_menu(
         AppendMenuW(hMenu, MF_STRING, MENU_ID_COPY, L"복사");
         if (is_editable) {
           AppendMenuW(hMenu, MF_STRING, MENU_ID_CUT, L"잘라내기");
-        }
-        if (is_editable) {
           AppendMenuW(hMenu, MF_STRING | (can_paste ? 0 : MF_GRAYED), MENU_ID_PASTE, L"붙여넣기");
         }
         AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
@@ -3681,67 +4266,72 @@ void CEF_CALLBACK context_menu_on_before_context_menu(
         AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
         AppendMenuW(hMenu, MF_STRING, MENU_ID_SELECT_ALL, L"모두 선택");
       }
+    } else if (has_link) {
+      AppendMenuW(hMenu, MF_STRING, 3001, L"새 탭에서 링크 열기");
+      AppendMenuW(hMenu, MF_STRING, 3004, L"다른 분할 화면에서 열기");
+      AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+      AppendMenuW(hMenu, MF_STRING, 3002, L"링크 페이지 저장");
+      AppendMenuW(hMenu, MF_STRING, 3003, L"링크 복사");
+      AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+      AppendMenuW(hMenu, MF_STRING, MENU_ID_USER_FIRST, L"검사 (Inspect)");
+    } else if (is_editable) {
+      int can_undo = (edit_flags & CM_EDITFLAG_CAN_UNDO) != 0;
+      int can_redo = (edit_flags & CM_EDITFLAG_CAN_REDO) != 0;
+      int can_cut = has_selection;
+      int can_copy = has_selection;
+
+      AppendMenuW(hMenu, MF_STRING | (can_undo ? 0 : MF_GRAYED), MENU_ID_UNDO, L"실행 취소");
+      AppendMenuW(hMenu, MF_STRING | (can_redo ? 0 : MF_GRAYED), MENU_ID_REDO, L"다시 실행");
+      AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+      AppendMenuW(hMenu, MF_STRING | (can_cut ? 0 : MF_GRAYED), MENU_ID_CUT, L"잘라내기");
+      AppendMenuW(hMenu, MF_STRING | (can_copy ? 0 : MF_GRAYED), MENU_ID_COPY, L"복사");
+      AppendMenuW(hMenu, MF_STRING | (can_paste ? 0 : MF_GRAYED), MENU_ID_PASTE, L"붙여넣기");
+      AppendMenuW(hMenu, MF_STRING, MENU_ID_SELECT_ALL, L"모두 선택");
+      AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+      AppendMenuW(hMenu, MF_STRING, MENU_ID_USER_FIRST, L"검사 (Inspect)");
     } else {
       if (has_selection) {
         AppendMenuW(hMenu, MF_STRING, MENU_ID_COPY, L"복사");
-        if (is_editable) {
-          AppendMenuW(hMenu, MF_STRING, MENU_ID_CUT, L"잘라내기");
-          AppendMenuW(hMenu, MF_STRING | (can_paste ? 0 : MF_GRAYED), MENU_ID_PASTE, L"붙여넣기");
-        }
-        AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
-      } else if (is_editable) {
-        AppendMenuW(hMenu, MF_STRING | (can_paste ? 0 : MF_GRAYED), MENU_ID_PASTE, L"붙여넣기");
-        AppendMenuW(hMenu, MF_STRING, MENU_ID_SELECT_ALL, L"모두 선택");
         AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
       }
 
-      if (has_link) {
-        AppendMenuW(hMenu, MF_STRING, 3001, L"새 탭에서 링크 열기");
-        AppendMenuW(hMenu, MF_STRING, 3004, L"다른 분할 화면에서 열기");
-        AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
-        AppendMenuW(hMenu, MF_STRING, 3002, L"링크 페이지 저장");
-        AppendMenuW(hMenu, MF_STRING, 3003, L"링크 복사");
-        AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
-        AppendMenuW(hMenu, MF_STRING, MENU_ID_USER_FIRST, L"검사 (Inspect)");
-      } else {
-        int can_back = browser->can_go_back(browser);
-        int can_forward = browser->can_go_forward(browser);
-        
-        char cur_page_url[4096] = {0};
-        if (frame) {
-          cef_string_userfree_t u = frame->get_url(frame);
-          if (u) {
-            cef_string_utf8_t u8 = {};
-            cef_string_to_utf8(u->str, u->length, &u8);
-            if (u8.str) strncpy(cur_page_url, u8.str, sizeof(cur_page_url) - 1);
-            cef_string_utf8_clear(&u8);
-            cef_string_userfree_free(u);
-          }
+      int can_back = browser->can_go_back(browser);
+      int can_forward = browser->can_go_forward(browser);
+      
+      char cur_page_url[4096] = {0};
+      if (frame) {
+        cef_string_userfree_t u = frame->get_url(frame);
+        if (u) {
+          cef_string_utf8_t u8 = {};
+          cef_string_to_utf8(u->str, u->length, &u8);
+          if (u8.str) strncpy(cur_page_url, u8.str, sizeof(cur_page_url) - 1);
+          cef_string_utf8_clear(&u8);
+          cef_string_userfree_free(u);
         }
-        if (cur_page_url[0] == '\0' && ctx_handler->parent && ctx_handler->parent->window_ctx) {
-          browser_window_t* w = ctx_handler->parent->window_ctx;
-          if (w->active_tab_index >= 0 && w->active_tab_index < w->tab_count) {
-            strncpy(cur_page_url, w->tabs[w->active_tab_index].url, sizeof(cur_page_url) - 1);
-          }
-        }
-
-        int can_save = (cur_page_url[0] != '\0' &&
-                        strncmp(cur_page_url, "lite://", 7) != 0 &&
-                        strncmp(cur_page_url, "about:", 6) != 0 &&
-                        strncmp(cur_page_url, "devtools://", 11) != 0 &&
-                        strncmp(cur_page_url, "chrome://", 9) != 0);
-
-        AppendMenuW(hMenu, MF_STRING | (can_back ? 0 : MF_GRAYED), MENU_ID_BACK, L"뒤로 가기");
-        AppendMenuW(hMenu, MF_STRING | (can_forward ? 0 : MF_GRAYED), MENU_ID_FORWARD, L"앞으로 가기");
-        AppendMenuW(hMenu, MF_STRING, MENU_ID_RELOAD, L"새로고침");
-        AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
-        AppendMenuW(hMenu, MF_STRING | (can_save ? 0 : MF_GRAYED), 3005, L"다른 이름으로 저장...");
-        AppendMenuW(hMenu, MF_STRING, MENU_ID_PRINT, L"인쇄...");
-        AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
-        AppendMenuW(hMenu, MF_STRING, MENU_ID_VIEW_SOURCE, L"페이지 소스 보기");
-        AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
-        AppendMenuW(hMenu, MF_STRING, MENU_ID_USER_FIRST, L"검사 (Inspect)");
       }
+      if (cur_page_url[0] == '\0' && ctx_handler->parent && ctx_handler->parent->window_ctx) {
+        browser_window_t* w = ctx_handler->parent->window_ctx;
+        if (w->active_tab_index >= 0 && w->active_tab_index < w->tab_count) {
+          strncpy(cur_page_url, w->tabs[w->active_tab_index].url, sizeof(cur_page_url) - 1);
+        }
+      }
+
+      int can_save = (cur_page_url[0] != '\0' &&
+                      strncmp(cur_page_url, "lite://", 7) != 0 &&
+                      strncmp(cur_page_url, "about:", 6) != 0 &&
+                      strncmp(cur_page_url, "devtools://", 11) != 0 &&
+                      strncmp(cur_page_url, "chrome://", 9) != 0);
+
+      AppendMenuW(hMenu, MF_STRING | (can_back ? 0 : MF_GRAYED), MENU_ID_BACK, L"뒤로 가기");
+      AppendMenuW(hMenu, MF_STRING | (can_forward ? 0 : MF_GRAYED), MENU_ID_FORWARD, L"앞으로 가기");
+      AppendMenuW(hMenu, MF_STRING, MENU_ID_RELOAD, L"새로고침");
+      AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+      AppendMenuW(hMenu, MF_STRING | (can_save ? 0 : MF_GRAYED), 3005, L"다른 이름으로 저장...");
+      AppendMenuW(hMenu, MF_STRING, MENU_ID_PRINT, L"인쇄...");
+      AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+      AppendMenuW(hMenu, MF_STRING, MENU_ID_VIEW_SOURCE, L"페이지 소스 보기");
+      AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+      AppendMenuW(hMenu, MF_STRING, MENU_ID_USER_FIRST, L"검사 (Inspect)");
     }
     
     LogMsg("on_before_context_menu: calling TrackPopupMenu (blocking) at screen coords x=%d, y=%d\n", pt.x, pt.y);
@@ -3750,7 +4340,15 @@ void CEF_CALLBACK context_menu_on_before_context_menu(
     DestroyMenu(hMenu);
     
     if (cmd > 0) {
-      if (cmd == MENU_ID_COPY) {
+      if (cmd == MENU_ID_UNDO) {
+        if (frame) {
+          frame->undo(frame);
+        }
+      } else if (cmd == MENU_ID_REDO) {
+        if (frame) {
+          frame->redo(frame);
+        }
+      } else if (cmd == MENU_ID_COPY) {
         if (frame) {
           frame->copy(frame);
         }
