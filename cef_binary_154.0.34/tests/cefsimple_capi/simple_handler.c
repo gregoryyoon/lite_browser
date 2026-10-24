@@ -4821,6 +4821,11 @@ int CEF_CALLBACK keyboard_handler_on_pre_key_event(
 
     // Ctrl + S: Save As...
     if (has_ctrl && !has_shift && (event->windows_key_code == 'S' || event->windows_key_code == 's')) {
+      if (event->focus_on_editable_field) {
+        // Focus is currently on an editable field or rich text editor (e.g. input, textarea, contenteditable, TUI Editor).
+        // Let the editor handle the shortcut; do NOT trigger browser Save As!
+        return 0;
+      }
       if (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
         tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
         cef_browser_t* target_browser = (active_tab->is_split && active_tab->active_split == 1 && active_tab->right_browser)
@@ -4843,7 +4848,12 @@ int CEF_CALLBACK keyboard_handler_on_pre_key_event(
           if (cur_url[0] == '\0') {
             strncpy(cur_url, active_tab->url, sizeof(cur_url) - 1);
           }
-          simple_download_trigger_save_as(win_ctx->main_hwnd, target_browser, cur_url, active_tab->title);
+          if (cur_url[0] != '\0' &&
+              strncmp(cur_url, "lite://", 7) != 0 &&
+              strncmp(cur_url, "about:blank", 11) != 0 &&
+              strncmp(cur_url, "devtools://", 11) != 0) {
+            simple_download_trigger_save_as(win_ctx->main_hwnd, target_browser, cur_url, active_tab->title);
+          }
         }
       }
       return 1; // Handled! Suppress default Chromium accelerator.
