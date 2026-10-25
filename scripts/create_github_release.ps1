@@ -2,8 +2,8 @@
 param(
     [Parameter(Mandatory=$true)]
     [string]$Token,
-    [string]$TagName = "v0.2.4",
-    [string]$ReleaseName = "Lite Browser v0.2.4",
+    [string]$TagName = "v0.2.5",
+    [string]$ReleaseName = "Lite Browser v0.2.5",
     [string]$InstallerPath = "LiteBrowserInstaller.exe",
     [string]$ReleaseBody = ""
 )
@@ -39,23 +39,33 @@ if (-not $ReleaseBody) {
 
 ### 주요 변경 사항
 
-#### 1. 웹페이지 저장 및 컨텍스트 메뉴 확장
-- **'다른 이름으로 저장...' (Save As...) 기능 추가**: 웹페이지 마우스 우클릭 컨텍스트 메뉴('인쇄...' 상단)에 '다른 이름으로 저장...' 항목 배치
-- **Ctrl + S 표준 단축키 지원**: 웹페이지 및 문서 열람 중 즉시 Windows 파일 저장 대화상자(GetSaveFileNameW) 호출 연동
-- **원본 콘텐츠 보존 다운로드**: .txt, .md, .doc, .json, .c 등 소스 코드 및 텍스트 파일 접속 시 정규 다운로드 매니저 파이프라인을 통해 원본 바이트 그대로 로컬 저장
+#### 1. AI 에이전트 실시간 웹페이지 인플레이스 번역 시스템
+- **CEF 내장 번역 부재 한계 극복**: Chromium 컴포넌트의 Google 독점 번역 엔진 제약을 해소하고, 사이드패널 AI Provider(Gemini 4 Argon, 3.8 Flash, ChatGPT, Claude 등)를 연동한 실시간 인플레이스 번역 파이프라인 구축
+- **DOM 구조 보존 및 양방향 원문/번역문 토글**: 하이퍼링크, 레이아웃 서식을 보존하며 인플레이스 치환하고, 도구 완료 카드의 `[원문 복원]` 및 `[번역문 다시 적용]` 버튼을 통해 실시간 양방향 전환 지원
+- **사이드패널 웰컴 카드 '한국어로 번역' 칩 연동**: 원클릭으로 현재 웹페이지 본문 전체를 번역하고 핵심 내용 3줄 요약 및 주요 용어 정리를 마크다운으로 브리핑
+- **다국어 번역 및 심층 컨테이너 순회**: 영어 외 일본어, 중국어 등 다국어 번역 지원 및 SPA 리프 노드/iframe 컨테이너 텍스트 추출 정밀화
 
-#### 2. 탭 및 윈도우 관리 안정성 강화
-- **Ctrl + W / Ctrl + F4 탭 닫기 단축키 정식 지원**: 웹페이지 본문 및 상단 툴바 어디서든 Ctrl + W, Ctrl + F4 입력 시 현재 활성 탭이 안전하게 종료되도록 CEF 키보드 핸들러 연동
-- **실시간 윈도우 타이틀 동기화**: 탭 전환, 탭 닫기, 분할 뷰 포커스 전환 시 Windows 작업 표시줄 및 Alt+Tab 전환창에 [페이지 제목] - Lite Browser 즉시 동기화
-- **오른쪽 탭 닫기 시 회색 화면 버그 수정**: 우클릭 '오른쪽 탭 닫기'(CloseTabsToRight) 및 일괄 탭 종료 시 내부 상태 갱신 순서 및 Z-order를 정상화하여 회색 화면(렌더링 누락) 문제 완벽 해결
+#### 2. AI 에이전트 자율 탭 제어 서브시스템 & 라이브 도구 UX
+- **자율 브라우저 탭 제어 도구군 추가**:
+  - `browser_get_tabs`: 열려 있는 모든 탭의 ID, 제목, URL, 활성/분할 상태 조회
+  - `browser_open_tab`: 자연어 명령으로 새 탭 생성 및 백그라운드 탐색 제어
+  - `browser_switch_tab` / `browser_reorder_tabs`: 탭 포커스 이동 및 인덱스 재배치
+  - `browser_split_tabs`: 2개 탭을 0.5f 듀얼 분할 화면으로 즉시 결합
+  - `browser_close_tabs`: 확인 카드 팝업 후 안전한 탭 일괄 종료
+  - `browser_get_tab_content`: 탭 본문 DOM 추출 및 텍스트/마크다운 분석
+- **지연 탐색 파이프라인 (PostDeferredNavigation)**: CEF `on_before_browse` 내부의 동기 URL 로드로 인한 Chromium NavigationThrottle 스택 오버플로우(0xC00000FD) 재진입 크래시를 원천 방지
+- **사이드패널 히든 iframe 통신 브릿지 (`sendUiAction`)**: 프레임 내비게이션으로 인한 LLM Fetch 스트리밍 취소 및 렌더러 오염 방지
+- **전 도구 실시간 진행(Running) UX 파이프라인**: 도구 호출 즉시 채팅창에 진행 카드를 표시하고(약 2초 시점), 세부 작업 단계(추출 → 분석/번역 → DOM 적용)를 실시간 반영한 뒤 제자리에서 완료 카드로 매끄럽게 전환
+- **Gemini 최신 모델 라인업 최신화**: `gemini-4-argon`, `gemini-3.8-flash` 지원 및 429 Quota Exceeded 발생 시 `RetryInfo` 기반 자동 지수 백오프 복원 파이프라인 적용
 
-#### 3. 웹 권한 제어 및 보안 강화
-- **웹 권한 관리 핸들러(Permission Handler) 도입**: 로컬 네트워크 및 루프백 접근(Local Network Access), 웹 리소스 권한 제어 서브시스템 구축
-- **세션 임시 권한 자동 격리 및 초기화**: 브라우저 종료 및 세션 완료 시 허용된 권한을 안전하게 초기화
+#### 3. Win32 CJK IME 및 사이드패널 포커스 안정성 강화
+- **Chrome_WidgetWin_0 네이티브 포커스 동기화**: 상단 윈도우와 네이티브 CEF 윈도우 간의 포커스 전달을 정규화하여 한국어, 일본어, 중국어(CJK) IME 조합 중 글자 잘림 및 포커스 이탈 문제 해결
+- **프롬프트 실행 중 채팅창 포커스 지속 유지**: AI 응답 스트리밍 및 도구 실행 중에도 채팅창 입력 포커스를 지속 유지하여 연속적인 프롬프트 입력 편의 제공
 
-#### 4. 배포 및 업데이트 파이프라인
-- **Per-User (Zero-UAC) 무음 업데이트 파이프라인**: 사용자 계정 컨트롤(UAC) 창 없는 완전 무음 백그라운드 자동 업데이트
-- **보안 및 무결성**: 최신 Authenticode SHA-256 전자 서명 및 DigiCert RFC 3161 공식 타임스탬프 적용
+#### 4. 브라우저 안정성 및 배포 메타데이터 개선
+- **'다른 이름으로 저장' (Ctrl+S) 단축키 입력 필드 충돌 방지**: input, textarea 등 편집 필드 및 내부 시스템 페이지에서 불필요한 파일 저장 대화상자 호출 억제
+- **미등록 프로토콜 방어**: Windows 레지스트리에 미등록된 외부 스키마 호출 시 `ERR_UNKNOWN_URL_SCHEME` 에러 화면 억제
+- **PE 리소스 RT_VERSION 주입**: 빌드 후처리 파이프라인에서 `lite_browser.exe`에 정식 `RT_VERSION` 리소스 주입 및 버전 일관성 확보
 "@
 }
 

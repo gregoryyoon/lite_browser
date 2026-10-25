@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/gregoryyoon/lite_browser/releases/latest"><img src="https://img.shields.io/badge/Release-v0.2.4-brightgreen.svg?logo=github&logoColor=white" alt="Latest Release v0.2.4" /></a>
+  <a href="https://github.com/gregoryyoon/lite_browser/releases/latest"><img src="https://img.shields.io/badge/Release-v0.2.5-brightgreen.svg?logo=github&logoColor=white" alt="Latest Release v0.2.5" /></a>
   <a href="https://github.com/gregoryyoon/lite_browser"><img src="https://img.shields.io/badge/Platform-Windows%2064--bit-0078D4.svg?logo=windows&logoColor=white" alt="Platform Windows 64-bit" /></a>
   <a href="https://github.com/gregoryyoon/lite_browser"><img src="https://img.shields.io/badge/Language-C11%20%2F%20Pure%20C%20API-00599C.svg?logo=c&logoColor=white" alt="Language C11 / Pure Win32 C CAPI" /></a>
   <a href="https://github.com/gregoryyoon/lite_browser"><img src="https://img.shields.io/badge/CEF-154.0.34%20(Chromium%20154)-FF6F00.svg?logo=googlechrome&logoColor=white" alt="CEF 154.0.34 / Chromium 154" /></a>
@@ -55,7 +55,9 @@
 ### 🤖 4. 상시 대기 독립 도킹 AI 사이드패널 & 보안 볼트
 - **작업 흐름을 방해하지 않는 AI 파트너**: 탭을 전환하거나 새 창을 열어도 대화 세션이 끊기지 않는 독립 네이티브 도킹 사이드패널을 제공합니다.
 - **Claude & ChatGPT 유료 구독 모델 직접 연동**: 복잡하고 번거로운 종량제 API Key 발급 없이도, 기존에 사용 중인 **ChatGPT Plus/Pro** 및 **Claude Pro** 구독 계정을 원클릭으로 연동하여 최신 플래그십 AI 모델을 무제한 감각으로 활용할 수 있습니다. (Google Gemini 및 로컬 Ollama 모델도 완벽 지원)
-- **Gemini 3.7 Flash 스마트 요약**: 긴 기사, 블로그, 심지어 YouTube 동영상 콘텐츠까지 5단계 스마트 분석 엔진으로 핵심만 명쾌하게 요약해 줍니다.
+- **실시간 웹페이지 인플레이스 번역**: 내장 번역 엔진이 없는 CEF 환경의 한계를 돌파하여, 해외 웹페이지의 DOM 구조를 보존한 채 자연스러운 한국어로 즉시 번역하고 원문/번역문을 양방향으로 실시간 토글합니다.
+- **자율 탭 제어 & 스마트 브라우징 도구**: "새 탭에 깃허브 열어줘", "열린 탭 정리해줘", "탭 2개 분할해서 비교해줘" 등 자연어 명령으로 브라우저 탭을 능동적으로 생성, 전환, 재배치, 분할 탐색합니다.
+- **Gemini 3.7 Flash 스마트 요약 & YouTube 분석**: 긴 기사, 블로그, 심지어 YouTube 동영상 콘텐츠까지 5단계 스마트 분석 엔진으로 핵심만 명쾌하게 요약해 줍니다.
 - **Windows DPAPI 보안 볼트**: 사용자 로그인 세션 토큰 및 API 키를 일반 파일에 평문 저장하지 않고, Windows OS 수준의 하드웨어 암호화(`CryptProtectData`)로 안전하게 격리 보호합니다.
 
 ### 🔍 5. 지능형 옴니박스 (Smart Omnibox Search)
