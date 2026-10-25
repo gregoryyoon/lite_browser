@@ -1086,6 +1086,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (window.sendNativeLog) window.sendNativeLog(`[Sidepanel] User Prompt: "${prompt}"`);
 
     promptInput.value = '';
+    if (promptInput) promptInput.focus();
     appendUserMessage(prompt);
     conversationHistory.push({ role: 'user', content: prompt });
 
@@ -1287,13 +1288,20 @@ document.addEventListener('DOMContentLoaded', () => {
       sendBtn.classList.remove('hidden');
       stopBtn.classList.add('hidden');
       abortController = null;
+      if (promptInput) {
+        promptInput.focus();
+      }
     }
   }
 
-  sendBtn.addEventListener('click', () => handleSendPrompt());
+  sendBtn.addEventListener('click', () => {
+    handleSendPrompt();
+    if (promptInput) promptInput.focus();
+  });
   stopBtn.addEventListener('click', () => {
     if (abortController) abortController.abort();
     window.taskRuntime.stop();
+    if (promptInput) promptInput.focus();
   });
 
   promptInput.addEventListener('keydown', (e) => {
@@ -1319,7 +1327,10 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.chip').forEach(chip => {
     chip.addEventListener('click', () => {
       const prompt = chip.getAttribute('data-prompt');
-      if (prompt) handleSendPrompt(prompt);
+      if (prompt) {
+        handleSendPrompt(prompt);
+        if (promptInput) promptInput.focus();
+      }
     });
   });
 
@@ -1328,6 +1339,7 @@ document.addEventListener('DOMContentLoaded', () => {
     messagesList.innerHTML = '';
     if (welcomeCard) welcomeCard.style.display = 'block';
     window.taskRuntime.setState(TaskState.IDLE, '대화 리셋');
+    if (promptInput) promptInput.focus();
   });
 
   // Global Tab Switch, Translation Toggle & Link Click Listener

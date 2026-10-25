@@ -21,6 +21,9 @@ function sendNativeLog(msg) {
       bridge = document.createElement('iframe');
       bridge.id = 'debug-log-bridge';
       bridge.style.display = 'none';
+      bridge.tabIndex = -1;
+      bridge.setAttribute('tabindex', '-1');
+      bridge.setAttribute('aria-hidden', 'true');
       document.body.appendChild(bridge);
     }
     bridge.src = 'http://ui-action/log?msg=' + encodeURIComponent(msg);
@@ -30,14 +33,16 @@ window.sendNativeLog = sendNativeLog;
 
 function sendUiAction(url) {
   let bridge = document.getElementById('ui-action-bridge');
-  if (bridge) {
-    bridge.remove();
+  if (!bridge) {
+    bridge = document.createElement('iframe');
+    bridge.id = 'ui-action-bridge';
+    bridge.style.display = 'none';
+    bridge.tabIndex = -1;
+    bridge.setAttribute('tabindex', '-1');
+    bridge.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(bridge);
   }
-  bridge = document.createElement('iframe');
-  bridge.id = 'ui-action-bridge';
-  bridge.style.display = 'none';
   bridge.src = url;
-  document.body.appendChild(bridge);
 }
 window.sendUiAction = sendUiAction;
 
