@@ -355,7 +355,17 @@ static LRESULT CALLBACK ChildBorderSubclassProc(
         while (root_tab && GetParent(root_tab) != main_hwnd) {
           root_tab = GetParent(root_tab);
         }
-        if (root_tab && root_tab != win_ctx->ui_hwnd) {
+        if (root_tab && root_tab == win_ctx->sidepanel_hwnd && win_ctx->sidepanel_browser) {
+          cef_browser_host_t* h = win_ctx->sidepanel_browser->get_host(win_ctx->sidepanel_browser);
+          if (h) {
+            h->set_focus(h, 1);
+            h->base.release(&h->base);
+          }
+          HWND chrome_wnd = FindWindowExW(win_ctx->sidepanel_hwnd, NULL, L"Chrome_WidgetWin_0", NULL);
+          if (chrome_wnd && GetFocus() != chrome_wnd) {
+            SetFocus(chrome_wnd);
+          }
+        } else if (root_tab && root_tab != win_ctx->ui_hwnd) {
           if (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
             tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
             if (active_tab->is_split) {
@@ -907,15 +917,45 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
     if (message == WM_ACTIVATE && LOWORD(wParam) == WA_INACTIVE) {
       return 0;
     }
-    if (win_ctx && win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
-      tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
-      cef_browser_t* target_b = (active_tab->is_split && active_tab->active_split == 1 && active_tab->right_browser)
-                             ? active_tab->right_browser : active_tab->browser;
-      if (target_b) {
-        cef_browser_host_t* host = target_b->get_host(target_b);
-        if (host) {
-          host->set_focus(host, 1);
-          host->base.release(&host->base);
+    if (win_ctx) {
+      HWND cur_focus = GetFocus();
+      if (win_ctx->show_sidepanel && win_ctx->sidepanel_browser && win_ctx->sidepanel_hwnd) {
+        HWND check = cur_focus;
+        while (check && check != hwnd) {
+          if (check == win_ctx->sidepanel_hwnd) {
+            cef_browser_host_t* sp_h = win_ctx->sidepanel_browser->get_host(win_ctx->sidepanel_browser);
+            if (sp_h) {
+              sp_h->set_focus(sp_h, 1);
+              sp_h->base.release(&sp_h->base);
+            }
+            HWND chrome_wnd = FindWindowExW(win_ctx->sidepanel_hwnd, NULL, L"Chrome_WidgetWin_0", NULL);
+            if (chrome_wnd && GetFocus() != chrome_wnd) {
+              SetFocus(chrome_wnd);
+            }
+            return 0;
+          }
+          check = GetParent(check);
+        }
+      }
+      if (win_ctx->ui_hwnd && win_ctx->ui_browser) {
+        HWND check = cur_focus;
+        while (check && check != hwnd) {
+          if (check == win_ctx->ui_hwnd) {
+            return 0;
+          }
+          check = GetParent(check);
+        }
+      }
+      if (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+        tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
+        cef_browser_t* target_b = (active_tab->is_split && active_tab->active_split == 1 && active_tab->right_browser)
+                               ? active_tab->right_browser : active_tab->browser;
+        if (target_b) {
+          cef_browser_host_t* host = target_b->get_host(target_b);
+          if (host) {
+            host->set_focus(host, 1);
+            host->base.release(&host->base);
+          }
         }
       }
     }

@@ -1656,8 +1656,41 @@ int CEF_CALLBACK request_handler_on_before_browse(
 
         if (strcmp(action, "toggle-ai-sidepanel") == 0) {
           win_ctx->show_sidepanel = !win_ctx->show_sidepanel;
-          if (win_ctx->show_sidepanel && !win_ctx->sidepanel_browser && !win_ctx->sidepanel_handler) {
-            CreateSidepanelBrowser(win_ctx);
+          if (win_ctx->show_sidepanel) {
+            if (!win_ctx->sidepanel_browser && !win_ctx->sidepanel_handler) {
+              CreateSidepanelBrowser(win_ctx);
+            } else if (win_ctx->sidepanel_browser) {
+              cef_browser_host_t* h = win_ctx->sidepanel_browser->get_host(win_ctx->sidepanel_browser);
+              if (h) {
+                h->was_resized(h);
+                h->set_focus(h, 1);
+                h->base.release(&h->base);
+              }
+              if (win_ctx->sidepanel_hwnd) {
+                HWND chrome_wnd = FindWindowExW(win_ctx->sidepanel_hwnd, NULL, L"Chrome_WidgetWin_0", NULL);
+                SetFocus(chrome_wnd ? chrome_wnd : win_ctx->sidepanel_hwnd);
+              }
+            }
+          } else {
+            // Restore focus to active tab content browser when sidepanel closes
+            if (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+              tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
+              cef_browser_t* target_b = (active_tab->is_split && active_tab->active_split == 1 && active_tab->right_browser)
+                                     ? active_tab->right_browser : active_tab->browser;
+              if (target_b) {
+                cef_browser_host_t* host = target_b->get_host(target_b);
+                if (host) {
+                  host->set_focus(host, 1);
+                  host->base.release(&host->base);
+                }
+              }
+              HWND target_hwnd = (active_tab->is_split && active_tab->active_split == 1 && active_tab->right_hwnd)
+                               ? active_tab->right_hwnd : active_tab->hwnd;
+              if (target_hwnd) {
+                HWND chrome_wnd = FindWindowExW(target_hwnd, NULL, L"Chrome_WidgetWin_0", NULL);
+                SetFocus(chrome_wnd ? chrome_wnd : target_hwnd);
+              }
+            }
           }
           RECT r;
           GetClientRect(win_ctx->main_hwnd, &r);
@@ -5057,6 +5090,20 @@ void CEF_CALLBACK focus_handler_on_got_focus(cef_focus_handler_t* self,
                                              cef_browser_t* browser) {
   simple_focus_handler_t* handler = (simple_focus_handler_t*)self;
   if (handler && handler->parent && handler->parent->type == BROWSER_TYPE_POPUP) {
+    return;
+  }
+  if (handler && handler->parent && handler->parent->type == BROWSER_TYPE_SIDEPANEL) {
+    cef_browser_host_t* host = browser->get_host(browser);
+    if (host) {
+      HWND sp_hwnd = host->get_window_handle(host);
+      if (sp_hwnd) {
+        HWND chrome_wnd = FindWindowExW(sp_hwnd, NULL, L"Chrome_WidgetWin_0", NULL);
+        if (chrome_wnd && GetFocus() != chrome_wnd) {
+          SetFocus(chrome_wnd);
+        }
+      }
+      host->base.release(&host->base);
+    }
     return;
   }
   browser_window_t *win_ctx = (handler && handler->parent) ? handler->parent->window_ctx : NULL;

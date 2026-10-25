@@ -154,6 +154,14 @@ void CEF_CALLBACK life_span_handler_on_after_created(
       win_ctx->sidepanel_hwnd = hwnd;
       if (win_ctx->show_sidepanel) {
         ShowWindow(hwnd, SW_SHOW);
+        cef_browser_host_t* h = browser->get_host(browser);
+        if (h) {
+          h->was_resized(h);
+          h->set_focus(h, 1);
+          h->base.release(&h->base);
+        }
+        HWND chrome_wnd = FindWindowExW(hwnd, NULL, L"Chrome_WidgetWin_0", NULL);
+        SetFocus(chrome_wnd ? chrome_wnd : hwnd);
       } else {
         ShowWindow(hwnd, SW_HIDE);
       }

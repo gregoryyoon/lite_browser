@@ -1303,6 +1303,18 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  // Auto-focus chat input on load & window focus
+  if (promptInput) {
+    setTimeout(() => {
+      promptInput.focus();
+    }, 150);
+  }
+  window.addEventListener('focus', () => {
+    if (promptInput && document.activeElement !== promptInput) {
+      promptInput.focus();
+    }
+  });
+
   // Suggestion Chips Click
   document.querySelectorAll('.chip').forEach(chip => {
     chip.addEventListener('click', () => {
