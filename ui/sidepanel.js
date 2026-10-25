@@ -698,10 +698,16 @@ document.addEventListener('DOMContentLoaded', () => {
     window.location.href = 'http://ui-action/toggle-ai-sidepanel';
   });
 
+  let activeRunningToolCard = null;
+
   // 2. Task Runtime Status & Callbacks
   window.taskRuntime.onStateChange = (newState, detail) => {
     statusBadge.textContent = newState;
     statusBadge.className = `status-badge status-${newState.toLowerCase()}`;
+
+    if (activeRunningToolCard && detail) {
+      activeRunningToolCard.updateProgress(detail);
+    }
 
     if (newState === TaskState.STUCK || newState === TaskState.WAITING) {
       interventionMessage.textContent = detail || '작업 수행 중 사용자 개입이 필요합니다.';
@@ -851,73 +857,206 @@ document.addEventListener('DOMContentLoaded', () => {
     browser_get_tab_content: '탭 본문 내용 추출',
     browser_split_tabs: '분할 화면(Split View) 결합',
     browser_close_tabs: '탭 닫기',
-    browser_open_tab: '새 탭 열기'
+    browser_open_tab: '새 탭 열기',
+    browser_translate_page: '웹페이지 실시간 번역',
+    browser_get_selected_text: '선택 텍스트 추출'
   };
 
-  function appendToolCard(toolName, args, result) {
-    const isError = Boolean(result?.isError || result?.status === 'error');
-    const friendlyName = TOOL_NAME_KO[toolName] || toolName;
-    const card = document.createElement('div');
-    card.className = 'timeline-step';
+  function getToolArgSummary(toolName, args) {
+    if (toolName === 'browser_navigate') return `URL: ${args.url || ''}`;
+    if (toolName === 'browser_open_tab') return `URL: ${args.url || '새 탭(lite://favorites)'}${args.activate === false ? ' [백그라운드]' : ''}`;
+    if (toolName === 'browser_translate_page') return `페이지 번역 (언어: ${args.target_lang || '한국어'}, 범위: ${args.scope || 'main'})`;
+    if (toolName === 'browser_get_selected_text') return `드래그 선택된 텍스트 추출`;
+    if (toolName === 'browser_click_element') return `클릭: ${args.text || args.selector || ''}`;
+    if (toolName === 'browser_type_text') return `입력: "${args.text || ''}" (${args.selector || ''})`;
+    if (toolName === 'browser_get_page_content') return `본문 추출 (형식: ${args.format || 'summary'})`;
+    if (toolName === 'browser_get_tabs') return `열린 탭 전체 목록 조회`;
+    if (toolName === 'browser_switch_tab') return `탭 #${args.tab_id} 화면 전환`;
+    if (toolName === 'browser_reorder_tabs') return `탭 재배치 순서: [${(args.tab_ids || []).join(' → ')}]`;
+    if (toolName === 'browser_get_tab_content') return `탭 본문 추출 (ID: ${args.tab_id})`;
+    if (toolName === 'browser_split_tabs') return `좌측(Tab ${args.left_tab_id}) | 우측(Tab ${args.right_tab_id}) 분할 화면`;
+    if (toolName === 'browser_close_tabs') return `탭 닫기 대상: [${(args.tab_ids || []).join(', ')}]`;
+    return JSON.stringify(args || {});
+  }
 
-    let argSummary = '';
-    if (toolName === 'browser_navigate') argSummary = `URL: ${args.url || ''}`;
-    else if (toolName === 'browser_open_tab') argSummary = `URL: ${args.url || '새 탭(lite://favorites)'}${args.activate === false ? ' [백그라운드]' : ''}`;
-    else if (toolName === 'browser_click_element') argSummary = `클릭: ${args.text || args.selector || ''}`;
-    else if (toolName === 'browser_type_text') argSummary = `입력: "${args.text || ''}" (${args.selector || ''})`;
-    else if (toolName === 'browser_get_page_content') argSummary = `본문 추출 (형식: ${args.format || 'summary'})`;
-    else if (toolName === 'browser_get_tabs') argSummary = `열린 탭 전체 목록 조회`;
-    else if (toolName === 'browser_switch_tab') argSummary = `탭 #${args.tab_id} 화면 전환`;
-    else if (toolName === 'browser_reorder_tabs') argSummary = `탭 재배치 순서: [${(args.tab_ids || []).join(' → ')}]`;
-    else if (toolName === 'browser_get_tab_content') argSummary = `탭 본문 추출 (ID: ${args.tab_id})`;
-    else if (toolName === 'browser_split_tabs') argSummary = `좌측(Tab ${args.left_tab_id}) | 우측(Tab ${args.right_tab_id}) 분할 화면`;
-    else if (toolName === 'browser_close_tabs') argSummary = `탭 닫기 대상: [${(args.tab_ids || []).join(', ')}]`;
-    else argSummary = JSON.stringify(args);
+  function getToolInitialProgressText(toolName, args) {
+    if (toolName === 'browser_navigate') return `${args.url || '해당 주소'} 웹페이지로 이동 중...`;
+    if (toolName === 'browser_open_tab') return `${args.url || '새 탭'} 생성 및 로딩 중...`;
+    if (toolName === 'browser_translate_page') return `웹페이지 본문 텍스트 추출 준비 중...`;
+    if (toolName === 'browser_get_selected_text') return `선택 영역 텍스트 추출 중...`;
+    if (toolName === 'browser_get_page_content') return `웹페이지 DOM 구조 및 본문 데이터 추출 중...`;
+    if (toolName === 'browser_get_tabs') return `열려 있는 전체 탭 목록 및 활성 상태 조회 중...`;
+    if (toolName === 'browser_switch_tab') return `탭 #${args.tab_id} 화면으로 전환 중...`;
+    if (toolName === 'browser_reorder_tabs') return `탭 ${(args.tab_ids || []).length}개 순서 재배치 중...`;
+    if (toolName === 'browser_get_tab_content') return `탭 #${args.tab_id} 본문 데이터 백그라운드 추출 중...`;
+    if (toolName === 'browser_split_tabs') return `탭 #${args.left_tab_id}과 탭 #${args.right_tab_id} 듀얼 분할 화면 구성 중...`;
+    if (toolName === 'browser_close_tabs') return `지정된 탭 ${(args.tab_ids || []).length}개 종료 처리 중...`;
+    if (toolName === 'browser_click_element') return `${args.text || args.selector || '요소'} 탐색 및 클릭 준비 중...`;
+    if (toolName === 'browser_type_text') return `${args.selector || '입력 필드'}에 텍스트 입력 준비 중...`;
+    if (toolName === 'browser_scroll') return `화면 ${args.direction || '아래'}로 스크롤 중...`;
+    if (toolName === 'browser_autofill_login') return `Vault 마스터 보안 인증 및 계정 탐색 중...`;
+    return '작업을 준비하고 있습니다...';
+  }
 
-    let resultSummary = '';
+  function getToolResultSummary(toolName, args, result) {
     if (toolName === 'browser_get_page_content' && result?.title) {
-      resultSummary = `[${result.title}] - ${result.url}\n${(result.bodySnippet || result.markdown || '').slice(0, 400)}...`;
-    } else if (toolName === 'browser_get_tab_content' && result?.title) {
-      resultSummary = `[Tab ${result.tab_id}: ${result.title}] - ${result.url}\n${(result.bodySnippet || '').slice(0, 400)}...`;
-    } else if (toolName === 'browser_get_tabs' && result?.tabs) {
-      resultSummary = `총 ${result.tabs.length}개 탭:\n` + result.tabs.map(t => `- [${t.tab_id}] ${t.title || '새 탭'} (${t.url})${t.is_active ? ' [활성]' : ''}${t.is_split ? ' [분할]' : ''}`).join('\n');
-    } else if (toolName === 'browser_switch_tab' && result?.status === 'success') {
-      resultSummary = `탭 #${args.tab_id} 화면으로 즉시 전환했습니다.`;
-    } else if (toolName === 'browser_open_tab' && result?.status === 'success') {
-      resultSummary = `새 탭(ID: ${result.tab_id}) 열기 완료: ${result.title || '새 탭'} (${result.url})`;
-    } else {
-      resultSummary = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+      return `[${result.title}] - ${result.url}\n${(result.bodySnippet || result.markdown || '').slice(0, 400)}...`;
     }
+    if (toolName === 'browser_get_tab_content' && result?.title) {
+      return `[Tab ${result.tab_id}: ${result.title}] - ${result.url}\n${(result.bodySnippet || '').slice(0, 400)}...`;
+    }
+    if (toolName === 'browser_get_tabs' && result?.tabs) {
+      return `총 ${result.tabs.length}개 탭:\n` + result.tabs.map(t => `- [${t.tab_id}] ${t.title || '새 탭'} (${t.url})${t.is_active ? ' [활성]' : ''}${t.is_split ? ' [분할]' : ''}`).join('\n');
+    }
+    if (toolName === 'browser_switch_tab' && result?.status === 'success') {
+      return `탭 #${args.tab_id} 화면으로 즉시 전환했습니다.`;
+    }
+    if (toolName === 'browser_open_tab' && result?.status === 'success') {
+      return `새 탭(ID: ${result.tab_id}) 열기 완료: ${result.title || '새 탭'} (${result.url})`;
+    }
+    if (toolName === 'browser_translate_page' && result?.status === 'success') {
+      return `${result.message || ''}\n웹페이지 본문 텍스트가 번역문으로 즉시 치환되었습니다. 아래 버튼을 눌러 언제든 원문/번역문을 전환할 수 있습니다.`;
+    }
+    if (toolName === 'browser_get_selected_text' && result?.status === 'success') {
+      return `선택된 텍스트:\n"${(result.selected_text || '').slice(0, 300)}${result.selected_text?.length > 300 ? '...' : ''}"`;
+    }
+    if (toolName === 'browser_reorder_tabs' && result?.status === 'success') {
+      return `탭 ${(args.tab_ids || []).length}개 재정렬 완료: [${(args.tab_ids || []).join(' → ')}] 순서로 탭 바가 배치되었습니다.`;
+    }
+    if (toolName === 'browser_split_tabs' && result?.status === 'success') {
+      return `탭 #${args.left_tab_id}(좌)와 탭 #${args.right_tab_id}(우)가 듀얼 분할 화면으로 결합되었습니다.`;
+    }
+    if (toolName === 'browser_close_tabs' && result?.status === 'success') {
+      return `탭 ${(result.closed_tab_ids || args.tab_ids || []).length}개가 안전하게 닫혔습니다.`;
+    }
+    if (toolName === 'browser_click_element' && result?.status === 'success') {
+      return `화면 요소 클릭 완료: ${args.text || args.selector || ''}`;
+    }
+    if (toolName === 'browser_type_text' && result?.status === 'success') {
+      return `텍스트 입력 완료: "${args.text || ''}" (${args.selector || ''})`;
+    }
+    if (toolName === 'browser_navigate' && result?.status === 'success') {
+      return `웹페이지 이동 완료: ${args.url || ''}`;
+    }
+    if (toolName === 'browser_scroll' && result?.status === 'success') {
+      return `화면 스크롤 완료 (${args.direction || 'down'} ${args.amount || 500}px)`;
+    }
+    if (toolName === 'browser_autofill_login') {
+      return result.message || (result.status === 'success' ? 'Vault 보안 자동 로그인 완료' : '자동 로그인 실패');
+    }
+    return typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+  }
+
+  function createRunningToolCard(toolName, args) {
+    const friendlyName = TOOL_NAME_KO[toolName] || toolName;
+    const argSummary = getToolArgSummary(toolName, args);
+    const initialProgress = getToolInitialProgressText(toolName, args);
+    const card = document.createElement('div');
+    card.className = 'timeline-step is-running';
 
     card.innerHTML = `
       <div class="timeline-step-header">
         <div class="step-info">
-          <span class="step-badge ${isError ? 'status' : 'tool'}" style="${isError ? 'background: rgba(239, 68, 68, 0.15); color: #ef4444;' : ''}">
-            ${isError ? '오류' : '도구 실행'}
+          <span class="step-badge running">
+            <svg class="icon-inline spin" viewBox="0 0 24 24" style="width: 11px; height: 11px;"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+            <span>실행 중</span>
           </span>
           <span class="step-name">${escapeHtml(friendlyName)}</span>
         </div>
-        <span class="step-status-icon">${isError ? '실패' : '완료'}</span>
+        <span class="step-status-icon" style="color: #f59e0b; display: inline-flex; align-items: center; gap: 4px;">
+          <span class="spinner-inline" style="width: 10px; height: 10px; border-width: 1.5px;"></span>
+          <span>진행 중</span>
+        </span>
       </div>
       <div class="timeline-step-body">
         <div style="font-weight: 500; margin-bottom: 4px; color: var(--text-primary);">${escapeHtml(argSummary)}</div>
-        <details style="margin-top: 4px;">
-          <summary style="font-size: 10.5px; color: var(--text-muted); cursor: pointer;">실행 결과 상세 보기</summary>
-          <pre>${escapeHtml(resultSummary)}</pre>
-        </details>
+        <div class="step-progress-row" style="display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
+          <svg class="icon-inline spin" viewBox="0 0 24 24" style="width: 12px; height: 12px; color: var(--accent-color);"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+          <span class="step-progress-text">${escapeHtml(initialProgress)}</span>
+        </div>
       </div>
     `;
 
-    const header = card.querySelector('.timeline-step-header');
-    if (header) {
-      header.addEventListener('click', () => {
-        const body = card.querySelector('.timeline-step-body');
-        if (body) body.classList.toggle('hidden');
-      });
-    }
-
     messagesList.appendChild(card);
     chatContainer.scrollTop = chatContainer.scrollHeight;
+
+    const controller = {
+      card,
+      updateProgress(detail) {
+        if (!detail) return;
+        const progressEl = card.querySelector('.step-progress-text');
+        if (progressEl) {
+          progressEl.textContent = detail;
+        }
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+      },
+      finish(result) {
+        if (activeRunningToolCard === controller) activeRunningToolCard = null;
+        card.classList.remove('is-running');
+
+        const isError = Boolean(result?.isError || result?.status === 'error');
+        const resultSummary = getToolResultSummary(toolName, args, result);
+
+        let toggleBarHtml = '';
+        if (toolName === 'browser_translate_page' && result?.status === 'success') {
+          toggleBarHtml = `
+            <div class="translation-toggle-bar" style="margin-top: 8px; display: flex; gap: 8px;">
+              <button class="btn btn-secondary btn-sm translation-toggle-btn" data-show-orig="1" style="font-size: 11px; padding: 4px 10px; display: inline-flex; align-items: center; gap: 4px;">
+                <svg class="icon-inline" viewBox="0 0 24 24" style="width: 13px; height: 13px;"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
+                <span>원문 복원</span>
+              </button>
+              <button class="btn btn-primary btn-sm translation-toggle-btn" data-show-orig="0" style="font-size: 11px; padding: 4px 10px; display: inline-flex; align-items: center; gap: 4px;">
+                <svg class="icon-inline" viewBox="0 0 24 24" style="width: 13px; height: 13px;"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></svg>
+                <span>번역문 다시 적용</span>
+              </button>
+            </div>
+          `;
+        }
+
+        card.innerHTML = `
+          <div class="timeline-step-header">
+            <div class="step-info">
+              <span class="step-badge ${isError ? 'status' : 'tool'}" style="${isError ? 'background: rgba(239, 68, 68, 0.15); color: #ef4444;' : ''}">
+                ${isError ? '오류' : '도구 실행'}
+              </span>
+              <span class="step-name">${escapeHtml(friendlyName)}</span>
+            </div>
+            <span class="step-status-icon" style="display: inline-flex; align-items: center; gap: 3px; color: ${isError ? '#ef4444' : '#10b981'};">
+              ${isError ? '<svg class="icon-inline" viewBox="0 0 24 24" style="width: 12px; height: 12px;"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>' : '<svg class="icon-inline" viewBox="0 0 24 24" style="width: 12px; height: 12px;"><path d="M20 6 9 17l-5-5"/></svg>'}
+              <span>${isError ? '실패' : '완료'}</span>
+            </span>
+          </div>
+          <div class="timeline-step-body">
+            <div style="font-weight: 500; margin-bottom: 4px; color: var(--text-primary);">${escapeHtml(argSummary)}</div>
+            ${toggleBarHtml}
+            <details style="margin-top: 4px;">
+              <summary style="font-size: 10.5px; color: var(--text-muted); cursor: pointer;">실행 결과 상세 보기</summary>
+              <pre>${escapeHtml(resultSummary)}</pre>
+            </details>
+          </div>
+        `;
+
+        const header = card.querySelector('.timeline-step-header');
+        if (header) {
+          header.addEventListener('click', () => {
+            const body = card.querySelector('.timeline-step-body');
+            if (body) body.classList.toggle('hidden');
+          });
+        }
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+      },
+      error(err) {
+        this.finish({ isError: true, error: err?.message || String(err) });
+      }
+    };
+
+    activeRunningToolCard = controller;
+    return controller;
+  }
+
+  function appendToolCard(toolName, args, result) {
+    const toolCard = createRunningToolCard(toolName, args);
+    toolCard.finish(result);
   }
 
 
@@ -939,6 +1078,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }, 1000);
     });
   }
+  window.getSubscriptionToken = getSubscriptionToken;
 
   async function handleSendPrompt(customText = null) {
     const prompt = (customText || promptInput.value).trim();
@@ -988,7 +1128,10 @@ document.addEventListener('DOMContentLoaded', () => {
         `   - 탭 찾기: 사용자가 특정 탭을 찾아달라고 하거나 이동을 요청하면 먼저 'browser_get_tabs'로 탭 목록을 조회하세요. 검색어로 1개 탭이 특정되면 'browser_switch_tab(tab_id)'으로 즉시 전환하고 어떤 탭으로 전환했는지 안내하세요. 일치하는 후보가 여러 개이면 전환하지 말고 후보 탭들의 목록을 [탭제목](lite-tab://switch/탭ID) 링크 형식으로 안내하세요.\n` +
         `   - 탭 그룹핑: 사용자가 탭 정리/그룹핑을 요청하면 'browser_get_tabs'로 전체 탭을 확인한 뒤, 성격/도메인/주제별로 분류하고 'browser_reorder_tabs(tab_ids)'를 호출하여 연관 탭들이 나란히 인접하도록 탭 순서를 정렬하세요. 이후 그룹 목록과 각 탭의 링크를 깔끔하게 브리핑하세요.\n` +
         `   - 탭 간 비교: 사용자가 탭 간 비교/대조를 요청하면 'browser_get_tabs'로 대상 탭을 파악하고, 각 대상 탭에 대해 'browser_get_tab_content(tab_id)'로 본문 내용을 추출하세요. 비교 대상이 2개 탭인 경우 'browser_split_tabs(left_tab_id, right_tab_id)'를 호출하여 분할 화면으로 띄워 시각적 대조를 지원하고, 사이드패널 답변에 스펙, 가격, 특징, 장단점을 명확하게 정리한 마크다운 비교표(Markdown Table)를 작성하세요.\n` +
-        `   - 탭 닫기: 사용자가 탭을 닫아달라고 하면 'browser_get_tabs'로 대상 탭 ID를 확인한 뒤 'browser_close_tabs(tab_ids)'를 호출하세요. 사용자가 "확인 없이 닫아줘"라고 명시한 경우에만 require_confirmation: false로 호출하고, 그 외에는 require_confirmation: true(기본값)로 안전 확인 카드를 거치도록 하세요.\n\n`;
+        `   - 탭 닫기: 사용자가 탭을 닫아달라고 하면 'browser_get_tabs'로 대상 탭 ID를 확인한 뒤 'browser_close_tabs(tab_ids)'를 호출하세요. 사용자가 "확인 없이 닫아줘"라고 명시한 경우에만 require_confirmation: false로 호출하고, 그 외에는 require_confirmation: true(기본값)로 안전 확인 카드를 거치도록 하세요.\n` +
+        `7. [웹페이지 번역 및 다국어 지원 규칙]:\n` +
+        `   - 웹페이지 번역: 사용자가 "이 페이지 번역해줘", "한국어로 바꿔줘", "페이지 번역" 등을 요청하면 'browser_translate_page' 도구를 호출하세요. 이 도구는 웹페이지 본문 텍스트를 인플레이스로 직접 치환합니다. 도구 실행이 완료된 후 최종 답변에는 번역 완료 안내와 함께 원문 페이지의 핵심 내용 3줄 요약 및 주요 용어 정리를 마크다운으로 깔끔하게 작성하세요.\n` +
+        `   - 선택 텍스트 번역: 사용자가 "선택한 거 번역해줘", "드래그한 내용 설명해줘" 등을 요청하면 'browser_get_selected_text' 도구로 선택 텍스트를 추출한 뒤, 사이드패널에서 한국어 번역과 문맥 설명을 상세히 작성하세요.\n\n`;
       const systemPrompt = baseDirective + (settings.systemPrompt || '') + memoryPrompt;
       const tools = window.taskRuntime.getAvailableTools();
 
@@ -1017,6 +1160,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (executedToolsInTurn.has('browser_open_tab')) {
           activeTools = activeTools.filter(t => t.name !== 'browser_open_tab');
+        }
+        if (executedToolsInTurn.has('browser_translate_page')) {
+          activeTools = activeTools.filter(t => t.name !== 'browser_translate_page');
+        }
+        if (executedToolsInTurn.has('browser_get_selected_text')) {
+          activeTools = activeTools.filter(t => t.name !== 'browser_get_selected_text');
         }
 
         await provider.chatStream({
@@ -1099,12 +1248,13 @@ document.addEventListener('DOMContentLoaded', () => {
         // Execute tool calls step by step
         for (const tc of toolCalls) {
           executedToolsInTurn.add(tc.name);
-          if (tc.name === 'browser_navigate' || tc.name === 'browser_open_tab') {
+          if (tc.name === 'browser_navigate' || tc.name === 'browser_open_tab' || tc.name === 'browser_translate_page') {
             executedToolsInTurn.delete('browser_get_page_content');
           }
+          const toolCard = createRunningToolCard(tc.name, tc.args);
           try {
             const toolResult = await window.taskRuntime.executeToolAction(tc.name, tc.args);
-            appendToolCard(tc.name, tc.args, toolResult);
+            toolCard.finish(toolResult);
 
             conversationHistory.push({
               role: 'tool',
@@ -1113,7 +1263,7 @@ document.addEventListener('DOMContentLoaded', () => {
               content: JSON.stringify(toolResult)
             });
           } catch (e) {
-            appendToolCard(tc.name, tc.args, { isError: true, error: e.message });
+            toolCard.error(e);
             conversationHistory.push({
               role: 'tool',
               tool_call_id: tc.id,
@@ -1168,7 +1318,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.taskRuntime.setState(TaskState.IDLE, '대화 리셋');
   });
 
-  // Global Tab Switch & Link Click Listener
+  // Global Tab Switch, Translation Toggle & Link Click Listener
   messagesList.addEventListener('click', (e) => {
     const tabEl = e.target.closest('[data-tab-id]');
     if (tabEl) {
@@ -1178,6 +1328,25 @@ document.addEventListener('DOMContentLoaded', () => {
           window.sendUiAction(`http://ui-action/switch-tab?id=${encodeURIComponent(tabId)}`);
         } else {
           window.location.href = `http://ui-action/switch-tab?id=${encodeURIComponent(tabId)}`;
+        }
+      }
+    }
+
+    const toggleBtn = e.target.closest('.translation-toggle-btn');
+    if (toggleBtn) {
+      const showOrig = toggleBtn.getAttribute('data-show-orig');
+      if (showOrig !== null) {
+        if (window.sendUiAction) {
+          window.sendUiAction(`http://ui-action/ai-toggle-translation?show_orig=${encodeURIComponent(showOrig)}`);
+        }
+        const parentBar = toggleBtn.closest('.translation-toggle-bar');
+        if (parentBar) {
+          parentBar.querySelectorAll('.translation-toggle-btn').forEach(btn => {
+            btn.classList.remove('btn-primary');
+            btn.classList.add('btn-secondary');
+          });
+          toggleBtn.classList.remove('btn-secondary');
+          toggleBtn.classList.add('btn-primary');
         }
       }
     }

@@ -2882,5 +2882,68 @@ Chromium의 불완전한 내부 탭 종료 동작을 차단하고, `Ctrl + F4` �
   - "백그라운드 새 탭에 검색해줘" 질의 시 활성 탭 전환 없이 백그라운드 탭 생성 동작 확인.
   - 탭 검색, 탭 그룹핑(재배치), 탭 간 비교(본문 추출 및 분할 화면 결합), 탭 닫기(확인 카드 팝업 후 안전 닫기) 전체 시나리오 정상 동작 최종 확인.
 
+---
+
+## 77. AI 에이전트 웹페이지 인플레이스 실시간 번역 시스템 및 전 도구 실시간 진행(Running) UX 파이프라인 (AI Agent Web Page In-Place Translation & Real-time Tool Running UX Pipeline)
+
+### 77.1 개요
+CEF 환경에는 Google 독점 API 키 및 라이선스 제약으로 인해 Chromium의 기본 내장 번역 컴포넌트(`components/translate`)가 배제되어 있습니다. 이를 극복하기 위해 Lite Browser에서는 고성능 LLM(Gemini / OpenAI 등)과 순수 CEF C API 백엔드를 결합하여, 웹페이지 본문 텍스트를 실시간으로 추출하고 자연스러운 한국어로 인플레이스 치환하며 언제든 원문/번역문을 양방향 토글할 수 있는 **AI 하이브리드 실시간 웹페이지 번역 시스템**을 설계·구현했습니다.  
+또한, 도구 실행 시 백엔드 연산 및 대량 텍스트 번역 과정에서 발생하는 대기 시간 동안 사용자가 멈춤 현상으로 오인하지 않도록, 도구 호출 즉시 채팅창에 진행 카드를 띄우고 세부 작업 단계(텍스트 추출 → 번역 중 → DOM 적용)를 실시간 갱신하는 **도구 실행 실시간 진행(Running) UX 파이프라인**을 전체 브라우저 도구에 전면 확장 적용했습니다.
+
+### 77.2 웹페이지 실시간 번역 아키텍처 및 구현 내역
+
+1. **CEF 기본 번역 기능 조사 및 하이브리드 아키텍처 수립**:
+   - CEF 공식 소스 및 Chromium 컴포넌트 분석을 통해 CEF 빌드에 구글 번역 엔진이 비활성화되어 있음을 확인.
+   - 외부 클라우드 번역 API 키 의존 없이 사용자가 사이드패널에 설정한 AI Provider(Gemini 4 Argon, 3.8 Flash, ChatGPT 등)를 직접 활용하는 인플레이스 번역 아키텍처 채택.
+2. **HTTPS 보안 제약(Mixed Content / CSP) 우회 고속 IPC 파이프라인**:
+   - HTTPS 사이트(GitHub 등)에서 `http://ui-action/` 기반 히든 iframe 로드 시 Chromium의 혼합 콘텐츠(Mixed Content) 및 `frame-src` Content Security Policy(CSP) 위반으로 인해 텍스트 블록 데이터가 차단되던 결함을 식별.
+   - 최상위 프레임 탐색(`window.location.href = 'http://ui-action/ai-page-texts-result?data=...'`) 방식을 채택하여, Chromium 보안 정책 평가 전 단계인 `request_handler_on_before_browse`에서 동기적으로 가로채고 탐색을 취소(`return 1`)함으로써 보안 차단 없이 대용량 텍스트를 C 백엔드로 즉각 안전 전달.
+3. **지능형 DOM 텍스트 블록 추출 및 필터링 (`ai-get-page-texts`)**:
+   - `h1~h6, p, li, blockquote, dt, dd, th, td, figcaption, a, button` 등 본문 의미 요소를 폭넓게 포괄.
+   - 하위 블록 태그가 중첩된 상위 컨테이너 요소나 문장 내 링크(`<a>`, `<button>`)의 이중 치환을 방지하는 스마트 필터링 적용.
+   - 순수 `div`/`span`만으로 작성된 모던 SPA 사이트에서도 본문이 누락되지 않도록 리프 노드 폴백 추출 로직 구축.
+   - 각 추출 요소에 `data-lb-tr-id="번호"`를 자동 부여하고 JSON 배열로 패키징.
+4. **인플레이스 치환 및 양방향 원문/번역문 토글 (`ai-apply-translation` & `ai-toggle-translation`)**:
+   - 번역문 적용 시 기존 DOM의 HTML 구조(`el.innerHTML`)를 `data-lb-orig` 속성에 원본 그대로 저장하여, 하이퍼링크나 굵은 글씨, 배지 등 시각적 구조가 손실되지 않도록 보존.
+   - 번역 텍스트를 `data-lb-trans`에 보관하고 `el.innerText = 번역문`으로 안전 치환.
+   - 사이드패널 도구 완료 카드에 **[원문 복원]** 및 **[번역문 다시 적용]** 버튼 바를 제공하여, 사용자가 언제든 클릭 한 번으로 원본 페이지와 번역 페이지를 실시간으로 전환할 수 있도록 지원.
+5. **사이드패널 웰컴 카드 '한국어로 번역' 칩 연동**:
+   - `ui/sidepanel.html` "무엇을 도와드릴까요" 카드 첫 번째 칩으로 인라인 Lucide `Languages` SVG 아이콘과 함께 `[한국어로 번역]` 바로가기 버튼 추가.
+   - 번역 완료 후 사이드패널에 번역 결과 안내와 함께 핵심 내용 3줄 요약 및 주요 용어 정리를 마크다운으로 브리핑.
+
+### 77.3 전 도구 실시간 진행(Running) UX 파이프라인 확장
+
+1. **마이크로 모듈러 도구 카드 컨트롤러 (`createRunningToolCard`)**:
+   - AI 모델이 도구 호출(`onToolCall`)을 결정하는 즉시(약 2초 시점) 채팅창에 **"실행 중(스피너)"** 카드를 먼저 렌더링하여 체감 응답 속도를 획기적으로 개선.
+   - `activeRunningToolCard`를 통해 [`taskRuntime.onStateChange`](file:///c:/projects/lite_browser/ui/sidepanel.js#L701-L715) 이벤트와 직접 반응형으로 동기화.
+2. **도구별 맞춤 초기 진행 문구 (`getToolInitialProgressText`)**:
+   - 0초 시점에 일반적인 문구 대신 도구의 목적에 부합하는 직관적 안내 표시:
+     - **웹페이지 분석**: `"웹페이지 DOM 구조 및 본문 데이터 추출 중..."`
+     - **새 탭 열기**: `"${url} 생성 및 로딩 중..."`
+     - **탭 목록 조회**: `"열려 있는 전체 탭 목록 및 활성 상태 조회 중..."`
+     - **탭 정렬/그룹핑**: `"탭 N개 순서 재배치 중..."`
+     - **탭 분할 비교**: `"탭 #X와 탭 #Y 듀얼 분할 화면 구성 중..."`
+     - **선택 텍스트 추출**: `"선택 영역 텍스트 추출 중..."`
+     - **자동 로그인**: `"Vault 마스터 보안 인증 및 계정 탐색 중..."`
+3. **비동기 실행 루프 실시간 라이브 업데이트 (`task_runtime.js`)**:
+   - 모든 도구의 실제 실행 과정(C 백엔드 IPC, DOM 데이터 수신, 요소 하이라이트 및 클릭, 텍스트 타이핑, 스크롤 등)에 `this.setState(TaskState.RUNNING, ...)`를 배치하여 카드 내부의 진행 문구가 실시간으로 전환.
+4. **제자리(In-place) 완료 레이아웃 전환**:
+   - 작업 완료 시 카드를 새로 생성해 화면이 튀거나 깜빡이지 않고, **기존 '실행 중' 카드의 DOM을 제자리에서 즉시 녹색 체크마크(`완료`)와 정갈한 정보형 요약, 접기/펼치기 상세(`<details>`)로 부드럽게 전환**.
+
+### 77.4 관련 소스 코드
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.c)
+- [`ui/task_runtime.js`](file:///c:/projects/lite_browser/ui/task_runtime.js)
+- [`ui/sidepanel.js`](file:///c:/projects/lite_browser/ui/sidepanel.js)
+- [`ui/sidepanel.html`](file:///c:/projects/lite_browser/ui/sidepanel.html)
+- [`ui/sidepanel.css`](file:///c:/projects/lite_browser/ui/sidepanel.css)
+
+### 77.5 빌드 및 검증 결과
+- **디버그 빌드**: `cef_binary_154.0.34` MSBuild Debug 타깃 빌드 성공 (`Exit code 0, 경고 0개, 오류 0개`).
+- **구문 정합성**: 전체 JS 괄호 정합성 검증 통과 (`sidepanel.js: 454/454`, `task_runtime.js: 308/308`).
+- **실기 검증**:
+  - GitHub 및 해외 사이트에서 "한국어로 번역해줘" 및 웰컴 카드의 [한국어로 번역] 칩 클릭 시 정상적으로 본문 텍스트가 번역문으로 인플레이스 치환되고 3줄 요약 제공 확인.
+  - 번역 도구 카드의 `[원문 복원]` 및 `[번역문 다시 적용]` 버튼 클릭 시 실시간 양방향 전환 및 버튼 활성 상태 동기화 확인.
+  - 새 탭 열기, 탭 목록 조회, 탭 정렬, 본문 분석 등 모든 도구 실행 시 도구 카드가 즉시 렌더링되고 단계별 진행 상태가 실시간 갱신된 후 완료 상태로 전환됨을 최종 확인.
+
 
 

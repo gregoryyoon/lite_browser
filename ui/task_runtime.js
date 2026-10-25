@@ -227,6 +227,25 @@ class TaskRuntime {
             activate: { type: 'boolean', description: '생성 후 새 탭으로 즉시 화면을 전환할지 여부 (기본값: true, 백그라운드 생성 요청 시: false)' }
           }
         }
+      },
+      {
+        name: 'browser_translate_page',
+        description: '현재 웹페이지의 텍스트를 인플레이스(In-place)로 실시간 번역하여 화면에 직접 치환하고, 사이드패널에 원문/번역문 토글 카드 및 핵심 요약 브리핑을 제공합니다. 사용자가 "이 페이지 번역해줘", "한국어로 바꿔줘" 등을 요청했을 때 호출합니다.',
+        parameters: {
+          type: 'object',
+          properties: {
+            target_lang: { type: 'string', description: '번역 대상 언어 (기본값: "한국어" 또는 "ko")' },
+            scope: { type: 'string', enum: ['main', 'full'], description: '번역 대상 영역 (기본값: "main" 메인 콘텐츠 우선, "full" 전체 DOM)' }
+          }
+        }
+      },
+      {
+        name: 'browser_get_selected_text',
+        description: '사용자가 현재 웹페이지에서 마우스로 드래그하여 선택한 텍스트를 추출합니다. 사용자가 "선택한 텍스트 번역해줘", "드래그한 내용 설명해줘" 등을 요청했을 때 호출합니다.',
+        parameters: {
+          type: 'object',
+          properties: {}
+        }
       }
     ];
   }
@@ -253,8 +272,10 @@ class TaskRuntime {
         switch (name) {
           case 'browser_navigate': {
             const url = args.url || '';
+            this.setState(TaskState.RUNNING, `${url} 웹페이지로 이동 중...`);
             sendUiAction(`http://ui-action/load?url=${encodeURIComponent(url)}`);
             await new Promise(r => setTimeout(r, 1500)); // wait for navigation
+            this.setState(TaskState.RUNNING, `${url} 페이지 로딩 완료`);
             return { status: 'success', message: `Navigated to ${url}` };
           }
 
@@ -271,6 +292,8 @@ class TaskRuntime {
                 targetUrl = 'https://www.google.com/search?q=' + encodeURIComponent(targetUrl);
               }
             }
+
+            this.setState(TaskState.RUNNING, `새 탭 생성 및 ${targetUrl} 탐색 중...`);
 
             const openResult = await new Promise((resolve) => {
               this.pendingOpenTabCallback = resolve;
@@ -291,6 +314,7 @@ class TaskRuntime {
             });
 
             if (openResult && openResult.success) {
+              this.setState(TaskState.RUNNING, `새 탭(ID: ${openResult.tab_id}) 열기 완료`);
               return {
                 status: 'success',
                 tab_id: openResult.tab_id,
@@ -300,6 +324,7 @@ class TaskRuntime {
                 message: `새 탭(ID: ${openResult.tab_id})에 ${openResult.url || targetUrl}을 열었습니다.`
               };
             } else {
+              this.setState(TaskState.RUNNING, '새 탭 생성 실패');
               return {
                 status: 'failed',
                 message: openResult?.message || '새 탭을 생성하지 못했습니다 (최대 탭 수 초과 가능).'
@@ -307,7 +332,149 @@ class TaskRuntime {
             }
           }
 
+          case 'browser_get_selected_text': {
+            this.setState(TaskState.RUNNING, '사용자 드래그 선택 영역 텍스트 추출 중...');
+            const selData = await new Promise((resolve) => {
+              this.pendingSelectionCallback = resolve;
+              window.onAgentSelectionExtracted = (res) => {
+                if (this.pendingSelectionCallback) {
+                  const cb = this.pendingSelectionCallback;
+                  this.pendingSelectionCallback = null;
+                  cb(res);
+                }
+              };
+              sendUiAction('http://ui-action/ai-get-selection');
+              setTimeout(() => {
+                if (this.pendingSelectionCallback) {
+                  this.pendingSelectionCallback = null;
+                  resolve({ selection: '', title: '', url: '' });
+                }
+              }, 3000);
+            });
+            const sel = (selData?.selection || '').trim();
+            this.setState(TaskState.RUNNING, sel ? `선택 텍스트 추출 완료 (${sel.length}자)` : '선택된 텍스트가 없습니다.');
+            const selText = selData?.selection || '';
+            if (selText) {
+              return {
+                status: 'success',
+                selected_text: selText,
+                url: selData.url || '',
+                title: selData.title || '',
+                message: `선택된 텍스트 (${selText.length}자)를 성공적으로 추출했습니다.`
+              };
+            } else {
+              return {
+                status: 'empty',
+                message: '현재 웹페이지에서 마우스로 드래그 선택된 텍스트가 없습니다. 전체 페이지 번역을 원하시면 browser_translate_page를 사용하세요.'
+              };
+            }
+          }
+
+          case 'browser_translate_page': {
+            const targetLang = args.target_lang || '한국어';
+            const scope = args.scope || 'main';
+
+            this.setState(TaskState.RUNNING, '웹페이지 텍스트 블록 추출 중...');
+
+            const extractData = await new Promise((resolve) => {
+              this.pendingPageTextsCallback = resolve;
+              window.onAgentPageTextsExtracted = (res) => {
+                if (this.pendingPageTextsCallback) {
+                  const cb = this.pendingPageTextsCallback;
+                  this.pendingPageTextsCallback = null;
+                  cb(res);
+                }
+              };
+              sendUiAction(`http://ui-action/ai-get-page-texts?scope=${encodeURIComponent(scope)}`);
+              setTimeout(() => {
+                if (this.pendingPageTextsCallback) {
+                  this.pendingPageTextsCallback = null;
+                  resolve({ items: [], title: '', url: '' });
+                }
+              }, 6000);
+            });
+
+            const items = extractData?.items || [];
+            if (!items || items.length === 0) {
+              return {
+                status: 'failed',
+                message: '번역할 본문 텍스트 요소를 찾을 수 없습니다.'
+              };
+            }
+
+            this.setState(TaskState.RUNNING, `${items.length}개 텍스트 블록 ${targetLang} 번역 중...`);
+
+            const settings = window.AIProviderFactory.getSettings();
+            const currentAuthMode = settings[`${settings.provider}AuthMode`] || 'apikey';
+            settings.authType = currentAuthMode;
+            if (currentAuthMode === 'subscription' && window.getSubscriptionToken) {
+              const subToken = await window.getSubscriptionToken(settings.provider);
+              if (subToken) {
+                settings.subscriptionToken = subToken;
+              }
+            }
+            const provider = window.AIProviderFactory.createProvider(settings);
+
+            const translationPrompt =
+              `당신은 전문 웹 브라우저 번역기입니다. 아래 제공된 웹페이지 본문 텍스트 블록 배열을 문맥을 살려 자연스러운 ${targetLang}(으)로 번역해주세요.\n` +
+              `원문의 서식이나 고유명사는 적절히 보존하고, 반드시 아래와 같은 순수 JSON 형식으로만 응답하세요(코드블록이나 설명 없이 JSON만 출력):\n` +
+              `{\n  "translations": [\n    { "id": 1, "text": "번역된 내용" }\n  ]\n}\n\n` +
+              `번역할 데이터:\n` + JSON.stringify(items);
+
+            let rawResponse = '';
+            try {
+              let fullResp = '';
+              await provider.chatStream({
+                messages: [{ role: 'user', content: translationPrompt }],
+                systemPrompt: 'You are a precise, JSON-only translator for web page text nodes. Return ONLY valid JSON.',
+                onChunk: (chunk, full) => { fullResp = full; }
+              });
+              rawResponse = fullResp;
+            } catch (err) {
+              console.error('Translation LLM call error:', err);
+              return { status: 'error', message: `AI 번역 중 오류가 발생했습니다: ${err.message}` };
+            }
+
+            let translations = [];
+            try {
+              let cleaned = rawResponse.trim();
+              if (cleaned.startsWith('```json')) cleaned = cleaned.slice(7);
+              if (cleaned.startsWith('```')) cleaned = cleaned.slice(3);
+              if (cleaned.endsWith('```')) cleaned = cleaned.slice(0, -3);
+              const parsed = JSON.parse(cleaned.trim());
+              translations = parsed.translations || [];
+            } catch (e) {
+              const match = rawResponse.match(/\{[\s\S]*"translations"[\s\S]*\}/);
+              if (match) {
+                try {
+                  const p = JSON.parse(match[0]);
+                  translations = p.translations || [];
+                } catch(e2) {}
+              }
+            }
+
+            if (!translations || translations.length === 0) {
+              return { status: 'failed', message: 'AI 번역 결과를 JSON으로 파싱하지 못했습니다.' };
+            }
+
+            this.setState(TaskState.RUNNING, '웹페이지에 번역문 적용 중...');
+            const transPayload = JSON.stringify(translations);
+            const b64 = btoa(unescape(encodeURIComponent(transPayload)));
+            sendUiAction(`http://ui-action/ai-apply-translation?data=${encodeURIComponent(b64)}`);
+            await new Promise(r => setTimeout(r, 400));
+
+            return {
+              status: 'success',
+              translated_count: translations.length,
+              target_lang: targetLang,
+              title: extractData.title || '',
+              url: extractData.url || '',
+              message: `총 ${translations.length}개 텍스트 블록을 ${targetLang}(으)로 성공적으로 번역 치환했습니다.`
+            };
+          }
+
           case 'browser_get_page_content': {
+            this.setState(TaskState.RUNNING, '웹페이지 DOM 구조 및 본문 데이터 추출 중...');
             const domData = await new Promise((resolve) => {
               this.pendingDomCallback = resolve;
               sendUiAction('http://ui-action/ai-get-dom-summary');
@@ -318,6 +485,8 @@ class TaskRuntime {
                 }
               }, 5000);
             });
+            const textLen = (domData?.bodySnippet || domData?.markdown || '').length;
+            this.setState(TaskState.RUNNING, `본문 데이터 수신 완료 (${textLen}자)`);
             return {
               status: 'success',
               url: domData.url || '',
@@ -331,12 +500,15 @@ class TaskRuntime {
           case 'browser_click_element': {
             const selector = args.selector || '';
             const text = args.text || '';
+            this.setState(TaskState.RUNNING, `화면 요소 위치 탐색 중: ${text || selector}`);
             if (selector) {
               sendUiAction(`http://ui-action/ai-highlight-element?selector=${encodeURIComponent(selector)}`);
               await new Promise(r => setTimeout(r, 200));
             }
+            this.setState(TaskState.RUNNING, `요소 클릭 이벤트 전달 중: ${text || selector}`);
             sendUiAction(`http://ui-action/ai-click-element?selector=${encodeURIComponent(selector)}&text=${encodeURIComponent(text)}`);
             await new Promise(r => setTimeout(r, 600));
+            this.setState(TaskState.RUNNING, '요소 클릭 완료');
             return { status: 'success', message: `Clicked element: ${selector || text}` };
           }
 
@@ -344,30 +516,37 @@ class TaskRuntime {
             const selector = args.selector || '';
             const text = args.text || '';
             const enter = args.press_enter ? '1' : '0';
+            this.setState(TaskState.RUNNING, `입력 필드 탐색 및 포커스 설정: ${selector}`);
             if (selector) {
               sendUiAction(`http://ui-action/ai-highlight-element?selector=${encodeURIComponent(selector)}`);
               await new Promise(r => setTimeout(r, 200));
             }
+            this.setState(TaskState.RUNNING, `텍스트 "${text}" 입력 이벤트 전달 중...`);
             sendUiAction(`http://ui-action/ai-type-element?selector=${encodeURIComponent(selector)}&text=${encodeURIComponent(text)}&enter=${enter}`);
             await new Promise(r => setTimeout(r, 600));
+            this.setState(TaskState.RUNNING, '텍스트 입력 완료');
             return { status: 'success', message: `Typed into ${selector}` };
           }
 
           case 'browser_scroll': {
             const dir = args.direction || 'down';
             const amount = args.amount || 500;
+            this.setState(TaskState.RUNNING, `화면 ${dir} 방향으로 ${amount}px 스크롤 중...`);
             sendUiAction(`http://ui-action/ai-scroll?direction=${encodeURIComponent(dir)}&amount=${amount}`);
             await new Promise(r => setTimeout(r, 400));
+            this.setState(TaskState.RUNNING, '화면 스크롤 완료');
             return { status: 'success', message: `Scrolled ${dir}` };
           }
 
           case 'browser_autofill_login': {
             const domain = args.domain || '';
+            this.setState(TaskState.RUNNING, `Vault 마스터 보안 금고에서 ${domain} 계정 검색 중...`);
             const result = await new Promise((resolve) => {
               window.onVaultAutofillResult = (res) => resolve(res);
               sendUiAction(`http://ui-action/vault-autofill?domain=${encodeURIComponent(domain)}`);
               setTimeout(() => resolve(false), 2500);
             });
+            this.setState(TaskState.RUNNING, result ? '보안 계정 자동 완성 완료' : '일치하는 계정 정보 없음');
             if (result) {
               return { status: 'success', message: 'Vault autofill executed safely (Plaintext password was not exposed to LLM context)' };
             } else {
@@ -376,6 +555,7 @@ class TaskRuntime {
           }
 
           case 'browser_get_tabs': {
+            this.setState(TaskState.RUNNING, '열려 있는 탭 목록 및 활성 상태 조회 중...');
             const tabs = await new Promise((resolve) => {
               this.pendingTabsCallback = resolve;
               sendUiAction('http://ui-action/ai-get-tabs');
@@ -387,13 +567,16 @@ class TaskRuntime {
               }, 4000);
             });
             this.cachedTabs = tabs;
+            this.setState(TaskState.RUNNING, `총 ${tabs.length}개 탭 정보 조회 완료`);
             return { status: 'success', tabs };
           }
 
           case 'browser_switch_tab': {
             const tabId = Number(args.tab_id);
+            this.setState(TaskState.RUNNING, `탭 #${tabId} 활성 화면으로 전환 중...`);
             sendUiAction(`http://ui-action/switch-tab?id=${tabId}`);
             await new Promise(r => setTimeout(r, 400));
+            this.setState(TaskState.RUNNING, `탭 #${tabId} 화면 전환 완료`);
             return { status: 'success', message: `Switched to tab ${tabId}`, tab_id: tabId };
           }
 
@@ -402,6 +585,7 @@ class TaskRuntime {
             if (!Array.isArray(tabIds) || tabIds.length === 0) {
               return { status: 'failed', message: 'No tab_ids provided for reorder' };
             }
+            this.setState(TaskState.RUNNING, `탭 ${tabIds.length}개 순서 재배치 및 그룹핑 중...`);
             const idsParam = tabIds.join(',');
             await new Promise((resolve) => {
               this.pendingReorderCallback = resolve;
@@ -413,11 +597,13 @@ class TaskRuntime {
                 }
               }, 2000);
             });
+            this.setState(TaskState.RUNNING, `탭 ${tabIds.length}개 탭 바 재배치 완료`);
             return { status: 'success', message: 'Tabs reordered successfully', tab_ids: tabIds };
           }
 
           case 'browser_get_tab_content': {
             const tabId = Number(args.tab_id);
+            this.setState(TaskState.RUNNING, `탭 #${tabId} 백그라운드 본문 데이터 추출 중...`);
             if (!this.pendingTabDomCallbacks) this.pendingTabDomCallbacks = {};
             const domData = await new Promise((resolve) => {
               this.pendingTabDomCallbacks[tabId] = resolve;
@@ -429,6 +615,7 @@ class TaskRuntime {
                 }
               }, 6000);
             });
+            this.setState(TaskState.RUNNING, `탭 #${tabId} 본문 데이터 추출 완료`);
             return {
               status: 'success',
               tab_id: domData?.tab_id || tabId,
@@ -441,6 +628,7 @@ class TaskRuntime {
           case 'browser_split_tabs': {
             const leftId = Number(args.left_tab_id);
             const rightId = Number(args.right_tab_id);
+            this.setState(TaskState.RUNNING, `탭 #${leftId}과 탭 #${rightId} 듀얼 분할 화면 구성 중...`);
             await new Promise((resolve) => {
               this.pendingSplitCallback = resolve;
               sendUiAction(`http://ui-action/ai-split-tabs?left=${leftId}&right=${rightId}`);
@@ -451,6 +639,7 @@ class TaskRuntime {
                 }
               }, 2000);
             });
+            this.setState(TaskState.RUNNING, '분할 화면 배치 완료');
             return { status: 'success', message: `Split view enabled for tabs ${leftId} and ${rightId}`, left_tab_id: leftId, right_tab_id: rightId };
           }
 
@@ -459,6 +648,7 @@ class TaskRuntime {
             if (tabIds.length === 0) {
               return { status: 'success', closed_tab_ids: [] };
             }
+            this.setState(TaskState.RUNNING, `${tabIds.length}개 탭 종료 처리 중...`);
             if (!this.cachedTabs || this.cachedTabs.length === 0) {
               try {
                 const res = await this.executeToolAction('browser_get_tabs', {});
@@ -471,9 +661,11 @@ class TaskRuntime {
             if (requireConfirmation && window.confirmCloseTabsUI) {
               const confirmed = await window.confirmCloseTabsUI(tabIds, this.cachedTabs);
               if (!confirmed) {
+                this.setState(TaskState.RUNNING, '사용자가 탭 닫기를 취소했습니다.');
                 return { status: 'cancelled', message: '사용자가 탭 닫기 확인 창에서 작업을 취소했습니다.', closed_tab_ids: [] };
               }
             }
+            this.setState(TaskState.RUNNING, `${tabIds.length}개 탭 닫기 실행 중...`);
             const idsParam = tabIds.join(',');
             await new Promise((resolve) => {
               this.pendingCloseCallback = resolve;
@@ -485,6 +677,7 @@ class TaskRuntime {
                 }
               }, 2000);
             });
+            this.setState(TaskState.RUNNING, `${tabIds.length}개 탭 닫기 완료`);
             return { status: 'success', message: `${tabIds.length}개 탭을 성공적으로 닫았습니다.`, closed_tab_ids: tabIds };
           }
 

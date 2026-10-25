@@ -2469,6 +2469,215 @@ int CEF_CALLBACK request_handler_on_before_browse(
             }
             free(data_b64);
           }
+        } else if (strncmp(action, "ai-get-page-texts", 17) == 0) {
+          if (cb) {
+            const char* query = (strncmp(action, "ai-get-page-texts?", 18) == 0) ? (action + 18) : "";
+            char* scope_param = get_query_param(query, "scope");
+            int is_full = (scope_param && strcmp(scope_param, "full") == 0);
+            if (scope_param) free(scope_param);
+
+            LogMsg("[AI-TRANSLATE] ai-get-page-texts requested, is_full=%d, cb=%p\n", is_full, (void*)cb);
+
+            char extract_script[4096];
+            snprintf(extract_script, sizeof(extract_script),
+              "(function() {"
+              "  try {"
+              "    const isFull = %d;"
+              "    const mainEl = isFull ? document.body : (document.querySelector('article, main, [role=\"main\"], .se-main-container, #postViewArea, #dic_area, .entry-content, .article-body, #content') || document.body);"
+              "    const selector = 'h1, h2, h3, h4, h5, h6, p, li, blockquote, dt, dd, th, td, figcaption, a, button';"
+              "    let elements = Array.from(mainEl.querySelectorAll(selector));"
+              "    if (elements.length === 0 && mainEl !== document.body) {"
+              "      elements = Array.from(document.body.querySelectorAll(selector));"
+              "    }"
+              "    let idCounter = 1;"
+              "    const items = [];"
+              "    elements.forEach(el => {"
+              "      if (!el) return;"
+              "      if (el.querySelector('p, h1, h2, h3, h4, h5, h6, ul, ol, table, blockquote')) return;"
+              "      if ((el.tagName === 'A' || el.tagName === 'BUTTON') && el.closest('p, li, h1, h2, h3, h4, h5, h6, blockquote, dt, dd, th, td')) return;"
+              "      const s = window.getComputedStyle(el);"
+              "      if (s.display === 'none' || s.visibility === 'hidden' || parseFloat(s.opacity || '1') < 0.1) return;"
+              "      if (el.offsetWidth === 0 && el.offsetHeight === 0) return;"
+              "      const text = (el.innerText || '').trim();"
+              "      if (text.length >= 2 && text.length <= 1500) {"
+              "        if (/^[\\d\\s\\W_]+$/.test(text)) return;"
+              "        el.setAttribute('data-lb-tr-id', String(idCounter));"
+              "        items.push({ id: idCounter, text: text });"
+              "        idCounter++;"
+              "      }"
+              "    });"
+              "    if (items.length === 0) {"
+              "      const allNodes = document.body.querySelectorAll('div, span, section');"
+              "      for (let i = 0; i < allNodes.length && items.length < 50; i++) {"
+              "        const el = allNodes[i];"
+              "        if (el.children.length === 0) {"
+              "          const s = window.getComputedStyle(el);"
+              "          if (s.display !== 'none' && s.visibility !== 'hidden' && (el.offsetWidth > 0 || el.offsetHeight > 0)) {"
+              "            const text = (el.innerText || '').trim();"
+              "            if (text.length >= 2 && text.length <= 1000 && !/^[\\d\\s\\W_]+$/.test(text)) {"
+              "              el.setAttribute('data-lb-tr-id', String(idCounter));"
+              "              items.push({ id: idCounter, text: text });"
+              "              idCounter++;"
+              "            }"
+              "          }"
+              "        }"
+              "      }"
+              "    }"
+              "    const payload = {"
+              "      title: document.title || '',"
+              "      url: window.location.href,"
+              "      items: items.slice(0, 80)"
+              "    };"
+              "    const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));"
+              "    window.location.href = 'http://ui-action/ai-page-texts-result?data=' + encodeURIComponent(b64);"
+              "  } catch(e) {"
+              "    console.error('Extract page texts error', e);"
+              "    window.location.href = 'http://ui-action/ai-page-texts-result?data=';"
+              "  }"
+              "})();", is_full);
+            cef_frame_t* f = cb->get_main_frame(cb);
+            if (f) {
+              cef_string_t js_str = {};
+              cef_string_from_utf8(extract_script, strlen(extract_script), &js_str);
+              f->execute_java_script(f, &js_str, NULL, 0);
+              cef_string_clear(&js_str);
+              f->base.release(&f->base);
+            }
+          }
+        } else if (strncmp(action, "ai-page-texts-result?", 21) == 0) {
+          const char* query = action + 21;
+          char* data_b64 = get_query_param(query, "data");
+          if (data_b64 && strlen(data_b64) > 0) {
+            for (char* p = data_b64; *p; p++) {
+              if (*p == ' ') *p = '+';
+            }
+            size_t decoded_len = 0;
+            unsigned char* decoded = base64_decode(data_b64, &decoded_len);
+            if (decoded) {
+              cef_browser_t* target_b = win_ctx->sidepanel_browser;
+              if (!target_b && win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+                tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
+                target_b = (active_tab->is_split && active_tab->right_browser) ? active_tab->right_browser : active_tab->browser;
+              }
+              LogMsg("[AI-TRANSLATE] ai-page-texts-result received, decoded_len=%d, target_b=%p\n", (int)decoded_len, (void*)target_b);
+              if (target_b) {
+                char* js_code = (char*)malloc(decoded_len + 128);
+                if (js_code) {
+                  snprintf(js_code, decoded_len + 128, "if (window.onAgentPageTextsExtracted) { window.onAgentPageTextsExtracted(%s); }", (char*)decoded);
+                  cef_frame_t* rf = target_b->get_main_frame(target_b);
+                  if (rf) {
+                    cef_string_t js_str = {};
+                    cef_string_from_utf8(js_code, strlen(js_code), &js_str);
+                    rf->execute_java_script(rf, &js_str, NULL, 0);
+                    cef_string_clear(&js_str);
+                    rf->base.release(&rf->base);
+                  }
+                  free(js_code);
+                }
+              }
+              free(decoded);
+            }
+            free(data_b64);
+          } else {
+            if (data_b64) free(data_b64);
+            LogMsg("[AI-TRANSLATE] ai-page-texts-result received empty data\n");
+            cef_browser_t* target_b = win_ctx->sidepanel_browser;
+            if (target_b) {
+              const char* js_code = "if (window.onAgentPageTextsExtracted) { window.onAgentPageTextsExtracted({ items: [], title: '', url: '' }); }";
+              cef_frame_t* rf = target_b->get_main_frame(target_b);
+              if (rf) {
+                cef_string_t js_str = {};
+                cef_string_from_utf8(js_code, strlen(js_code), &js_str);
+                rf->execute_java_script(rf, &js_str, NULL, 0);
+                cef_string_clear(&js_str);
+                rf->base.release(&rf->base);
+              }
+            }
+          }
+        } else if (strncmp(action, "ai-apply-translation?", 21) == 0) {
+          const char* query = action + 21;
+          char* data_b64 = get_query_param(query, "data");
+          if (data_b64) {
+            for (char* p = data_b64; *p; p++) {
+              if (*p == ' ') *p = '+';
+            }
+            size_t decoded_len = 0;
+            unsigned char* decoded = base64_decode(data_b64, &decoded_len);
+            if (decoded) {
+              LogMsg("[AI-TRANSLATE] ai-apply-translation received, len=%d, cb=%p\n", (int)decoded_len, (void*)cb);
+              if (cb) {
+                size_t script_len = decoded_len + 1024;
+                char* js_script = (char*)malloc(script_len);
+                if (js_script) {
+                  snprintf(js_script, script_len,
+                    "(function() {"
+                    "  try {"
+                    "    const transMap = %s;"
+                    "    const map = {};"
+                    "    transMap.forEach(item => { map[String(item.id)] = item.text; });"
+                    "    document.querySelectorAll('[data-lb-tr-id]').forEach(el => {"
+                    "      const id = el.getAttribute('data-lb-tr-id');"
+                    "      if (map[id]) {"
+                    "        if (!el.hasAttribute('data-lb-orig')) {"
+                    "          el.setAttribute('data-lb-orig', el.innerHTML);"
+                    "        }"
+                    "        el.setAttribute('data-lb-trans', map[id]);"
+                    "        el.innerText = map[id];"
+                    "      }"
+                    "    });"
+                    "    document.documentElement.setAttribute('data-lb-translated', 'true');"
+                    "  } catch(e) { console.error(e); }"
+                    "})();", (char*)decoded);
+                  cef_frame_t* cf = cb->get_main_frame(cb);
+                  if (cf) {
+                    cef_string_t js_str = {};
+                    cef_string_from_utf8(js_script, strlen(js_script), &js_str);
+                    cf->execute_java_script(cf, &js_str, NULL, 0);
+                    cef_string_clear(&js_str);
+                    cf->base.release(&cf->base);
+                  }
+                  free(js_script);
+                }
+              }
+              free(decoded);
+            }
+            free(data_b64);
+          }
+        } else if (strncmp(action, "ai-toggle-translation?", 22) == 0) {
+          const char* query = action + 22;
+          char* p_orig = get_query_param(query, "show_orig");
+          int show_orig = p_orig ? atoi(p_orig) : 0;
+          if (p_orig) free(p_orig);
+          LogMsg("[AI-TRANSLATE] ai-toggle-translation received, show_orig=%d, cb=%p\n", show_orig, (void*)cb);
+          if (cb) {
+            char js_script[1024];
+            snprintf(js_script, sizeof(js_script),
+              "(function() {"
+              "  try {"
+              "    const showOrig = %d;"
+              "    document.querySelectorAll('[data-lb-tr-id]').forEach(el => {"
+              "      if (showOrig) {"
+              "        if (el.hasAttribute('data-lb-orig')) {"
+              "          el.innerHTML = el.getAttribute('data-lb-orig');"
+              "        }"
+              "      } else {"
+              "        if (el.hasAttribute('data-lb-trans')) {"
+              "          el.innerText = el.getAttribute('data-lb-trans');"
+              "        }"
+              "      }"
+              "    });"
+              "    document.documentElement.setAttribute('data-lb-translated', showOrig ? 'false' : 'true');"
+              "  } catch(e) { console.error(e); }"
+              "})();", show_orig);
+            cef_frame_t* cf = cb->get_main_frame(cb);
+            if (cf) {
+              cef_string_t js_str = {};
+              cef_string_from_utf8(js_script, strlen(js_script), &js_str);
+              cf->execute_java_script(cf, &js_str, NULL, 0);
+              cef_string_clear(&js_str);
+              cf->base.release(&cf->base);
+            }
+          }
         } else if (strcmp(action, "ai-get-tabs") == 0) {
           if (win_ctx) {
             char* json = (char*)malloc(65536);
