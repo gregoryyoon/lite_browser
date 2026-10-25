@@ -24,7 +24,7 @@ description: >-
 3. **패키징 도구**: NSIS 3.x (`C:\Program Files (x86)\NSIS\makensis.exe`)
 4. **서명 도구**: Windows SDK `signtool.exe`, 자체 서명 또는 공인 인증서 (`scripts/certs/`)
 5. **스크립트 런타임**: PowerShell 5.1+
-6. **인증 토큰**: GitHub Personal Access Token (`$env:GITHUB_TOKEN` 또는 사용자 전달)
+6. **인증 토큰**: **Windows Git Credential Manager (GCM) 자동 감지** (`git credential fill` 기반으로 Windows 자격 증명 관리자에 보관된 토큰을 자동 추출하므로 사용자 재입력 불필요. `$env:GITHUB_TOKEN` 또는 `-Token` 파라미터 수동 지정도 지원)
 
 ---
 
@@ -138,14 +138,16 @@ git push origin vX.Y.Z
 ### Phase 7: GitHub Release 자동 배포 및 인스톨러 업로드
 [`scripts/create_github_release.ps1`](file:///c:/projects/lite_browser/scripts/create_github_release.ps1)을 호출하여 GitHub Release를 발행하고 서명된 인스톨러를 첨부합니다.
 
+> [!TIP]
+> **Windows Git Credential Manager (GCM) 자동 연동**:
+> 스크립트 실행 시 Windows 자격 증명 관리자에 안전하게 저장된 GitHub 토큰을 `git credential fill`을 통해 자동으로 감지 및 인증하므로 사용자가 토큰을 매번 다시 입력할 필요가 없습니다.
+
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\create_github_release.ps1 `
-    -Token $Token `
-    -TagName "vX.Y.Z" `
-    -ReleaseName "Lite Browser vX.Y.Z" `
-    -InstallerPath "LiteBrowserInstaller.exe" `
-    -ReleaseBody $ReleaseNotes
+# 별도 토큰 입력 없이 전자동 배포 실행
+powershell -ExecutionPolicy Bypass -File scripts\create_github_release.ps1
 ```
 
-> [!TIP]
+*(필요 시 `-Token $Token`, `-TagName "vX.Y.Z"`, `-ReleaseBody $ReleaseNotes` 등으로 커스텀 파라미터 오버라이드 가능)*
+
+> [!IMPORTANT]
 > `create_github_release.ps1`은 반드시 **UTF-8 with BOM**으로 저장되어 있어야 한글 릴리즈 본문이 깨지지 않고 정상 전송됩니다.

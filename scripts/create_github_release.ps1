@@ -1,7 +1,6 @@
 ﻿# GitHub Release and Asset Upload Pipeline for Lite Browser
 param(
-    [Parameter(Mandatory=$true)]
-    [string]$Token,
+    [string]$Token = "",
     [string]$TagName = "v0.2.5",
     [string]$ReleaseName = "Lite Browser v0.2.5",
     [string]$InstallerPath = "LiteBrowserInstaller.exe",
@@ -13,6 +12,43 @@ $ErrorActionPreference = "Stop"
 Write-Host "==========================================================" -ForegroundColor Cyan
 Write-Host "  Lite Browser GitHub Release Pipeline                   " -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Cyan
+
+# 0. Resolve GitHub Token (Parameter -> $env:GITHUB_TOKEN -> Git Credential Manager)
+if (-not $Token -and $env:GITHUB_TOKEN) {
+    $Token = $env:GITHUB_TOKEN
+}
+
+if (-not $Token) {
+    try {
+        $pinfo = New-Object System.Diagnostics.ProcessStartInfo
+        $pinfo.FileName = "git.exe"
+        $pinfo.Arguments = "credential fill"
+        $pinfo.RedirectStandardInput = $true
+        $pinfo.RedirectStandardOutput = $true
+        $pinfo.UseShellExecute = $false
+        $pinfo.CreateNoWindow = $true
+
+        $proc = [System.Diagnostics.Process]::Start($pinfo)
+        $proc.StandardInput.WriteLine("protocol=https")
+        $proc.StandardInput.WriteLine("host=github.com")
+        $proc.StandardInput.WriteLine("")
+        $proc.StandardInput.Close()
+
+        $output = $proc.StandardOutput.ReadToEnd()
+        $proc.WaitForExit(3000)
+
+        $tokenLine = ($output -split "`r?`n") | Where-Object { $_ -match "^password=" }
+        if ($tokenLine) {
+            $Token = $tokenLine -replace "^password=", ""
+        }
+    } catch {
+        # ignore error and fallback to check
+    }
+}
+
+if (-not $Token) {
+    throw "GitHub Personal Access Token is required. Please set GITHUB_TOKEN or configure Git Credential Manager."
+}
 
 $Repo = "gregoryyoon/lite_browser"
 $ApiBase = "https://api.github.com/repos/$Repo"
