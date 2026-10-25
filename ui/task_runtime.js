@@ -230,11 +230,11 @@ class TaskRuntime {
       },
       {
         name: 'browser_translate_page',
-        description: '현재 웹페이지의 텍스트를 인플레이스(In-place)로 실시간 번역하여 화면에 직접 치환하고, 사이드패널에 원문/번역문 토글 카드 및 핵심 요약 브리핑을 제공합니다. 사용자가 "이 페이지 번역해줘", "한국어로 바꿔줘" 등을 요청했을 때 호출합니다.',
+        description: '현재 웹페이지의 본문 텍스트를 대상 언어(target_lang)로 인플레이스(In-place) 실시간 번역하여 화면에 직접 치환하고, 사이드패널에 원문/번역문 토글 카드 및 핵심 요약 브리핑을 제공합니다. 한국어뿐만 아니라 영어, 일본어, 중국어 등 사용자가 요청한 모든 대상 언어로 번역할 수 있습니다. (예: "한국어로 번역해줘", "영어로 번역해줘", "일본어로 번역해줘")',
         parameters: {
           type: 'object',
           properties: {
-            target_lang: { type: 'string', description: '번역 대상 언어 (기본값: "한국어" 또는 "ko")' },
+            target_lang: { type: 'string', description: '번역 대상 언어 (예: "한국어", "영어", "일본어" 등, 미지정 시 기본값: "한국어")' },
             scope: { type: 'string', enum: ['main', 'full'], description: '번역 대상 영역 (기본값: "main" 메인 콘텐츠 우선, "full" 전체 DOM)' }
           }
         }

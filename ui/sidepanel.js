@@ -882,7 +882,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function getToolInitialProgressText(toolName, args) {
     if (toolName === 'browser_navigate') return `${args.url || '해당 주소'} 웹페이지로 이동 중...`;
     if (toolName === 'browser_open_tab') return `${args.url || '새 탭'} 생성 및 로딩 중...`;
-    if (toolName === 'browser_translate_page') return `웹페이지 본문 텍스트 추출 준비 중...`;
+    if (toolName === 'browser_translate_page') return `웹페이지 본문 텍스트 ${args.target_lang || '한국어'} 번역 준비 중...`;
     if (toolName === 'browser_get_selected_text') return `선택 영역 텍스트 추출 중...`;
     if (toolName === 'browser_get_page_content') return `웹페이지 DOM 구조 및 본문 데이터 추출 중...`;
     if (toolName === 'browser_get_tabs') return `열려 있는 전체 탭 목록 및 활성 상태 조회 중...`;
@@ -1130,8 +1130,8 @@ document.addEventListener('DOMContentLoaded', () => {
         `   - 탭 간 비교: 사용자가 탭 간 비교/대조를 요청하면 'browser_get_tabs'로 대상 탭을 파악하고, 각 대상 탭에 대해 'browser_get_tab_content(tab_id)'로 본문 내용을 추출하세요. 비교 대상이 2개 탭인 경우 'browser_split_tabs(left_tab_id, right_tab_id)'를 호출하여 분할 화면으로 띄워 시각적 대조를 지원하고, 사이드패널 답변에 스펙, 가격, 특징, 장단점을 명확하게 정리한 마크다운 비교표(Markdown Table)를 작성하세요.\n` +
         `   - 탭 닫기: 사용자가 탭을 닫아달라고 하면 'browser_get_tabs'로 대상 탭 ID를 확인한 뒤 'browser_close_tabs(tab_ids)'를 호출하세요. 사용자가 "확인 없이 닫아줘"라고 명시한 경우에만 require_confirmation: false로 호출하고, 그 외에는 require_confirmation: true(기본값)로 안전 확인 카드를 거치도록 하세요.\n` +
         `7. [웹페이지 번역 및 다국어 지원 규칙]:\n` +
-        `   - 웹페이지 번역: 사용자가 "이 페이지 번역해줘", "한국어로 바꿔줘", "페이지 번역" 등을 요청하면 'browser_translate_page' 도구를 호출하세요. 이 도구는 웹페이지 본문 텍스트를 인플레이스로 직접 치환합니다. 도구 실행이 완료된 후 최종 답변에는 번역 완료 안내와 함께 원문 페이지의 핵심 내용 3줄 요약 및 주요 용어 정리를 마크다운으로 깔끔하게 작성하세요.\n` +
-        `   - 선택 텍스트 번역: 사용자가 "선택한 거 번역해줘", "드래그한 내용 설명해줘" 등을 요청하면 'browser_get_selected_text' 도구로 선택 텍스트를 추출한 뒤, 사이드패널에서 한국어 번역과 문맥 설명을 상세히 작성하세요.\n\n`;
+        `   - 웹페이지 번역: 사용자가 "이 페이지 번역해줘", "한국어로 바꿔줘", "영어로 번역해줘", "일본어로 번역해줘" 등 웹페이지 번역을 요청하면 'browser_translate_page(target_lang, scope)' 도구를 호출하세요. 한국어뿐만 아니라 영어, 일본어, 중국어 등 사용자가 요청한 언어에 맞춰 target_lang(예: "영어", "한국어", "일본어" 등, 미지정 시 기본값 "한국어")을 명시적으로 전달하세요. 이 도구는 웹페이지 본문 텍스트를 대상 언어로 인플레이스 직접 치환합니다. 도구 실행이 완료된 후 최종 답변에는 번역 완료 안내와 함께 페이지의 핵심 내용 3줄 요약 및 주요 용어 정리를 마크다운으로 깔끔하게 작성하세요.\n` +
+        `   - 선택 텍스트 번역: 사용자가 "선택한 거 번역해줘", "드래그한 내용 설명해줘" 등을 요청하면 'browser_get_selected_text' 도구로 선택 텍스트를 추출한 뒤, 사이드패널에서 요청된 언어로의 번역과 문맥 설명을 상세히 작성하세요.\n\n`;
       const systemPrompt = baseDirective + (settings.systemPrompt || '') + memoryPrompt;
       const tools = window.taskRuntime.getAvailableTools();
 
