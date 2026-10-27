@@ -488,43 +488,146 @@ int CEF_CALLBACK life_span_handler_on_before_popup(
     return 0; // Return 0 (false) to let CEF create the child browser in popup_hwnd
   }
 
-  // Regular link navigation / new tab request -> open as tab in LiteBrowser
-  if (win_ctx && target_url && target_url->str) {
-    cef_string_utf8_t url_utf8 = {};
-    cef_string_to_utf8(target_url->str, target_url->length, &url_utf8);
-
-    if (url_utf8.str && strlen(url_utf8.str) > 0) {
-      char target_url_str[4096];
-      strncpy(target_url_str, url_utf8.str, sizeof(target_url_str) - 1);
-      target_url_str[sizeof(target_url_str) - 1] = '\0';
-      cef_string_utf8_clear(&url_utf8);
-
-      int found_tab_idx = -1;
-      for (int i = 0; i < win_ctx->tab_count; i++) {
-        if ((win_ctx->tabs[i].browser && browser->get_identifier(browser) == win_ctx->tabs[i].browser->get_identifier(win_ctx->tabs[i].browser)) ||
-            (win_ctx->tabs[i].right_browser && browser->get_identifier(browser) == win_ctx->tabs[i].right_browser->get_identifier(win_ctx->tabs[i].right_browser))) {
-          found_tab_idx = i;
-          break;
-        }
+  // Regular link navigation / new tab request (target="_blank", window.open without dimensions, form POST to new tab)
+  // Let CEF create the browser directly into a new Tab slot inside LiteBrowser main window,
+  // preserving HTTP POST body, window.opener, window.name, and session context!
+  if (win_ctx && win_ctx->tab_count < MAX_TABS) {
+    char target_url_str[4096] = {0};
+    if (target_url && target_url->str && target_url->length > 0) {
+      cef_string_utf8_t url_utf8 = {};
+      cef_string_to_utf8(target_url->str, target_url->length, &url_utf8);
+      if (url_utf8.str && url_utf8.length > 0) {
+        strncpy(target_url_str, url_utf8.str, sizeof(target_url_str) - 1);
+        cef_string_utf8_clear(&url_utf8);
       }
+    }
+    if (strlen(target_url_str) == 0) {
+      strcpy(target_url_str, "about:blank");
+    }
 
-      if (found_tab_idx != -1 && win_ctx->tabs[found_tab_idx].is_split) {
-        cef_frame_t* target_frame = browser->get_main_frame(browser);
-        if (target_frame) {
-          cef_string_t url_str = {};
-          cef_string_from_utf8(target_url_str, strlen(target_url_str), &url_str);
-          target_frame->load_url(target_frame, &url_str);
-          cef_string_clear(&url_str);
-          target_frame->base.release(&target_frame->base);
-        }
-        return 1;
+    int found_tab_idx = -1;
+    for (int i = 0; i < win_ctx->tab_count; i++) {
+      if ((win_ctx->tabs[i].browser && browser->get_identifier(browser) == win_ctx->tabs[i].browser->get_identifier(win_ctx->tabs[i].browser)) ||
+          (win_ctx->tabs[i].right_browser && browser->get_identifier(browser) == win_ctx->tabs[i].right_browser->get_identifier(win_ctx->tabs[i].right_browser))) {
+        found_tab_idx = i;
+        break;
       }
+    }
 
-      int in_background = (target_disposition == CEF_WOD_NEW_BACKGROUND_TAB);
-      CreateNewTabEx2(win_ctx, target_url_str, 0, in_background);
+    if (found_tab_idx != -1 && win_ctx->tabs[found_tab_idx].is_split) {
+      cef_frame_t* target_frame = browser->get_main_frame(browser);
+      if (target_frame) {
+        cef_string_t url_str = {};
+        cef_string_from_utf8(target_url_str, strlen(target_url_str), &url_str);
+        target_frame->load_url(target_frame, &url_str);
+        cef_string_clear(&url_str);
+        target_frame->base.release(&target_frame->base);
+      }
       return 1;
     }
-    cef_string_utf8_clear(&url_utf8);
+
+    int in_background = (target_disposition == CEF_WOD_NEW_BACKGROUND_TAB);
+
+    // 1. Unfocus and hide previous active tab if new tab will be foreground
+    if (!in_background) {
+      for (int k = 0; k < win_ctx->tab_count; k++) {
+        if (win_ctx->tabs[k].hwnd) ShowWindow(win_ctx->tabs[k].hwnd, SW_HIDE);
+        if (win_ctx->tabs[k].right_hwnd) ShowWindow(win_ctx->tabs[k].right_hwnd, SW_HIDE);
+        if (win_ctx->tabs[k].browser) {
+          cef_browser_host_t* prev_h = win_ctx->tabs[k].browser->get_host(win_ctx->tabs[k].browser);
+          if (prev_h) {
+            prev_h->set_focus(prev_h, 0);
+            prev_h->base.release(&prev_h->base);
+          }
+        }
+      }
+    }
+
+    // 2. Calculate layout bounds for child browser tab
+    RECT rect;
+    GetClientRect(win_ctx->main_hwnd, &rect);
+    int total_w = rect.right;
+    int height = rect.bottom;
+    int ui_height = GetUIHeightForWindow(win_ctx->main_hwnd);
+    int content_y = ui_height;
+    int content_h = height - content_y;
+    if (content_h < 10) content_h = 10;
+
+    int main_area_w = total_w;
+    if (win_ctx->show_sidepanel) {
+      int sp_splitter_w = 4;
+      int default_sp_w = (int)(380 * (ui_height / 76.0f));
+      int min_sp_w = (int)(320 * (ui_height / 76.0f));
+      if (min_sp_w < 280) min_sp_w = 280;
+
+      int sp_w = (win_ctx->sidepanel_width > 0) ? win_ctx->sidepanel_width : default_sp_w;
+      if (sp_w < min_sp_w) sp_w = min_sp_w;
+
+      if (total_w > min_sp_w + 300) {
+        if (sp_w > total_w - 300) sp_w = total_w - 300;
+      }
+      if (sp_w < 200) sp_w = 200;
+
+      main_area_w = total_w - sp_w - sp_splitter_w;
+      if (main_area_w < 100) main_area_w = 100;
+    }
+
+    int dark_init = is_theme_dark();
+    if (settings) {
+      settings->background_color = dark_init ? 0xFF0D0F15 : 0xFFF4F4F5;
+    }
+
+    // 3. Create content handler for this tab
+    simple_handler_t *content_handler = simple_handler_create(0);
+    content_handler->window_ctx = win_ctx;
+    content_handler->type = BROWSER_TYPE_CONTENT;
+    *client = &content_handler->client;
+
+    // 4. Configure windowInfo to be created as child of main_hwnd
+    if (windowInfo) {
+      windowInfo->style = WS_CHILD | (in_background ? 0 : WS_VISIBLE) | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
+      windowInfo->parent_window = win_ctx->main_hwnd;
+      windowInfo->bounds.x = 0;
+      windowInfo->bounds.y = content_y;
+      windowInfo->bounds.width = main_area_w;
+      windowInfo->bounds.height = content_h;
+      windowInfo->runtime_style = CEF_RUNTIME_STYLE_DEFAULT;
+    }
+
+    // 5. Insert new tab metadata into win_ctx->tabs
+    int insert_idx = win_ctx->tab_count;
+    if (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+      insert_idx = win_ctx->active_tab_index + 1;
+    }
+
+    int max_id = 0;
+    for (int k = 0; k < win_ctx->tab_count; k++) {
+      if (win_ctx->tabs[k].tab_id > max_id) max_id = win_ctx->tabs[k].tab_id;
+    }
+
+    for (int i = win_ctx->tab_count; i > insert_idx; i--) {
+      win_ctx->tabs[i] = win_ctx->tabs[i - 1];
+    }
+
+    memset(&win_ctx->tabs[insert_idx], 0, sizeof(tab_info_t));
+    win_ctx->tabs[insert_idx].tab_id = max_id + 1;
+    win_ctx->tabs[insert_idx].browser = NULL; // will be assigned in on_after_created
+    win_ctx->tabs[insert_idx].hwnd = NULL;
+    strcpy(win_ctx->tabs[insert_idx].title, "새 탭");
+    strncpy(win_ctx->tabs[insert_idx].url, target_url_str, sizeof(win_ctx->tabs[insert_idx].url) - 1);
+    win_ctx->tabs[insert_idx].is_loaded = 1;
+    win_ctx->tabs[insert_idx].tab_handler = content_handler;
+
+    if (!in_background || win_ctx->active_tab_index < 0) {
+      win_ctx->active_tab_index = insert_idx;
+    }
+    win_ctx->tab_count++;
+    update_ui_tabs(win_ctx);
+
+    LogMsg("life_span_handler_on_before_popup: allowed tab creation for url=%s, tab_id=%d, returning 0\n",
+           target_url_str, win_ctx->tabs[insert_idx].tab_id);
+
+    return 0; // Return 0 (false) so CEF creates the child browser in main_hwnd with POST data & opener intact!
   }
 
   return 1;
