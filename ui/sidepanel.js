@@ -847,6 +847,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const TOOL_NAME_KO = {
     browser_navigate: '웹페이지 이동',
     browser_get_page_content: '페이지 실시간 분석',
+    browser_take_screenshot: '화면 스크린샷 캡처',
     browser_click_element: '요소 클릭',
     browser_type_text: '텍스트 입력',
     browser_scroll: '화면 스크롤',
@@ -859,10 +860,13 @@ document.addEventListener('DOMContentLoaded', () => {
     browser_close_tabs: '탭 닫기',
     browser_open_tab: '새 탭 열기',
     browser_translate_page: '웹페이지 실시간 번역',
-    browser_get_selected_text: '선택 텍스트 추출'
+    browser_get_selected_text: '선택 텍스트 추출',
+    youtube_get_comments: 'YouTube 댓글/여론 분석'
   };
 
   function getToolArgSummary(toolName, args) {
+    if (toolName === 'browser_take_screenshot') return '현재 뷰포트 화면 전체 캡처';
+    if (toolName === 'youtube_get_comments') return `댓글 수집 (${args.limit || 30}개)`;
     if (toolName === 'browser_navigate') return `URL: ${args.url || ''}`;
     if (toolName === 'browser_open_tab') return `URL: ${args.url || '새 탭(lite://favorites)'}${args.activate === false ? ' [백그라운드]' : ''}`;
     if (toolName === 'browser_translate_page') return `페이지 번역 (언어: ${args.target_lang || '한국어'}, 범위: ${args.scope || 'main'})`;
@@ -880,6 +884,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function getToolInitialProgressText(toolName, args) {
+    if (toolName === 'browser_take_screenshot') return '활성 화면 뷰포트 스크린샷 캡처 중...';
     if (toolName === 'browser_navigate') return `${args.url || '해당 주소'} 웹페이지로 이동 중...`;
     if (toolName === 'browser_open_tab') return `${args.url || '새 탭'} 생성 및 로딩 중...`;
     if (toolName === 'browser_translate_page') return `웹페이지 본문 텍스트 ${args.target_lang || '한국어'} 번역 준비 중...`;
@@ -895,10 +900,21 @@ document.addEventListener('DOMContentLoaded', () => {
     if (toolName === 'browser_type_text') return `${args.selector || '입력 필드'}에 텍스트 입력 준비 중...`;
     if (toolName === 'browser_scroll') return `화면 ${args.direction || '아래'}로 스크롤 중...`;
     if (toolName === 'browser_autofill_login') return `Vault 마스터 보안 인증 및 계정 탐색 중...`;
+    if (toolName === 'youtube_get_comments') return `YouTube 실시간 시청자 댓글 데이터 수집 중...`;
     return '작업을 준비하고 있습니다...';
   }
-
   function getToolResultSummary(toolName, args, result) {
+    if (toolName === 'browser_take_screenshot') {
+      return result?.status === 'success' ? `뷰포트 화면 캡처 완료 (${result.width}x${result.height})` : (result?.message || '뷰포트 화면 캡처 실패');
+    }
+    if (toolName === 'youtube_get_comments') {
+      if (result?.count > 0 && Array.isArray(result.comments)) {
+        return `총 ${result.comments.length}개 댓글 수집 완료 (${result.title || 'YouTube 영상'}):\n` +
+          result.comments.slice(0, 3).map(c => `- ${c.author || '시청자'}: ${c.text || ''}${c.votes && c.votes !== '0' ? ` [👍 ${c.votes}]` : ''}`).join('\n') +
+          (result.comments.length > 3 ? `\n... 외 ${result.comments.length - 3}개` : '');
+      }
+      return result?.message || '수집된 댓글이 없습니다.';
+    }
     if (toolName === 'browser_get_page_content' && result?.title) {
       return `[${result.title}] - ${result.url}\n${(result.bodySnippet || result.markdown || '').slice(0, 400)}...`;
     }
@@ -946,6 +962,42 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     return typeof result === 'string' ? result : JSON.stringify(result, null, 2);
   }
+
+  function showImagePreviewModal(imageSrc) {
+    if (!imageSrc) return;
+    let modal = document.getElementById('image-preview-modal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'image-preview-modal';
+      modal.className = 'image-modal-backdrop';
+      modal.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.75); display: flex; align-items: center; justify-content: center; z-index: 9999; padding: 20px; backdrop-filter: blur(4px);';
+      modal.innerHTML = `
+        <div class="image-modal-content" style="position: relative; max-width: 95%; max-height: 90%; display: flex; flex-direction: column; align-items: center;">
+          <button type="button" class="image-modal-close" style="position: absolute; top: -14px; right: -14px; width: 28px; height: 28px; border-radius: 50%; background: var(--bg-card, #202124); border: 1px solid var(--border-color, #444); color: var(--text-primary, #fff); display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 10;">
+            <svg viewBox="0 0 24 24" style="width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 2;"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
+          <img class="image-modal-img" src="" alt="화면 캡처 원본" style="max-width: 100%; max-height: 80vh; object-fit: contain; border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.15);" />
+        </div>
+      `;
+      modal.addEventListener('click', (e) => {
+        if (e.target === modal || e.target.closest('.image-modal-close')) {
+          modal.classList.add('hidden');
+          modal.style.display = 'none';
+        }
+      });
+      document.body.appendChild(modal);
+    }
+    const img = modal.querySelector('.image-modal-img');
+    if (img) img.src = imageSrc;
+    modal.classList.remove('hidden');
+    modal.style.display = 'flex';
+  }
+
+  window.onViewportCapturedCallback = function(data) {
+    if (data?.status === 'success' && window.taskRuntime) {
+      window.taskRuntime.addLog(`뷰포트 시각 캡처 완료 (${data.width}x${data.height})`, 'success');
+    }
+  };
 
   function createRunningToolCard(toolName, args) {
     const friendlyName = TOOL_NAME_KO[toolName] || toolName;
@@ -1013,6 +1065,18 @@ document.addEventListener('DOMContentLoaded', () => {
           `;
         }
 
+        let screenshotBadgeHtml = '';
+        if (result?.screenshot && typeof result.screenshot === 'string') {
+          screenshotBadgeHtml = `
+            <div class="visual-capture-badge-container" style="margin-top: 6px;">
+              <button type="button" class="btn btn-secondary btn-sm visual-capture-badge-btn" style="font-size: 11px; padding: 4px 10px; display: inline-flex; align-items: center; gap: 6px; color: var(--accent-color, #3b82f6); border-color: rgba(59, 130, 246, 0.3); background: rgba(59, 130, 246, 0.08); border-radius: 6px; cursor: pointer;">
+                <svg class="icon-inline" viewBox="0 0 24 24" style="width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2;"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+                <span>뷰포트 시각 캡처 포함 (클릭하여 확대)</span>
+              </button>
+            </div>
+          `;
+        }
+
         card.innerHTML = `
           <div class="timeline-step-header">
             <div class="step-info">
@@ -1029,6 +1093,7 @@ document.addEventListener('DOMContentLoaded', () => {
           <div class="timeline-step-body">
             <div style="font-weight: 500; margin-bottom: 4px; color: var(--text-primary);">${escapeHtml(argSummary)}</div>
             ${toggleBarHtml}
+            ${screenshotBadgeHtml}
             <details style="margin-top: 4px;">
               <summary style="font-size: 10.5px; color: var(--text-muted); cursor: pointer;">실행 결과 상세 보기</summary>
               <pre>${escapeHtml(resultSummary)}</pre>
@@ -1043,6 +1108,15 @@ document.addEventListener('DOMContentLoaded', () => {
             if (body) body.classList.toggle('hidden');
           });
         }
+
+        const badgeBtn = card.querySelector('.visual-capture-badge-btn');
+        if (badgeBtn && result?.screenshot) {
+          badgeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            showImagePreviewModal(result.screenshot);
+          });
+        }
+
         chatContainer.scrollTop = chatContainer.scrollHeight;
       },
       error(err) {
@@ -1085,6 +1159,11 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!prompt || isGenerating) return;
     if (window.sendNativeLog) window.sendNativeLog(`[Sidepanel] User Prompt: "${prompt}"`);
 
+    window.lastUserPrompt = prompt;
+    if (window.taskRuntime) {
+      window.taskRuntime.lastUserQuery = prompt;
+    }
+
     promptInput.value = '';
     if (promptInput) promptInput.focus();
     appendUserMessage(prompt);
@@ -1094,6 +1173,7 @@ document.addEventListener('DOMContentLoaded', () => {
     sendBtn.classList.add('hidden');
     stopBtn.classList.remove('hidden');
     abortController = new AbortController();
+    let latestCapturedScreenshotInTurn = null;
 
     window.taskRuntime.setState(TaskState.RUNNING, 'AI 응답 및 작업 계획 생성 중...');
 
@@ -1132,7 +1212,12 @@ document.addEventListener('DOMContentLoaded', () => {
         `   - 탭 닫기: 사용자가 탭을 닫아달라고 하면 'browser_get_tabs'로 대상 탭 ID를 확인한 뒤 'browser_close_tabs(tab_ids)'를 호출하세요. 사용자가 "확인 없이 닫아줘"라고 명시한 경우에만 require_confirmation: false로 호출하고, 그 외에는 require_confirmation: true(기본값)로 안전 확인 카드를 거치도록 하세요.\n` +
         `7. [웹페이지 번역 및 다국어 지원 규칙]:\n` +
         `   - 웹페이지 번역: 사용자가 "이 페이지 번역해줘", "한국어로 바꿔줘", "영어로 번역해줘", "일본어로 번역해줘" 등 웹페이지 번역을 요청하면 'browser_translate_page(target_lang, scope)' 도구를 호출하세요. 한국어뿐만 아니라 영어, 일본어, 중국어 등 사용자가 요청한 언어에 맞춰 target_lang(예: "영어", "한국어", "일본어" 등, 미지정 시 기본값 "한국어")을 명시적으로 전달하세요. 이 도구는 웹페이지 본문 텍스트를 대상 언어로 인플레이스 직접 치환합니다. 도구 실행이 완료된 후 최종 답변에는 번역 완료 안내와 함께 페이지의 핵심 내용 3줄 요약 및 주요 용어 정리를 마크다운으로 깔끔하게 작성하세요.\n` +
-        `   - 선택 텍스트 번역: 사용자가 "선택한 거 번역해줘", "드래그한 내용 설명해줘" 등을 요청하면 'browser_get_selected_text' 도구로 선택 텍스트를 추출한 뒤, 사이드패널에서 요청된 언어로의 번역과 문맥 설명을 상세히 작성하세요.\n\n`;
+        `   - 선택 텍스트 번역: 사용자가 "선택한 거 번역해줘", "드래그한 내용 설명해줘" 등을 요청하면 'browser_get_selected_text' 도구로 선택 텍스트를 추출한 뒤, 사이드패널에서 요청된 언어로의 번역과 문맥 설명을 상세히 작성하세요.\n` +
+        `8. [YouTube 동영상 요약 및 댓글/여론 분석 분기 지침]:\n` +
+        `   - 동영상 내용 요약: 사용자가 YouTube 영상의 내용, 핵심 요약, 설명, 대본 등을 질문하면 'browser_get_page_content' 도구를 호출하세요. 이 도구는 영상의 실제 자막 대본(Transcript), 챕터 타임라인, 설명글을 기반으로 노이즈 없는 고밀도 요약을 제공합니다. 댓글은 포함되지 않습니다.\n` +
+        `   - 댓글 및 시청자 여론 분석: 사용자가 "댓글 반응 알려줘", "시청자 여론 어때?", "댓글 분위기 어때?", "인기 댓글 뭐야?" 등 댓글이나 여론 조사를 명시적으로 요청한 경우에만 'youtube_get_comments(limit)' 도구를 호출하세요. 상위 댓글(기본 30개)의 좋아요 순 반응과 주요 의견을 바탕으로 시청자 반응 요약 및 감정 분석을 브리핑하세요.\n` +
+        `9. [시각적 차트/대시보드 분석 및 스크린샷 활용 지침]:\n` +
+        `   - 차트 및 대시보드 관찰: 사용자가 TradingView, 차트, 캔들그래프, 지도, 대시보드(Grafana 등) 등 시각적 화면에 대한 분석을 요청하거나 화면을 직접 보고 싶을 때는 'browser_take_screenshot' 도구를 호출하여 실시간 화면 뷰포트를 캡처하여 관찰하세요. ('browser_get_page_content' 호출 시에도 페이지가 시각 집약적인 경우 자동으로 뷰포트 시각 캡처가 결합되어 제공됩니다).\n\n`;
       const systemPrompt = baseDirective + (settings.systemPrompt || '') + memoryPrompt;
       const tools = window.taskRuntime.getAvailableTools();
 
@@ -1149,6 +1234,12 @@ document.addEventListener('DOMContentLoaded', () => {
         let activeTools = tools;
         if (executedToolsInTurn.has('browser_get_page_content') && !executedToolsInTurn.has('browser_navigate')) {
           activeTools = activeTools.filter(t => t.name !== 'browser_get_page_content');
+        }
+        if (executedToolsInTurn.has('browser_take_screenshot') && !executedToolsInTurn.has('browser_navigate')) {
+          activeTools = activeTools.filter(t => t.name !== 'browser_take_screenshot');
+        }
+        if (executedToolsInTurn.has('youtube_get_comments')) {
+          activeTools = activeTools.filter(t => t.name !== 'youtube_get_comments');
         }
         if (executedToolsInTurn.has('browser_reorder_tabs')) {
           activeTools = activeTools.filter(t => t.name !== 'browser_reorder_tabs');
@@ -1241,6 +1332,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // If no tool calls, task loop is finished
         if (toolCalls.length === 0) {
+          if (latestCapturedScreenshotInTurn && bubble && bubble.container) {
+            const badgeContainer = document.createElement('div');
+            badgeContainer.style.margin = '8px 0 2px 0';
+            badgeContainer.innerHTML = `
+              <button type="button" class="visual-capture-badge-btn" style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 6px; font-size: 11.5px; font-weight: 500; background: var(--accent-light, rgba(26,115,232,0.12)); color: var(--accent-color, #1a73e8); border: 1px solid var(--accent-border, rgba(26,115,232,0.3)); cursor: pointer; transition: all 0.15s ease;">
+                <svg class="icon-inline" viewBox="0 0 24 24" style="width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2;"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+                <span>뷰포트 시각 캡처 포함 (클릭하여 확대)</span>
+              </button>
+            `;
+            const badgeBtn = badgeContainer.querySelector('.visual-capture-badge-btn');
+            if (badgeBtn) {
+              badgeBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                showImagePreviewModal(latestCapturedScreenshotInTurn);
+              });
+            }
+            bubble.container.appendChild(badgeContainer);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+          }
           break;
         }
 
@@ -1249,20 +1359,27 @@ document.addEventListener('DOMContentLoaded', () => {
         // Execute tool calls step by step
         for (const tc of toolCalls) {
           executedToolsInTurn.add(tc.name);
-          if (tc.name === 'browser_navigate' || tc.name === 'browser_open_tab' || tc.name === 'browser_translate_page') {
+          if (tc.name === 'browser_navigate' || tc.name === 'browser_open_tab' || tc.name === 'browser_translate_page' || tc.name === 'browser_switch_tab' || tc.name === 'browser_click_element' || tc.name === 'browser_scroll' || tc.name === 'browser_type_text') {
             executedToolsInTurn.delete('browser_get_page_content');
+            executedToolsInTurn.delete('browser_take_screenshot');
+            executedToolsInTurn.delete('youtube_get_comments');
           }
           const toolCard = createRunningToolCard(tc.name, tc.args);
           try {
             const toolResult = await window.taskRuntime.executeToolAction(tc.name, tc.args);
             toolCard.finish(toolResult);
 
-            conversationHistory.push({
+            const toolHistoryItem = {
               role: 'tool',
               tool_call_id: tc.id,
               name: tc.name,
               content: JSON.stringify(toolResult)
-            });
+            };
+            if (toolResult?.screenshot) {
+              toolHistoryItem.screenshot = toolResult.screenshot;
+              latestCapturedScreenshotInTurn = toolResult.screenshot;
+            }
+            conversationHistory.push(toolHistoryItem);
           } catch (e) {
             toolCard.error(e);
             conversationHistory.push({

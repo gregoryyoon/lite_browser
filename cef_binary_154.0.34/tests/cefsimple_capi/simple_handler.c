@@ -17,9 +17,11 @@
 
 #include <stdarg.h>
 #include <stdatomic.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include "include/capi/cef_task_capi.h"
 #include "include/capi/cef_parser_capi.h"
@@ -29,6 +31,7 @@
 
 #if defined(OS_WIN)
 #include <windows.h>
+#include <ole2.h>
 #include <shlobj.h>
 #include <shellapi.h>
 extern int GetUIHeightForWindow(HWND hwnd);
@@ -119,6 +122,65 @@ static void ResolveUIFilePath(const char* relative_path, char* out_file_path, si
     snprintf(out_file_url, max_url_len, "file:///projects/lite_browser/%s", relative_path);
   }
 #endif
+}
+
+static char* g_content_extractor_cache = NULL;
+static size_t g_content_extractor_len = 0;
+static uint64_t g_content_extractor_mtime = 0;
+
+static const char* GetContentExtractorScript(size_t* out_len) {
+  char file_path[MAX_PATH];
+  ResolveUIFilePath("ui/content_extractor.js", file_path, sizeof(file_path), NULL, 0);
+  struct _stat64 st;
+  if (_stat64(file_path, &st) == 0) {
+    if (g_content_extractor_cache && (uint64_t)st.st_mtime == g_content_extractor_mtime) {
+      if (out_len) *out_len = g_content_extractor_len;
+      return g_content_extractor_cache;
+    }
+    // File modified or initial load: reload safely
+    FILE* f = fopen(file_path, "rb");
+    if (f) {
+      fseek(f, 0, SEEK_END);
+      long sz = ftell(f);
+      fseek(f, 0, SEEK_SET);
+      if (sz > 0) {
+        char* buf = (char*)malloc(sz + 1);
+        if (buf) {
+          size_t read_bytes = fread(buf, 1, sz, f);
+          buf[read_bytes] = '\0';
+          if (read_bytes > 0) {
+            if (g_content_extractor_cache) free(g_content_extractor_cache);
+            g_content_extractor_cache = buf;
+            g_content_extractor_len = read_bytes;
+            g_content_extractor_mtime = (uint64_t)st.st_mtime;
+          } else {
+            free(buf);
+          }
+        }
+      }
+      fclose(f);
+    }
+  }
+  if (out_len) *out_len = g_content_extractor_len;
+  return g_content_extractor_cache;
+}
+
+static void InjectContentExtractorScript(cef_browser_t* browser, const char* runner_call) {
+  if (!browser || !runner_call) return;
+  size_t ce_len = 0;
+  const char* ce_script = GetContentExtractorScript(&ce_len);
+  if (!ce_script || ce_len == 0) return;
+
+  size_t runner_len = strlen(runner_call);
+  char* full_script = (char*)malloc(ce_len + runner_len + 2);
+  if (!full_script) return;
+
+  memcpy(full_script, ce_script, ce_len);
+  full_script[ce_len] = '\n';
+  memcpy(full_script + ce_len + 1, runner_call, runner_len + 1);
+
+  ExecuteJsOnBrowser(browser, full_script);
+  free(full_script);
 }
 
 static void get_theme_config_path(char* out_path, size_t max_len) {
@@ -413,6 +475,136 @@ static unsigned char* base64_decode(const char* src, size_t* out_len) {
   *out_len = decoded_len;
   return out;
 }
+
+#if defined(OS_WIN)
+static char* CaptureHwndToJpegBase64(HWND tab_hwnd, int* out_w, int* out_h) {
+  if (!tab_hwnd || !IsWindow(tab_hwnd)) return NULL;
+
+  RECT rc = {0};
+  GetClientRect(tab_hwnd, &rc);
+  int w = rc.right - rc.left;
+  int h = rc.bottom - rc.top;
+  if (w <= 0 || h <= 0) return NULL;
+
+  POINT pt = {0, 0};
+  ClientToScreen(tab_hwnd, &pt);
+
+  HDC hScreenDC = GetDC(NULL);
+  if (!hScreenDC) return NULL;
+
+  HDC hMemDC = CreateCompatibleDC(hScreenDC);
+  if (!hMemDC) {
+    ReleaseDC(NULL, hScreenDC);
+    return NULL;
+  }
+
+  HBITMAP hBitmap = CreateCompatibleBitmap(hScreenDC, w, h);
+  if (!hBitmap) {
+    DeleteDC(hMemDC);
+    ReleaseDC(NULL, hScreenDC);
+    return NULL;
+  }
+
+  HGDIOBJ hOldBmp = SelectObject(hMemDC, hBitmap);
+  BitBlt(hMemDC, 0, 0, w, h, hScreenDC, pt.x, pt.y, SRCCOPY);
+  SelectObject(hMemDC, hOldBmp);
+  DeleteDC(hMemDC);
+  ReleaseDC(NULL, hScreenDC);
+
+  // Compress to JPEG using dynamic GDI+ Flat API (80% Quality)
+  char* result_b64 = NULL;
+  HMODULE hGdiplus = LoadLibraryW(L"gdiplus.dll");
+  HMODULE hOle32 = LoadLibraryW(L"ole32.dll");
+
+  if (hGdiplus && hOle32) {
+    typedef struct MyGdiplusStartupInput {
+      UINT32 GdiplusVersion;
+      void* DebugEventCallback;
+      BOOL SuppressBackgroundThread;
+      BOOL SuppressExternalCodecs;
+    } MyGdiplusStartupInput;
+
+    typedef struct {
+      GUID Guid;
+      ULONG NumberOfValues;
+      ULONG Type;
+      void* Value;
+    } MyGpEncoderParameter;
+
+    typedef struct {
+      UINT Count;
+      MyGpEncoderParameter Parameter[1];
+    } MyGpEncoderParameters;
+
+    typedef int (WINAPI *MyGdiplusStartupFn)(ULONG_PTR *token, const MyGdiplusStartupInput *input, void *output);
+    typedef void (WINAPI *MyGdiplusShutdownFn)(ULONG_PTR token);
+    typedef int (WINAPI *MyGdipCreateBitmapFromHBITMAPFn)(HBITMAP hbm, HPALETTE hpal, void **bitmap);
+    typedef int (WINAPI *MyGdipSaveImageToStreamFn)(void *image, IStream *stream, const CLSID *clsidEncoder, const MyGpEncoderParameters *encoderParams);
+    typedef int (WINAPI *MyGdipDisposeImageFn)(void *image);
+    typedef HRESULT (WINAPI *MyCreateStreamOnHGlobalFn)(HGLOBAL hGlobal, BOOL fDeleteOnRelease, LPSTREAM *ppstm);
+    typedef HRESULT (WINAPI *MyGetHGlobalFromStreamFn)(IStream *pstm, HGLOBAL *phglobal);
+
+    MyGdiplusStartupFn pfnStartup = (MyGdiplusStartupFn)GetProcAddress(hGdiplus, "GdiplusStartup");
+    MyGdiplusShutdownFn pfnShutdown = (MyGdiplusShutdownFn)GetProcAddress(hGdiplus, "GdiplusShutdown");
+    MyGdipCreateBitmapFromHBITMAPFn pfnCreateBitmap = (MyGdipCreateBitmapFromHBITMAPFn)GetProcAddress(hGdiplus, "GdipCreateBitmapFromHBITMAP");
+    MyGdipSaveImageToStreamFn pfnSaveImage = (MyGdipSaveImageToStreamFn)GetProcAddress(hGdiplus, "GdipSaveImageToStream");
+    MyGdipDisposeImageFn pfnDisposeImage = (MyGdipDisposeImageFn)GetProcAddress(hGdiplus, "GdipDisposeImage");
+    MyCreateStreamOnHGlobalFn pfnCreateStream = (MyCreateStreamOnHGlobalFn)GetProcAddress(hOle32, "CreateStreamOnHGlobal");
+    MyGetHGlobalFromStreamFn pfnGetHGlobal = (MyGetHGlobalFromStreamFn)GetProcAddress(hOle32, "GetHGlobalFromStream");
+
+    if (pfnStartup && pfnShutdown && pfnCreateBitmap && pfnSaveImage && pfnDisposeImage && pfnCreateStream && pfnGetHGlobal) {
+      ULONG_PTR gdiplusToken = 0;
+      MyGdiplusStartupInput input = { 1, NULL, FALSE, FALSE };
+      if (pfnStartup(&gdiplusToken, &input, NULL) == 0) {
+        void* pGpImage = NULL;
+        if (pfnCreateBitmap(hBitmap, NULL, &pGpImage) == 0 && pGpImage) {
+          IStream* pStream = NULL;
+          if (SUCCEEDED(pfnCreateStream(NULL, TRUE, &pStream)) && pStream) {
+            static const CLSID clsidJpeg = { 0x557cf401, 0x1a04, 0x11d3, { 0x9a, 0x73, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e } };
+            static const GUID guidEncoderQuality = { 0x1d5be4b5, 0xfa4a, 0x452d, { 0x9c, 0xdd, 0x5d, 0xb3, 0x51, 0x05, 0xe7, 0xeb } };
+
+            ULONG quality = 80;
+            MyGpEncoderParameters encParams;
+            encParams.Count = 1;
+            encParams.Parameter[0].Guid = guidEncoderQuality;
+            encParams.Parameter[0].NumberOfValues = 1;
+            encParams.Parameter[0].Type = 4; // EncoderParameterValueTypeLong
+            encParams.Parameter[0].Value = &quality;
+
+            if (pfnSaveImage(pGpImage, pStream, &clsidJpeg, &encParams) == 0) {
+              STATSTG stat = {0};
+              HRESULT hr = pStream->lpVtbl->Stat(pStream, &stat, 1 /* STATFLAG_NONAME */);
+              ULONG jpeg_size = (SUCCEEDED(hr) && stat.cbSize.LowPart > 0) ? stat.cbSize.LowPart : 0;
+
+              HGLOBAL hMem = NULL;
+              if (jpeg_size > 0 && SUCCEEDED(pfnGetHGlobal(pStream, &hMem)) && hMem) {
+                BYTE* pData = (BYTE*)GlobalLock(hMem);
+                if (pData) {
+                  result_b64 = base64_encode(pData, jpeg_size);
+                  GlobalUnlock(hMem);
+                }
+              }
+            }
+            pStream->lpVtbl->Release(pStream);
+          }
+          pfnDisposeImage(pGpImage);
+        }
+        pfnShutdown(gdiplusToken);
+      }
+    }
+  }
+
+  if (hGdiplus) FreeLibrary(hGdiplus);
+  if (hOle32) FreeLibrary(hOle32);
+  DeleteObject(hBitmap);
+
+  if (result_b64) {
+    if (out_w) *out_w = w;
+    if (out_h) *out_h = h;
+  }
+  return result_b64;
+}
+#endif
 
 static char* get_query_param(const char* query, const char* param_name) {
   size_t name_len = strlen(param_name);
@@ -2140,278 +2332,12 @@ int CEF_CALLBACK request_handler_on_before_browse(
           if (amt) free(amt);
         } else if (strcmp(action, "ai-get-dom-summary") == 0) {
           if (cb) {
-            const char* dom_collector = 
-              "(function() {"
-              "  try {"
-              "    function getMeta(doc, prop) {"
-              "      if (!doc) return '';"
-              "      const el = doc.querySelector('meta[property=\"' + prop + '\"], meta[name=\"' + prop + '\"], meta[itemprop=\"' + prop + '\"]');"
-              "      return el ? (el.getAttribute('content') || '').trim() : '';"
-              "    }"
-              "    function isVisible(el, win) {"
-              "      if (!el || el.nodeType !== 1) return true;"
-              "      try {"
-              "        const s = (win || window).getComputedStyle(el);"
-              "        if (s.display === 'none' || s.visibility === 'hidden' || parseFloat(s.opacity || '1') < 0.05) return false;"
-              "        const r = el.getBoundingClientRect();"
-              "        if (r.width === 0 && r.height === 0 && el.children.length === 0) return false;"
-              "        return true;"
-              "      } catch(e) { return true; }"
-              "    }"
-              "    function findBestDoc() {"
-              "      const candidates = [];"
-              "      function evalDoc(d, w, isIframe) {"
-              "        if (!d) return;"
-              "        try {"
-              "          let score = 0;"
-              "          const textLen = (d.body ? (d.body.innerText || '').trim().length : 0);"
-              "          score += Math.min(textLen, 5000);"
-              "          const selList = ["
-              "            '.se-main-container', '.se_component_wrap', '#postViewArea', '.post-view',"
-              "            '#dic_area', '#articleBody', '.article_view', '.news_body',"
-              "            '.entry-content', '.post-content', '.article-body', '.article_body',"
-              "            'article', 'main', '[role=\"main\"]', '#content', '.content-body', '#article'"
-              "          ];"
-              "          for (let s of selList) {"
-              "            const el = d.querySelector(s);"
-              "            if (el && el.innerText && el.innerText.trim().length > 100) {"
-              "              score += 3000;"
-              "              break;"
-              "            }"
-              "          }"
-              "          if (isIframe && textLen > 200) score += 2000;"
-              "          candidates.push({ doc: d, win: w, score: score });"
-              "          const ifrs = d.querySelectorAll('iframe, frame');"
-              "          for (let i = 0; i < ifrs.length; i++) {"
-              "            try {"
-              "              const idoc = ifrs[i].contentDocument || (ifrs[i].contentWindow && ifrs[i].contentWindow.document);"
-              "              const iwin = ifrs[i].contentWindow;"
-              "              if (idoc) evalDoc(idoc, iwin, true);"
-              "            } catch(e) {}"
-              "          }"
-              "        } catch(e) {}"
-              "      }"
-              "      evalDoc(document, window, false);"
-              "      candidates.sort((a, b) => b.score - a.score);"
-              "      return candidates.length > 0 ? candidates[0] : { doc: document, win: window };"
-              "    }"
-              "    if (window.location.hostname.includes('youtube.com') && window.location.pathname.includes('/watch')) {"
-              "      const ytTitle = (document.querySelector('h1.ytd-watch-metadata yt-formatted-string, #title h1, h1.title')?.innerText || document.title || '').trim();"
-              "      const ytAuthor = (document.querySelector('#channel-name, ytd-channel-name, #owner')?.innerText || '').trim();"
-              "      const ytDesc = (document.querySelector('#description-inline-expander, #description, ytd-text-inline-expander')?.innerText || '').trim();"
-              "      const ytComments = Array.from(document.querySelectorAll('ytd-comment-thread-renderer, ytd-comment-view-model'));"
-              "      let commentsList = [];"
-              "      ytComments.slice(0, 50).forEach(c => {"
-              "        const a = (c.querySelector('#author-text, #header-author, .ytd-comment-view-model #author-text')?.innerText || '').trim().replace(/^@/, '');"
-              "        const t = (c.querySelector('#content-text, yt-attributed-string#content-text, .yt-core-attributed-string')?.innerText || '').trim();"
-              "        const l = (c.querySelector('#vote-count-middle, .ytd-comment-action-buttons-renderer span.yt-core-attributed-string')?.innerText || '').trim();"
-              "        if (t) {"
-              "          commentsList.push('- **' + (a || '시청자') + '**' + (l ? ' [좋아요 ' + l + ']' : '') + ': ' + t);"
-              "        }"
-              "      });"
-              "      let ytMd = '# 🎬 ' + ytTitle + '\\n\\n';"
-              "      if (ytAuthor) ytMd += '- **채널**: ' + ytAuthor + '\\n';"
-              "      ytMd += '- **URL**: ' + window.location.href + '\\n\\n';"
-              "      if (ytDesc) ytMd += '### 📝 동영상 상세 설명\\n' + ytDesc.slice(0, 2000) + '\\n\\n';"
-              "      if (commentsList.length > 0) {"
-              "        ytMd += '### 💬 시청자 댓글 목록 (' + commentsList.length + '개 로딩됨)\\n' + commentsList.join('\\n\\n') + '\\n\\n';"
-              "      } else {"
-              "        const cnt = (document.querySelector('ytd-comments-header-renderer #count, yt-formatted-string.count-text')?.innerText || '').trim();"
-              "        if (cnt) ytMd += '### 💬 시청자 댓글\\n' + cnt + ' (댓글 영역을 보려면 스크롤을 아래로 조금 더 내려주세요)\\n\\n';"
-              "      }"
-              "      const ytData = {"
-              "        title: ytTitle,"
-              "        url: window.location.href,"
-              "        author: ytAuthor,"
-              "        bodySnippet: ytMd,"
-              "        markdown: ytMd,"
-              "        buttons: [],"
-              "        inputs: []"
-              "      };"
-              "      const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(ytData))));"
-              "      window.location.href = 'http://ui-action/ai-dom-result?data=' + encodeURIComponent(b64);"
-              "      return;"
-              "    }"
-              "    const best = findBestDoc();"
-              "    const tDoc = best.doc || document;"
-              "    const tWin = best.win || window;"
-              "    const selList = ["
-              "      '.se-main-container', '#postViewArea', '.se_component_wrap',"
-              "      '#dic_area', '#articleBody', '.article_view', '.news_body',"
-              "      '.entry-content', '.post-content', '.article-body', '.article_body',"
-              "      'article', 'main', '[role=\"main\"]', '#content'"
-              "    ];"
-              "    let articleEl = null;"
-              "    for (let s of selList) {"
-              "      const el = tDoc.querySelector(s);"
-              "      if (el && el.innerText && el.innerText.trim().length > 100) {"
-              "        articleEl = el;"
-              "        break;"
-              "      }"
-              "    }"
-              "    if (!articleEl) {"
-              "      const nodes = Array.from(tDoc.querySelectorAll('div, section, article, main'));"
-              "      let maxScore = -1;"
-              "      articleEl = tDoc.body || tDoc.documentElement;"
-              "      const vH = tWin.innerHeight || 800;"
-              "      const vW = tWin.innerWidth || 1200;"
-              "      for (let n of nodes) {"
-              "        if (!isVisible(n, tWin)) continue;"
-              "        const txt = (n.innerText || '').trim();"
-              "        if (txt.length < 50) continue;"
-              "        let sc = txt.length / 20.0 + (txt.match(/,/g) || []).length * 2;"
-              "        const links = n.querySelectorAll('a');"
-              "        let lLen = 0;"
-              "        links.forEach(a => lLen += (a.innerText || '').trim().length);"
-              "        if (txt.length > 0 && (lLen / txt.length) > 0.5) sc *= 0.5;"
-              "        try {"
-              "          const r = n.getBoundingClientRect();"
-              "          if (r.top >= 0 && r.top <= vH * 1.5 && r.width >= vW * 0.3) sc *= 1.3;"
-              "        } catch(e) {}"
-              "        sc += n.querySelectorAll('p').length * 5;"
-              "        if (sc > maxScore) {"
-              "          maxScore = sc;"
-              "          articleEl = n;"
-              "        }"
-              "      }"
-              "    }"
-              "    const clone = articleEl.cloneNode(true);"
-              "    const dropTags = ['script', 'style', 'noscript', 'template', 'svg', 'canvas', 'iframe', 'frame', 'nav', 'header', 'footer', 'aside', 'form', 'select', 'dialog', 'menu'];"
-              "    dropTags.forEach(t => clone.querySelectorAll(t).forEach(e => e.remove()));"
-              "    const dropClasses = ['.ad', '.ads', '.banner', '.sponsor', '.social-share', '.sns-share', '.share-box', '.pagination', '.paging', '.sidebar', '.widget', '.popup', '.modal', '.footer', '.header-nav'];"
-              "    dropClasses.forEach(c => {"
-              "      try {"
-              "        clone.querySelectorAll(c).forEach(e => {"
-              "          if (!e.matches('article, main, .se-main-container, #postViewArea, #dic_area, .entry-content, .article-body')) e.remove();"
-              "        });"
-              "      } catch(e) {}"
-              "    });"
-              "    function toMd(node) {"
-              "      if (!node) return '';"
-              "      let md = '';"
-              "      function walk(el) {"
-              "        if (!el) return;"
-              "        if (el.nodeType === 3) {"
-              "          md += el.textContent.replace(/\\s+/g, ' ');"
-              "          return;"
-              "        }"
-              "        if (el.nodeType !== 1) return;"
-              "        const tag = el.tagName.toLowerCase();"
-              "        if (/^h[1-6]$/.test(tag)) {"
-              "          const lvl = parseInt(tag[1], 10);"
-              "          const t = (el.innerText || el.textContent || '').trim();"
-              "          if (t) md += '\\n\\n' + '#'.repeat(lvl) + ' ' + t + '\\n\\n';"
-              "          return;"
-              "        }"
-              "        if (tag === 'p') {"
-              "          const t = (el.innerText || el.textContent || '').trim();"
-              "          if (t) {"
-              "            md += '\\n\\n';"
-              "            for (let c of el.childNodes) walk(c);"
-              "            md += '\\n\\n';"
-              "          }"
-              "          return;"
-              "        }"
-              "        if (tag === 'blockquote') {"
-              "          const t = (el.innerText || el.textContent || '').trim();"
-              "          if (t) md += '\\n\\n> ' + t.replace(/\\n+/g, '\\n> ') + '\\n\\n';"
-              "          return;"
-              "        }"
-              "        if (tag === 'ul' || tag === 'ol') {"
-              "          md += '\\n\\n';"
-              "          let i = 1;"
-              "          for (let c of el.children) {"
-              "            if (c.tagName && c.tagName.toLowerCase() === 'li') {"
-              "              const it = (c.innerText || c.textContent || '').trim();"
-              "              if (it) md += (tag === 'ol' ? (i++ + '. ') : '- ') + it + '\\n';"
-              "            }"
-              "          }"
-              "          md += '\\n';"
-              "          return;"
-              "        }"
-              "        if (tag === 'table') {"
-              "          md += '\\n\\n';"
-              "          const trs = el.querySelectorAll('tr');"
-              "          trs.forEach((tr, rIdx) => {"
-              "            const tds = tr.querySelectorAll('th, td');"
-              "            if (!tds.length) return;"
-              "            md += '| ' + Array.from(tds).map(c => (c.innerText || '').trim().replace(/\\|/g, '\\\\|')).join(' | ') + ' |\\n';"
-              "            if (rIdx === 0) md += '| ' + Array.from(tds).map(() => '---').join(' | ') + ' |\\n';"
-              "          });"
-              "          md += '\\n';"
-              "          return;"
-              "        }"
-              "        if (tag === 'pre' || tag === 'code') {"
-              "          const ct = (el.innerText || el.textContent || '').trim();"
-              "          if (ct) md += '\\n\\n```\\n' + ct + '\\n```\\n\\n';"
-              "          return;"
-              "        }"
-              "        if (tag === 'br') { md += '\\n'; return; }"
-              "        if (tag === 'hr') { md += '\\n\\n---\\n\\n'; return; }"
-              "        if (tag === 'strong' || tag === 'b') {"
-              "          const bt = (el.innerText || el.textContent || '').trim();"
-              "          if (bt) md += ' **' + bt + '** ';"
-              "          return;"
-              "        }"
-              "        for (let c of el.childNodes) walk(c);"
-              "        if (['div', 'section', 'article'].includes(tag)) md += '\\n';"
-              "      }"
-              "      walk(node);"
-              "      return md.replace(/[ \\t]+/g, ' ').replace(/\\n{3,}/g, '\\n\\n').trim();"
-              "    }"
-              "    let markdownBody = toMd(clone);"
-              "    if (!markdownBody || markdownBody.length < 50) {"
-              "      markdownBody = (clone.innerText || (tDoc.body ? tDoc.body.innerText : '') || '').trim();"
-              "    }"
-              "    if (markdownBody.length > 8000) {"
-              "      markdownBody = markdownBody.slice(0, 8000) + '\\n\\n...(이하 생략)';"
-              "    }"
-              "    const title = getMeta(tDoc, 'og:title') || getMeta(document, 'og:title') || tDoc.title || document.title || '';"
-              "    const author = getMeta(tDoc, 'author') || getMeta(tDoc, 'article:author') || getMeta(document, 'author') || '';"
-              "    const publishedTime = getMeta(tDoc, 'article:published_time') || getMeta(document, 'article:published_time') || '';"
-              "    const image = getMeta(tDoc, 'og:image') || getMeta(document, 'og:image') || '';"
-              "    const buttons = Array.from(tDoc.querySelectorAll('button, a, input[type=\"submit\"], [role=\"button\"]'))"
-              "      .filter(el => isVisible(el, tWin))"
-              "      .slice(0, 30)"
-              "      .map(el => ({"
-              "        tag: el.tagName.toLowerCase(),"
-              "        text: (el.innerText || el.value || '').trim().slice(0, 50),"
-              "        id: el.id || '',"
-              "        selector: el.id ? ('#' + el.id) : (el.className ? ('.' + el.className.trim().split(/\\s+/)[0]) : el.tagName.toLowerCase())"
-              "      }))"
-              "      .filter(x => x.text.length > 0);"
-              "    const inputs = Array.from(tDoc.querySelectorAll('input:not([type=\"hidden\"]), textarea, select'))"
-              "      .filter(el => isVisible(el, tWin))"
-              "      .slice(0, 20)"
-              "      .map(el => ({"
-              "        tag: el.tagName.toLowerCase(),"
-              "        type: el.type || '',"
-              "        name: el.name || '',"
-              "        placeholder: el.placeholder || '',"
-              "        selector: el.id ? ('#' + el.id) : (el.name ? ('[name=\"' + el.name + '\"]') : (el.type ? ('input[type=\"' + el.type + '\"]') : el.tagName.toLowerCase()))"
-              "      }));"
-              "    const data = {"
-              "      title: title,"
-              "      url: window.location.href,"
-              "      author: author,"
-              "      publishedTime: publishedTime,"
-              "      image: image,"
-              "      bodySnippet: markdownBody,"
-              "      markdown: markdownBody,"
-              "      buttons: buttons,"
-              "      inputs: inputs"
-              "    };"
-              "    const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(data))));"
-              "    window.location.href = 'http://ui-action/ai-dom-result?data=' + encodeURIComponent(b64);"
-              "  } catch(e) { console.error(e); }"
-              "})();";
-            cef_frame_t* f = cb->get_main_frame(cb);
-            if (f) {
-              cef_string_t js_str = {};
-              cef_string_from_utf8(dom_collector, strlen(dom_collector), &js_str);
-              f->execute_java_script(f, &js_str, NULL, 0);
-              cef_string_clear(&js_str);
-              f->base.release(&f->base);
+            InjectContentExtractorScript(cb, "ContentExtractor.runDomSummary();");
+          } else {
+            cef_browser_t* target_b = win_ctx ? win_ctx->sidepanel_browser : NULL;
+            if (target_b) {
+              const char* no_cb_js = "if (window.onAgentDomExtracted) { window.onAgentDomExtracted({ title: '현재 페이지', url: '', bodySnippet: '활성화된 웹페이지가 없습니다.', markdown: '활성화된 웹페이지가 없습니다.', buttons: [], inputs: [] }); }";
+              ExecuteJsOnBrowser(target_b, no_cb_js);
             }
           }
         } else if (strncmp(action, "ai-dom-result?", 14) == 0) {
@@ -2423,28 +2349,110 @@ int CEF_CALLBACK request_handler_on_before_browse(
             }
             size_t decoded_len = 0;
             unsigned char* decoded = base64_decode(data_b64, &decoded_len);
+            cef_browser_t* target_b = win_ctx ? win_ctx->sidepanel_browser : NULL;
+            if (!target_b && win_ctx && win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+              tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
+              target_b = (active_tab->is_split && active_tab->right_browser) ? active_tab->right_browser : active_tab->browser;
+            }
             if (decoded) {
-              cef_browser_t* target_b = win_ctx->sidepanel_browser;
-              if (!target_b && win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
-                tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
-                target_b = (active_tab->is_split && active_tab->right_browser) ? active_tab->right_browser : active_tab->browser;
-              }
               if (target_b) {
                 char* js_code = (char*)malloc(decoded_len + 128);
                 if (js_code) {
                   snprintf(js_code, decoded_len + 128, "if (window.onAgentDomExtracted) { window.onAgentDomExtracted(%s); }", (char*)decoded);
-                  cef_frame_t* rf = target_b->get_main_frame(target_b);
-                  if (rf) {
-                    cef_string_t js_str = {};
-                    cef_string_from_utf8(js_code, strlen(js_code), &js_str);
-                    rf->execute_java_script(rf, &js_str, NULL, 0);
-                    cef_string_clear(&js_str);
-                    rf->base.release(&rf->base);
-                  }
+                  ExecuteJsOnBrowser(target_b, js_code);
                   free(js_code);
                 }
               }
               free(decoded);
+            } else if (target_b) {
+              ExecuteJsOnBrowser(target_b, "if (window.onAgentDomExtracted) { window.onAgentDomExtracted({ title: '현재 페이지', url: '', bodySnippet: '본문 디코딩에 실패했습니다.', markdown: '본문 디코딩에 실패했습니다.', buttons: [], inputs: [] }); }");
+            }
+            free(data_b64);
+          }
+        } else if (strcmp(action, "ai-capture-viewport") == 0) {
+          cef_browser_t* target_b = win_ctx ? win_ctx->sidepanel_browser : NULL;
+          if (!target_b && win_ctx && win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+            tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
+            target_b = (active_tab->is_split && active_tab->right_browser) ? active_tab->right_browser : active_tab->browser;
+          }
+
+#if defined(OS_WIN)
+          if (win_ctx && win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+            tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
+            HWND tab_hwnd = (active_tab->is_split && active_tab->active_split == 1 && active_tab->right_hwnd)
+                            ? active_tab->right_hwnd : active_tab->hwnd;
+            int cap_w = 0, cap_h = 0;
+            char* b64_img = CaptureHwndToJpegBase64(tab_hwnd, &cap_w, &cap_h);
+            if (b64_img) {
+              if (target_b) {
+                size_t b64_len = strlen(b64_img);
+                size_t js_alloc = b64_len + 256;
+                char* js_code = (char*)malloc(js_alloc);
+                if (js_code) {
+                  snprintf(js_code, js_alloc,
+                           "if (window.onAgentViewportCaptured) { window.onAgentViewportCaptured({ status: 'success', data: 'data:image/jpeg;base64,%s', width: %d, height: %d }); }",
+                           b64_img, cap_w, cap_h);
+                  ExecuteJsOnBrowser(target_b, js_code);
+                  free(js_code);
+                }
+              }
+              free(b64_img);
+            } else if (target_b) {
+              ExecuteJsOnBrowser(target_b, "if (window.onAgentViewportCaptured) { window.onAgentViewportCaptured({ status: 'error', message: '뷰포트 화면 캡처에 실패했습니다.' }); }");
+            }
+          } else if (target_b) {
+            ExecuteJsOnBrowser(target_b, "if (window.onAgentViewportCaptured) { window.onAgentViewportCaptured({ status: 'error', message: '활성화된 웹페이지 탭이 없습니다.' }); }");
+          }
+#else
+          if (target_b) {
+            ExecuteJsOnBrowser(target_b, "if (window.onAgentViewportCaptured) { window.onAgentViewportCaptured({ status: 'error', message: '현재 플랫폼에서는 뷰포트 캡처를 지원하지 않습니다.' }); }");
+          }
+#endif
+        } else if (strncmp(action, "ai-get-youtube-comments?", 24) == 0 || strcmp(action, "ai-get-youtube-comments") == 0) {
+          const char* query = (strncmp(action, "ai-get-youtube-comments?", 24) == 0) ? (action + 24) : "";
+          char* limit_str = get_query_param(query, "limit");
+          int limit = limit_str ? atoi(limit_str) : 30;
+          if (limit <= 0) limit = 30;
+          if (limit > 50) limit = 50;
+          if (limit_str) free(limit_str);
+
+          if (cb) {
+            char runner[128];
+            snprintf(runner, sizeof(runner), "ContentExtractor.runYouTubeComments(%d);", limit);
+            InjectContentExtractorScript(cb, runner);
+          } else {
+            cef_browser_t* target_b = win_ctx ? win_ctx->sidepanel_browser : NULL;
+            if (target_b) {
+              const char* no_cb_js = "if (window.onAgentYoutubeCommentsReceived) { window.onAgentYoutubeCommentsReceived({ count: 0, comments: [], message: '활성화된 웹페이지가 없습니다.' }); }";
+              ExecuteJsOnBrowser(target_b, no_cb_js);
+            }
+          }
+        } else if (strncmp(action, "ai-youtube-comments-result?", 27) == 0) {
+          const char* query = action + 27;
+          char* data_b64 = get_query_param(query, "data");
+          if (data_b64) {
+            for (char* p = data_b64; *p; p++) {
+              if (*p == ' ') *p = '+';
+            }
+            size_t decoded_len = 0;
+            unsigned char* decoded = base64_decode(data_b64, &decoded_len);
+            cef_browser_t* target_b = win_ctx ? win_ctx->sidepanel_browser : NULL;
+            if (!target_b && win_ctx && win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+              tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
+              target_b = (active_tab->is_split && active_tab->right_browser) ? active_tab->right_browser : active_tab->browser;
+            }
+            if (decoded) {
+              if (target_b) {
+                char* js_code = (char*)malloc(decoded_len + 128);
+                if (js_code) {
+                  snprintf(js_code, decoded_len + 128, "if (window.onAgentYoutubeCommentsReceived) { window.onAgentYoutubeCommentsReceived(%s); }", (char*)decoded);
+                  ExecuteJsOnBrowser(target_b, js_code);
+                  free(js_code);
+                }
+              }
+              free(decoded);
+            } else if (target_b) {
+              ExecuteJsOnBrowser(target_b, "if (window.onAgentYoutubeCommentsReceived) { window.onAgentYoutubeCommentsReceived({ count: 0, comments: [], message: '댓글 데이터 디코딩에 실패했습니다.' }); }");
             }
             free(data_b64);
           }
@@ -2976,50 +2984,9 @@ int CEF_CALLBACK request_handler_on_before_browse(
             cef_browser_t* target_b = (cur_tab->is_split && cur_tab->active_split == 1 && cur_tab->right_browser)
                                       ? cur_tab->right_browser : cur_tab->browser;
             if (target_b) {
-              const char* script_fmt =
-                "(function() {"
-                "  try {"
-                "    function getMeta(prop) {"
-                "      const el = document.querySelector('meta[property=\"' + prop + '\"], meta[name=\"' + prop + '\"], meta[itemprop=\"' + prop + '\"]');"
-                "      return el ? (el.getAttribute('content') || '').trim() : '';"
-                "    }"
-                "    const selList = ['article', 'main', '[role=\"main\"]', '#content', '.content-body', '#article', '.se-main-container', '#dic_area', '#articleBody', '.article_view', '.news_body', '.entry-content', '.post-content', '.article-body'];"
-                "    let articleEl = null;"
-                "    for (let s of selList) {"
-                "      const el = document.querySelector(s);"
-                "      if (el && el.innerText && el.innerText.trim().length > 100) { articleEl = el; break; }"
-                "    }"
-                "    if (!articleEl) articleEl = document.body || document.documentElement;"
-                "    let text = (articleEl ? articleEl.innerText : document.title) || '';"
-                "    if (text.length > 5000) text = text.slice(0, 5000) + '...';"
-                "    const data = {"
-                "      tab_id: %d,"
-                "      title: document.title || '',"
-                "      url: window.location.href,"
-                "      description: getMeta('og:description') || getMeta('description'),"
-                "      bodySnippet: text,"
-                "      markdown: text"
-                "    };"
-                "    const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(data))));"
-                "    window.location.href = 'http://ui-action/ai-tab-dom-result?tab_id=%d&data=' + encodeURIComponent(b64);"
-                "  } catch(e) {"
-                "    window.location.href = 'http://ui-action/ai-tab-dom-result?tab_id=%d&data=';"
-                "  }"
-                "})();";
-
-              char* script = (char*)malloc(4096);
-              if (script) {
-                snprintf(script, 4096, script_fmt, target_id, target_id, target_id);
-                cef_frame_t* f = target_b->get_main_frame(target_b);
-                if (f) {
-                  cef_string_t js_str = {};
-                  cef_string_from_utf8(script, strlen(script), &js_str);
-                  f->execute_java_script(f, &js_str, NULL, 0);
-                  cef_string_clear(&js_str);
-                  f->base.release(&f->base);
-                }
-                free(script);
-              }
+              char runner[128];
+              snprintf(runner, sizeof(runner), "ContentExtractor.runTabDom(%d);", target_id);
+              InjectContentExtractorScript(target_b, runner);
             } else {
               cef_frame_t* rf = NULL;
               if (win_ctx->sidepanel_browser) {
@@ -3067,52 +3034,28 @@ int CEF_CALLBACK request_handler_on_before_browse(
             }
             size_t decoded_len = 0;
             unsigned char* decoded = base64_decode(data_b64, &decoded_len);
+            cef_browser_t* target_b = win_ctx ? win_ctx->sidepanel_browser : NULL;
             if (decoded) {
-              cef_browser_t* target_b = win_ctx ? win_ctx->sidepanel_browser : NULL;
               if (target_b) {
                 char* js_code = (char*)malloc(decoded_len + 128);
                 if (js_code) {
                   snprintf(js_code, decoded_len + 128, "if (window.onAgentTabDomExtracted) { window.onAgentTabDomExtracted(%d, %s); }", res_tab_id, (char*)decoded);
-                  cef_frame_t* rf = target_b->get_main_frame(target_b);
-                  if (rf) {
-                    cef_string_t js_str = {};
-                    cef_string_from_utf8(js_code, strlen(js_code), &js_str);
-                    rf->execute_java_script(rf, &js_str, NULL, 0);
-                    cef_string_clear(&js_str);
-                    rf->base.release(&rf->base);
-                  }
+                  ExecuteJsOnBrowser(target_b, js_code);
                   free(js_code);
                 }
               }
               free(decoded);
-            } else {
-              cef_browser_t* target_b = win_ctx ? win_ctx->sidepanel_browser : NULL;
-              if (target_b) {
-                char js_code[128];
-                snprintf(js_code, sizeof(js_code), "if (window.onAgentTabDomExtracted) { window.onAgentTabDomExtracted(%d, null); }", res_tab_id);
-                cef_frame_t* rf = target_b->get_main_frame(target_b);
-                if (rf) {
-                  cef_string_t js_str = {};
-                  cef_string_from_utf8(js_code, strlen(js_code), &js_str);
-                  rf->execute_java_script(rf, &js_str, NULL, 0);
-                  cef_string_clear(&js_str);
-                  rf->base.release(&rf->base);
-                }
-              }
+            } else if (target_b) {
+              char js_code[128];
+              snprintf(js_code, sizeof(js_code), "if (window.onAgentTabDomExtracted) { window.onAgentTabDomExtracted(%d, null); }", res_tab_id);
+              ExecuteJsOnBrowser(target_b, js_code);
             }
           } else {
             cef_browser_t* target_b = win_ctx ? win_ctx->sidepanel_browser : NULL;
             if (target_b) {
               char js_code[128];
               snprintf(js_code, sizeof(js_code), "if (window.onAgentTabDomExtracted) { window.onAgentTabDomExtracted(%d, null); }", res_tab_id);
-              cef_frame_t* rf = target_b->get_main_frame(target_b);
-              if (rf) {
-                cef_string_t js_str = {};
-                cef_string_from_utf8(js_code, strlen(js_code), &js_str);
-                rf->execute_java_script(rf, &js_str, NULL, 0);
-                cef_string_clear(&js_str);
-                rf->base.release(&rf->base);
-              }
+              ExecuteJsOnBrowser(target_b, js_code);
             }
           }
           if (tab_id_str) free(tab_id_str);

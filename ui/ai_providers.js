@@ -217,17 +217,37 @@ class GeminiProvider extends AIProviderInterface {
           } catch (e) {
             parsedResponse = { content: msg.content };
           }
+          const hasScreenshot = parsedResponse && parsedResponse.screenshot && typeof parsedResponse.screenshot === 'string';
+          const screenshotData = hasScreenshot ? parsedResponse.screenshot : null;
+          let textResponse = parsedResponse;
+          if (hasScreenshot) {
+            textResponse = Object.assign({}, parsedResponse, { screenshot: '[Attached Viewport Screenshot]' });
+          }
+          const toolParts = [{
+            functionResponse: {
+              name: msg.name || 'tool_response',
+              response: {
+                name: msg.name || 'tool_response',
+                content: textResponse
+              }
+            }
+          }];
+          if (screenshotData) {
+            const base64Raw = screenshotData.replace(/^data:image\/[a-zA-Z]+;base64,/, '');
+            const mimeMatch = screenshotData.match(/^data:(image\/[a-zA-Z]+);base64,/);
+            const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+            if (base64Raw) {
+              toolParts.push({
+                inlineData: {
+                  mimeType: mimeType,
+                  data: base64Raw
+                }
+              });
+            }
+          }
           contents.push({
             role: 'user',
-            parts: [{
-              functionResponse: {
-                name: msg.name || 'tool_response',
-                response: {
-                  name: msg.name || 'tool_response',
-                  content: parsedResponse
-                }
-              }
-            }]
+            parts: toolParts
           });
           continue;
         }
@@ -269,6 +289,20 @@ class GeminiProvider extends AIProviderInterface {
 
         if (msg.role === 'user') {
           const parts = [];
+          const img = msg.image || msg.screenshot;
+          if (img && typeof img === 'string') {
+            const base64Raw = img.replace(/^data:image\/[a-zA-Z]+;base64,/, '');
+            const mimeMatch = img.match(/^data:(image\/[a-zA-Z]+);base64,/);
+            const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+            if (base64Raw) {
+              parts.push({
+                inlineData: {
+                  mimeType: mimeType,
+                  data: base64Raw
+                }
+              });
+            }
+          }
           if (msg.content) {
             parts.push({ text: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content) });
           }
@@ -443,7 +477,19 @@ class OpenAIProvider extends AIProviderInterface {
               }
             }
           } else if (msg.role === 'user') {
-            inputItems.push({ role: 'user', content: msg.content });
+            const img = msg.image || msg.screenshot;
+            if (img && typeof img === 'string') {
+              const imageUrl = img.startsWith('data:') ? img : `data:image/jpeg;base64,${img}`;
+              inputItems.push({
+                role: 'user',
+                content: [
+                  ...(msg.content ? [{ type: 'input_text', text: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content) }] : []),
+                  { type: 'input_image', image_url: imageUrl }
+                ]
+              });
+            } else {
+              inputItems.push({ role: 'user', content: msg.content });
+            }
           }
         }
 
@@ -474,12 +520,31 @@ class OpenAIProvider extends AIProviderInterface {
 
         for (const msg of messages) {
           if (msg.role === 'tool') {
+            let parsed = null;
+            try { parsed = typeof msg.content === 'string' ? JSON.parse(msg.content) : msg.content; } catch(e) {}
+            let toolContentStr = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+            if (parsed && parsed.screenshot && typeof parsed.screenshot === 'string') {
+              try {
+                const textOnly = Object.assign({}, parsed, { screenshot: '[Attached Viewport Screenshot]' });
+                toolContentStr = JSON.stringify(textOnly);
+              } catch(e) {}
+            }
             fullMessages.push({
               role: 'tool',
               tool_call_id: msg.tool_call_id || msg.id || ('call_' + (msg.name || 'tool')),
               name: msg.name,
-              content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)
+              content: toolContentStr
             });
+            if (parsed && parsed.screenshot && typeof parsed.screenshot === 'string') {
+              const imageUrl = parsed.screenshot.startsWith('data:') ? parsed.screenshot : `data:image/jpeg;base64,${parsed.screenshot}`;
+              fullMessages.push({
+                role: 'user',
+                content: [
+                  { type: 'text', text: `[도구 ${msg.name || 'screenshot'} 실행 결과 캡처된 뷰포트 화면]` },
+                  { type: 'image_url', image_url: { url: imageUrl, detail: 'auto' } }
+                ]
+              });
+            }
           } else if (msg.role === 'assistant') {
             const m = { role: 'assistant', content: msg.content || null };
             if (msg.tool_calls && msg.tool_calls.length > 0) {
@@ -487,7 +552,23 @@ class OpenAIProvider extends AIProviderInterface {
             }
             fullMessages.push(m);
           } else if (msg.role === 'user') {
-            fullMessages.push({ role: 'user', content: msg.content });
+            const img = msg.image || msg.screenshot;
+            if (img && typeof img === 'string') {
+              const imageUrl = img.startsWith('data:') ? img : `data:image/jpeg;base64,${img}`;
+              const userContent = [];
+              if (msg.content) {
+                userContent.push({ type: 'text', text: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content) });
+              }
+              userContent.push({
+                type: 'image_url',
+                image_url: { url: imageUrl, detail: 'auto' }
+              });
+              fullMessages.push({ role: 'user', content: userContent });
+            } else if (Array.isArray(msg.content)) {
+              fullMessages.push({ role: 'user', content: msg.content });
+            } else {
+              fullMessages.push({ role: 'user', content: msg.content });
+            }
           }
         }
 
@@ -733,14 +814,45 @@ class AnthropicProvider extends AIProviderInterface {
       for (const msg of messages) {
         if (msg.role === 'system') continue;
         if (msg.role === 'tool') {
-          formattedMessages.push({
-            role: 'user',
-            content: [{
-              type: 'tool_result',
-              tool_use_id: msg.tool_call_id || msg.id || 'tool_call_1',
-              content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)
-            }]
-          });
+          let parsed = null;
+          try { parsed = typeof msg.content === 'string' ? JSON.parse(msg.content) : msg.content; } catch(e) {}
+          if (parsed && parsed.screenshot && typeof parsed.screenshot === 'string') {
+            const base64Raw = parsed.screenshot.replace(/^data:image\/[a-zA-Z]+;base64,/, '');
+            const mimeMatch = parsed.screenshot.match(/^data:(image\/[a-zA-Z]+);base64,/);
+            const mediaType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+            let textContentStr = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+            try {
+              const textOnly = Object.assign({}, parsed, { screenshot: '[Attached Viewport Screenshot]' });
+              textContentStr = JSON.stringify(textOnly);
+            } catch(e) {}
+            formattedMessages.push({
+              role: 'user',
+              content: [{
+                type: 'tool_result',
+                tool_use_id: msg.tool_call_id || msg.id || 'tool_call_1',
+                content: [
+                  { type: 'text', text: textContentStr },
+                  {
+                    type: 'image',
+                    source: {
+                      type: 'base64',
+                      media_type: mediaType,
+                      data: base64Raw
+                    }
+                  }
+                ]
+              }]
+            });
+          } else {
+            formattedMessages.push({
+              role: 'user',
+              content: [{
+                type: 'tool_result',
+                tool_use_id: msg.tool_call_id || msg.id || 'tool_call_1',
+                content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)
+              }]
+            });
+          }
         } else if (msg.role === 'assistant') {
           const contents = [];
           if (msg.content) contents.push({ type: 'text', text: msg.content });
@@ -763,7 +875,31 @@ class AnthropicProvider extends AIProviderInterface {
           }
           formattedMessages.push({ role: 'assistant', content: contents.length > 0 ? contents : [{ type: 'text', text: ' ' }] });
         } else {
-          formattedMessages.push({ role: 'user', content: msg.content });
+          const img = msg.image || msg.screenshot;
+          if (img && typeof img === 'string') {
+            const base64Raw = img.replace(/^data:image\/[a-zA-Z]+;base64,/, '');
+            const mimeMatch = img.match(/^data:(image\/[a-zA-Z]+);base64,/);
+            const mediaType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+            const contents = [
+              {
+                type: 'image',
+                source: {
+                  type: 'base64',
+                  media_type: mediaType,
+                  data: base64Raw
+                }
+              }
+            ];
+            if (msg.content) {
+              contents.push({
+                type: 'text',
+                text: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)
+              });
+            }
+            formattedMessages.push({ role: 'user', content: contents });
+          } else {
+            formattedMessages.push({ role: 'user', content: msg.content });
+          }
         }
       }
 
@@ -1136,9 +1272,22 @@ class AIProviderFactory {
   }
 }
 
-window.AIProviderInterface = AIProviderInterface;
-window.AIProviderFactory = AIProviderFactory;
-window.GeminiProvider = GeminiProvider;
-window.OpenAIProvider = OpenAIProvider;
-window.AnthropicProvider = AnthropicProvider;
-window.OllamaProvider = OllamaProvider;
+if (typeof window !== 'undefined') {
+  window.AIProviderInterface = AIProviderInterface;
+  window.AIProviderFactory = AIProviderFactory;
+  window.GeminiProvider = GeminiProvider;
+  window.OpenAIProvider = OpenAIProvider;
+  window.AnthropicProvider = AnthropicProvider;
+  window.OllamaProvider = OllamaProvider;
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    AIProviderInterface,
+    AIProviderFactory,
+    GeminiProvider,
+    OpenAIProvider,
+    AnthropicProvider,
+    OllamaProvider
+  };
+}

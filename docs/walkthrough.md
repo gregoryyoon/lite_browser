@@ -2945,5 +2945,98 @@ CEF 환경에는 Google 독점 API 키 및 라이선스 제약으로 인해 Chro
   - 번역 도구 카드의 `[원문 복원]` 및 `[번역문 다시 적용]` 버튼 클릭 시 실시간 양방향 전환 및 버튼 활성 상태 동기화 확인.
   - 새 탭 열기, 탭 목록 조회, 탭 정렬, 본문 분석 등 모든 도구 실행 시 도구 카드가 즉시 렌더링되고 단계별 진행 상태가 실시간 갱신된 후 완료 상태로 전환됨을 최종 확인.
 
+---
 
+## 78. Chrome Gemini 스타일 웹 본문 추출/요약 파이프라인 현대화 및 비전 하이브리드 고도화 (Modern 5-Stage Content Extraction Pipeline & Vision Hybrid Fallback)
 
+### 78.1 개요
+현대 웹 브라우저 AI 환경(Chrome Gemini, Edge Copilot, Arc 등)의 핵심 경쟁력은 복잡하고 노이즈가 많은 웹페이지에서 기사 본문, 기술 문서, 대시보드 차트, 동영상 대본 등 핵심 콘텐츠를 얼마나 정밀하고 신속하게 정제하여 멀티모달 모델에 공급하는가에 있습니다.
+Lite Browser는 기존 C 코드에 하드코딩되어 있던 파편화된 DOM 추출 스크립트를 전면 개편하여, **단일 진실 공급원(SSOT) 자바스크립트 모듈 + C 런타임 mtime 메모리 캐시 & 핫 리로딩 + 5단계 지능형 정제 파이프라인 + YouTube 3-Tier 다중 추출 + Win32 GDI+ 비전(Vision) 하이브리드 폴백**으로 구성된 최신 콘텐츠 추출 아키텍처를 완성했습니다.
+
+---
+
+### 78.2 5단계 로드맵 상세 구현 내역
+
+#### 1단계: 인라인 `<code>` 마크다운 분절 버그 해결 및 코드 블록 무결성 보존
+- **문제점**: 본문 문장 내 `<code>var x = 1;</code>`과 같은 인라인 코드 요소가 마크다운 변환 시 줄바꿈(`\n\n`) 처리되어 단락이 무단 분절되고 문맥이 파괴되던 문제 해결.
+- **해결책**:
+  - 부모가 `<pre>`인 블록 코드와 일반 인라인 `<code>`를 명확히 분기.
+  - 인라인 코드는 양쪽 공백 보존 후 단일 백틱(`` `code` ``)으로 감싸 동일 라인 인라인 유지.
+  - 블록 코드(`<pre><code>`)는 삼중 백틱(```lang)과 정확한 클래스 언어 태그(`language-python`, `language-cpp` 등) 및 들여쓰기를 원형 보존.
+
+#### 2단계: YouTube 비디오 자막 대본(`timedtext`) 및 댓글 여론 분석 도구 신설
+- **자막 대본 수집 파이프라인**:
+  - `w.ytInitialPlayerResponse.captions`의 `captionTracks`를 탐색하여 선호 언어(한국어 수동 > 한국어 자동 `a.ko` > 영어 `en` > 기본값) 순으로 최적 자막 트랙 자동 선정.
+  - 시간대별 자막 이벤트(`data.events`)를 청킹하여 타임스탬프(`[MM:SS] 발화 내용`)와 결합된 구조화 대본 생성.
+- **전용 `youtube_get_comments` 도구**:
+  - AI 에이전트 런타임에 유튜브 댓글 전용 수집 도구 등록 (`limit`: 1~50개).
+  - 작성자명, 댓글 본문, 좋아요 수, 고정 댓글 여부를 JSON 데이터로 추출하여 시청자 여론/반응 분석 지원.
+
+#### 3단계: 단일 모듈 통합(SSOT) 및 C 레벨 mtime 메모리 캐시 & 핫 리로딩
+- **파편화 스크립트 단일화**:
+  - `simple_handler.c` 내에 수백 줄 단위의 C 이스케이프 문자열로 파편화되어 있던 `ai-get-dom-summary`, `ai-get-tab-dom`, `ai-get-youtube-comments` 스크립트를 독립 모듈인 [`ui/content_extractor.js`](file:///c:/projects/lite_browser/ui/content_extractor.js)로 완전 통합.
+- **C 런타임 mtime 메모리 캐시 & 무중단 핫 리로딩**:
+  - `GetContentExtractorScript()`: Windows `_stat64` API로 파일의 최종 수정 시간(`st_mtime`)을 감지.
+  - 수정되지 않은 경우 메모리 버퍼에서 0ms로 즉시 반환하고, 파일 수정 감지 시 런타임 재컴파일 없이 JS 파일을 자동 리로드하여 개발 생산성 극대화.
+  - `InjectContentExtractorScript()` 및 표준 러너(`ContentExtractor.runDomSummary()`, `runTabDom()`, `runYouTubeComments()`) 표준화.
+
+#### 4단계: Mozilla Readability 휴리스틱 노이즈 필터링 및 16k 헤드-테일 청킹
+- **휴리스틱 정규식 노이즈 제거**:
+  - `REGEX_UNLIKELY` 및 `REGEX_MAYBE_CANDIDATE`를 적용하여 광고, 배너, 사이드바, 푸터, 소셜 공유, 추천 기사 박스 등 비본문 노이즈 원천 배제.
+- **링크 밀도(Link Density) 가지치기**:
+  - 텍스트 대비 링크 비율이 0.65(65%)를 초과하는 네비게이션/추천 링크 클러스터를 식별하여 본문 래퍼를 훼손하지 않고 정밀 가지치기.
+- **스마트 헤드-테일 청킹 (`applyHeadTailChunking`)**:
+  - 컨텍스트 윈도우 보호를 위해 16,000자 초과 텍스트 발생 시 전반부 60%(9,600자)와 후반부 40%(6,400자)를 보존하고 중앙에 생략 안내 배너를 삽입하여 결론 누락 방지.
+
+#### 5단계: 차트/대시보드 페이지 감지 시 스크린샷 비전(Vision) 하이브리드 폴백
+- **차트/시각 특화 페이지 자동 감지 (`detectVisualContext`)**:
+  - Canvas, WebGL 컨텍스트, 고밀도 SVG 노드, 전용 차트 위젯(`.tradingview-widget-container`, `#tv-chart-container` 등) 및 본문 텍스트 희소성(`<250자`)을 평가하여 `isVisualHeavy: true` 판정.
+  - 긴 텍스트 기사에 차트 아이콘이 포함된 경우의 오탐지(False-Positive) 방어 로직 완비.
+- **Win32 C 레벨 뷰포트 캡처 & 동적 GDI+ JPEG 인코딩**:
+  - 활성 탭 HWND 클라이언트 영역을 `BitBlt`로 메모리 DC에 복사.
+  - `gdiplus.dll` 및 `ole32.dll`을 동적 로드(`LoadLibraryW`)하여 C API 환경에서 80% 압축 품질의 JPEG Base64 스트림으로 초고속 인코딩 (`http://ui-action/ai-capture-viewport`).
+- **자율 Agent 도구 및 멀티모달 LLM 페이로드 표준화**:
+  - `browser_take_screenshot` 툴 신규 등록 및 `browser_get_page_content` 자동 하이브리드 연동.
+  - Gemini(`inlineData`), OpenAI(`image_url`), Anthropic Claude(`source base64`)로 시각 데이터를 전송하고, 도구 텍스트 본문에서 거대 Base64를 정제하여 400 Context Length Exceeded 에러 원천 차단.
+- **사이드패널 UI 뱃지 및 프롬프트 칩 고도화**:
+  - 캡처 사용 시 어시스턴트 메시지에 `🖼️ 뷰포트 시각 캡처 포함` 뱃지 및 클릭 시 원본 팝오버 미리보기 제공.
+  - 웰컴 카드 칩 개편: `[현재 페이지 요약]`, `[화면 캡처 후 분석]`, `[열린 탭 비교]`.
+
+---
+
+### 78.3 YouTube 설명글/챕터 SSOT 및 3-Tier 다중 수집 파이프라인 고도화
+
+실제 복합 동영상(`https://www.youtube.com/watch?v=y8vLZdiwWtA`, 치앙마이 호텔 리뷰) 검증 중 발생한 BotGuard 토큰 및 Polymer DOM 트랩을 완벽히 해결했습니다.
+1. **설명글 & 10개 챕터 100% 무손실 보존**:
+   - DOM `#description` '빈 노드 트랩'을 우회하여 `w.ytInitialPlayerResponse.videoDetails.shortDescription` 및 `ytInitialData.engagementPanels` 구조화 챕터 데이터를 1순위로 조회, 10개 챕터 타임라인과 3,500자 이상 설명글 전체 보존.
+2. **0바이트 BotGuard PO-Token 방어 (Tier 1 -> Tier 2 전환)**:
+   - `exp=xpe` 파라미터로 인해 `timedtext`가 HTTP 200 + 0바이트를 반환할 때 `SyntaxError` 없이 즉시 DOM 트랜스크립트 패널(Tier 2)로 안전 전환.
+3. **DOM 트랜스크립트 패널 동적 폴링 (Tier 2)**:
+   - 비동기로 마운트되는 "스크립트 표시" 버튼을 감지하여 클릭하고 세그먼트 발화 내 숫자를 보존하여 대본 구성.
+4. **정직한 상태 브리핑 (Tier 3)**:
+   - 등록된 자막 트랙이 있음에도 "자막이 없다"는 허위 안내문을 주입하던 문제를 바로잡아 실제 자막 정보와 챕터/설명글 기반의 완벽한 요약 생성.
+
+---
+
+### 78.4 관련 소스 코드
+- [`ui/content_extractor.js`](file:///c:/projects/lite_browser/ui/content_extractor.js): 통합 웹 콘텐츠 및 YouTube/비전 휴리스틱 추출 엔진
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.c): mtime 스크립트 캐시 & Win32 GDI+ 뷰포트 캡처 IPC
+- [`ui/task_runtime.js`](file:///c:/projects/lite_browser/ui/task_runtime.js): `browser_take_screenshot`, `youtube_get_comments`, 하이브리드 자동 수집
+- [`ui/ai_providers.js`](file:///c:/projects/lite_browser/ui/ai_providers.js): Gemini / OpenAI / Claude 멀티모달 비전 직렬화 및 토큰 방어
+- [`ui/sidepanel.js`](file:///c:/projects/lite_browser/ui/sidepanel.js): 시각 캡처 뱃지, 팝오버 썸네일, 툴 리셋 동기화
+- [`ui/sidepanel.html`](file:///c:/projects/lite_browser/ui/sidepanel.html): 웰컴 카드 추천 프롬프트 칩 갱신
+- [`scripts/test_content_extractor_stage5.js`](file:///c:/projects/lite_browser/scripts/test_content_extractor_stage5.js): 5단계 시각 감지 및 노이즈 필터링 단위 테스트
+- [`scripts/test_multimodal_providers.js`](file:///c:/projects/lite_browser/scripts/test_multimodal_providers.js): 멀티모달 페이로드 직렬화 단위 테스트
+- [`scripts/test_youtube_extractor.js`](file:///c:/projects/lite_browser/scripts/test_youtube_extractor.js): YouTube 3-Tier 다중 수집 파이프라인 11종 단위 테스트
+
+---
+
+### 78.5 빌드 및 검증 결과
+- **C API 빌드 검증**: `cef_binary_154.0.34` MSVC Debug 타깃 컴파일 및 링크 완료 (`Exit code 0, 경고 0개, 오류 0개`, `lite_browser.dll` 및 `lite_browser.exe` 정상 패키징).
+- **자동화 단위 테스트**:
+  - `bun scripts/test_content_extractor_stage5.js`: 6/6 케이스 전체 통과.
+  - `bun scripts/test_multimodal_providers.js`: 6/6 케이스 전체 통과.
+  - `bun scripts/test_youtube_extractor.js`: 11/11 케이스 전체 통과.
+- **실제 라이브 검증**:
+  - YouTube 치앙마이 호텔 영상(`y8vLZdiwWtA`)에서 10개 챕터 타임라인과 호텔 리뷰 상세 설명글 100% 수집 및 시간대별 4대 핵심 테마 요약 출력 확인.
+  - 사이드패널 추천 칩(`[현재 페이지 요약]`, `[화면 캡처 후 분석]`, `[열린 탭 비교]`) 클릭 시 각 의도에 맞는 프롬프트 정상 실행 확인.

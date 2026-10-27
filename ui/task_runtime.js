@@ -59,6 +59,8 @@ class TaskRuntime {
     this.onLog = null;
     this.onStepUpdate = null;
     this.pendingDomCallback = null;
+    this.pendingViewportCallback = null;
+    this.lastUserQuery = '';
   }
 
   setState(newState, detail = '') {
@@ -98,6 +100,24 @@ class TaskRuntime {
           type: 'object',
           properties: {
             format: { type: 'string', enum: ['summary', 'interactive_elements', 'full_text'] }
+          }
+        }
+      },
+      {
+        name: 'browser_take_screenshot',
+        description: '현재 웹 브라우저 활성 탭의 뷰포트 화면 전체를 스크린샷으로 실시간 캡처하여 관찰합니다. 차트, 캔버스 그래프, 대시보드 및 복합 시각 자료를 분석할 때 호출합니다.',
+        parameters: {
+          type: 'object',
+          properties: {}
+        }
+      },
+      {
+        name: 'youtube_get_comments',
+        description: '현재 YouTube 동영상 페이지에서 시청자들의 실시간 댓글 목록(작성자, 내용, 좋아요 수, 고정 여부)을 수집합니다. 사용자가 "댓글 분위기 알려줘", "시청자 반응 어때?", "인기 댓글 뭐야?" 등 댓글 및 여론 분석을 요청했을 때만 호출합니다. 일반 동영상 내용 요약 시에는 호출하지 마세요.',
+        parameters: {
+          type: 'object',
+          properties: {
+            limit: { type: 'number', description: '가져올 댓글 수 (기본값: 30, 최대: 50)' }
           }
         }
       },
@@ -486,19 +506,88 @@ class TaskRuntime {
               setTimeout(() => {
                 if (this.pendingDomCallback) {
                   this.pendingDomCallback = null;
-                  resolve({ title: '현재 페이지', url: '', bodySnippet: '페이지 본문 내용을 읽을 수 없습니다.', markdown: '', buttons: [], inputs: [] });
+                  resolve({ title: '현재 페이지', url: '', bodySnippet: '페이지 본문 내용을 읽을 수 없습니다.', markdown: '', buttons: [], inputs: [], visualContext: { isVisualHeavy: false, reason: [] } });
                 }
-              }, 5000);
+              }, 8000);
             });
             const textLen = (domData?.bodySnippet || domData?.markdown || '').length;
             this.setState(TaskState.RUNNING, `본문 데이터 수신 완료 (${textLen}자)`);
+
+            const isVisualHeavy = Boolean(domData?.visualContext?.isVisualHeavy);
+            const userQuery = (this.lastUserQuery || (typeof window !== 'undefined' && window.lastUserPrompt) || '').toLowerCase();
+            const visualKeywordRegex = /(차트|그래프|화면|캔버스|시각|이미지|캔들|dashboard|대시보드|chart|graph|visual)/i;
+            const needsVisualFallback = isVisualHeavy || visualKeywordRegex.test(userQuery);
+
+            let screenshotData = null;
+            if (needsVisualFallback) {
+              this.setState(TaskState.RUNNING, '시각 집약(차트/대시보드) 페이지 감지 - 뷰포트 시각 캡처 수집 중...');
+              const captureRes = await this.captureViewport();
+              if (captureRes?.status === 'success' && captureRes.data) {
+                screenshotData = captureRes.data;
+                this.setState(TaskState.RUNNING, `뷰포트 시각 캡처 완료 (${captureRes.width}x${captureRes.height})`);
+              }
+            }
+
             return {
               status: 'success',
               url: domData.url || '',
               title: domData.title || '',
               bodySnippet: domData.bodySnippet || domData.markdown || '',
               buttons: domData.buttons || [],
-              inputs: domData.inputs || []
+              inputs: domData.inputs || [],
+              visualContext: domData.visualContext || { isVisualHeavy: false, reason: [] },
+              ...(screenshotData ? { screenshot: screenshotData } : {})
+            };
+          }
+
+          case 'browser_take_screenshot': {
+            this.setState(TaskState.RUNNING, '웹페이지 뷰포트 화면 스크린샷 캡처 중...');
+            const captureRes = await this.captureViewport();
+            if (captureRes?.status === 'success' && captureRes.data) {
+              this.setState(TaskState.RUNNING, `뷰포트 스크린샷 캡처 완료 (${captureRes.width}x${captureRes.height})`);
+              return {
+                status: 'success',
+                width: captureRes.width,
+                height: captureRes.height,
+                screenshot: captureRes.data
+              };
+            } else {
+              this.setState(TaskState.RUNNING, '뷰포트 화면 캡처 실패');
+              return {
+                status: 'error',
+                message: captureRes?.message || '뷰포트 화면 캡처에 실패했습니다.'
+              };
+            }
+          }
+
+          case 'youtube_get_comments': {
+            const limit = Math.min(Math.max(parseInt(args?.limit) || 30, 5), 50);
+            this.setState(TaskState.RUNNING, `YouTube 시청자 댓글 및 여론 데이터 수집 중 (최대 ${limit}개)...`);
+            const commentData = await new Promise((resolve) => {
+              this.pendingYoutubeCommentsCallback = resolve;
+              sendUiAction(`http://ui-action/ai-get-youtube-comments?limit=${limit}`);
+              setTimeout(() => {
+                if (this.pendingYoutubeCommentsCallback) {
+                  this.pendingYoutubeCommentsCallback = null;
+                  resolve({
+                    title: 'YouTube 동영상',
+                    url: '',
+                    count: 0,
+                    comments: [],
+                    message: '댓글 수집 응답 대기 시간이 초과되었습니다.'
+                  });
+                }
+              }, 10000);
+            });
+            const count = commentData.comments ? commentData.comments.length : 0;
+            this.setState(TaskState.RUNNING, `댓글 ${count}개 수집 완료`);
+            return {
+              status: count > 0 ? 'success' : 'no_comments',
+              url: commentData.url || '',
+              title: commentData.title || '',
+              count: count,
+              comments: commentData.comments || [],
+              message: commentData.message || (count > 0 ? `총 ${count}개의 댓글을 성공적으로 수집했습니다.` : '수집된 댓글이 없습니다. 동영상의 댓글이 사용 중지되었거나 아직 로드되지 않았을 수 있습니다.')
             };
           }
 
@@ -711,6 +800,13 @@ class TaskRuntime {
     }
   }
 
+  handleYoutubeCommentsReceived(commentData) {
+    if (this.pendingYoutubeCommentsCallback) {
+      this.pendingYoutubeCommentsCallback(commentData);
+      this.pendingYoutubeCommentsCallback = null;
+    }
+  }
+
   handleTabsListReceived(tabs) {
     if (this.pendingTabsCallback) {
       this.pendingTabsCallback(tabs);
@@ -746,6 +842,26 @@ class TaskRuntime {
     }
   }
 
+  async captureViewport() {
+    return new Promise((resolve) => {
+      this.pendingViewportCallback = resolve;
+      sendUiAction('http://ui-action/ai-capture-viewport');
+      setTimeout(() => {
+        if (this.pendingViewportCallback) {
+          this.pendingViewportCallback = null;
+          resolve({ status: 'error', message: '뷰포트 화면 캡처 응답 대기 시간이 초과되었습니다.' });
+        }
+      }, 6000);
+    });
+  }
+
+  handleViewportCaptured(data) {
+    if (this.pendingViewportCallback) {
+      this.pendingViewportCallback(data);
+      this.pendingViewportCallback = null;
+    }
+  }
+
   pause() {
     this.isPaused = true;
     this.setState(TaskState.PAUSED, '일시정지되었습니다.');
@@ -773,6 +889,15 @@ window.TaskState = TaskState;
 window.taskRuntime = new TaskRuntime();
 
 // C backend callback bridges
+window.onAgentViewportCaptured = function(data) {
+  if (window.taskRuntime) {
+    window.taskRuntime.handleViewportCaptured(data);
+  }
+  if (typeof window.onViewportCapturedCallback === 'function') {
+    window.onViewportCapturedCallback(data);
+  }
+};
+
 window.onAgentDomExtracted = function(data) {
   if (window.taskRuntime) {
     window.taskRuntime.handleDomExtracted(data);
@@ -806,5 +931,11 @@ window.onAgentTabSplitCompleted = function(res) {
 window.onAgentTabsClosed = function(res) {
   if (window.taskRuntime) {
     window.taskRuntime.handleTabsClosed(res);
+  }
+};
+
+window.onAgentYoutubeCommentsReceived = function(data) {
+  if (window.taskRuntime) {
+    window.taskRuntime.handleYoutubeCommentsReceived(data);
   }
 };
