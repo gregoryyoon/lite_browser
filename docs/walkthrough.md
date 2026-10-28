@@ -3040,3 +3040,46 @@ Lite Browser는 기존 C 코드에 하드코딩되어 있던 파편화된 DOM �
 - **실제 라이브 검증**:
   - YouTube 치앙마이 호텔 영상(`y8vLZdiwWtA`)에서 10개 챕터 타임라인과 호텔 리뷰 상세 설명글 100% 수집 및 시간대별 4대 핵심 테마 요약 출력 확인.
   - 사이드패널 추천 칩(`[현재 페이지 요약]`, `[화면 캡처 후 분석]`, `[열린 탭 비교]`) 클릭 시 각 의도에 맞는 프롬프트 정상 실행 확인.
+## 79. .log 및 개발/텍스트 파일 인라인 렌더링, '다른 이름으로 링크 저장...' 대화상자 연동 및 Gzip 압축 자동 해제 (Inline Log/Text Rendering, Save Link As Dialog & In-Place Gzip Decompression)
+
+### 79.1 개요
+CI/웹 서버(예: `http://ci.chipsnmedia.com/.../0.log`)에서 제공하는 `.log` 파일 링크를 클릭했을 때 파일 다운로드로 빠지지 않고 Microsoft Edge 브라우저와 동일하게 **브라우저 탭 내에서 순수 텍스트(plain text)로 바로 렌더링**되도록 개선했습니다.  
+또한, 링크 우클릭 컨텍스트 메뉴 항목을 표준 명칭인 **'다른 이름으로 링크 저장...'**으로 개선하고 Windows 네이티브 파일 저장 대화상자(`GetSaveFileNameW`)를 연동했으며, 서버가 `Content-Encoding: gzip`으로 전송하여 다운로드된 파일의 경우에도 파일 저장 시 **Gzip 압축을 자동 해제하여 메모장에서 열었을 때 ` P` 같은 깨진 글자 없이 100% 정상 텍스트로 보존**되도록 완비했습니다.
+
+### 79.2 주요 구현 내역
+1. **Windows 레지스트리 텍스트 MIME 타입 자동 동기화 (`cefsimple_win.c`)**:
+   - Windows OS 레지스트리(`HKCR\.log`) 및 Chromium 기본 테이블에 `.log`에 대한 MIME Type이 등록되어 있지 않아 정적 웹 서버의 `application/octet-stream` 전송 시 강제 다운로드로 전환되던 문제를 해결.
+   - 브라우저 실행 시 UAC 권한이 필요 없는 `HKCU\Software\Classes`에 `.log`, `.out`, `.err`, `.diff`, `.patch`, `.ini`, `.cfg`, `.conf` 8개 확장자의 `Content Type`을 `text/plain`, `PerceivedType`을 `text`로 자동 등록하고 `SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, NULL, NULL)`로 셸 캐시 즉시 갱신.
+2. **다운로드 파이프라인 가로채기 및 인라인 텍스트 뷰어 전환 (`simple_download_handler.c`, `simple_display_handler.c`)**:
+   - 웹 서버가 `Content-Disposition: attachment` 또는 `application/octet-stream` 헤더를 강제 전송하더라도, 사용자 탐색(Navigation)에 의해 다운로드가 트리거되고 명시적 저장 요청(`is_custom_save_as`)이 아닌 경우를 자동 식별.
+   - 다운로드 shelf 버블 표시 및 `downloads.json` 영구 기록을 생략한 채, 격리된 임시 폴더(`%TEMP%\LiteBrowser\inline_text\`)에 다운로드 수행.
+   - 다운로드 완료 시 탭 프레임(`target_frame->load_url`)에 디코딩된 텍스트를 인라인으로 렌더링.
+   - 주소창(Omnibox)에는 임시 `file:///` 경로 대신 원래의 원격 웹 URL(`http://ci.chipsnmedia.com/.../0.log`)이 표시되도록 역조회 매핑(`simple_download_lookup_inline_url`) 연동.
+   - 해당 인라인 뷰어 탭에서 `Ctrl + S` 또는 우클릭 "다른 이름으로 저장..."을 실행하면, 타임스탬프 접두사가 제거된 본래 파일명(`0.log`)과 로그 전용 필터(`*.log`)가 대화상자에 제안되도록 처리.
+3. **링크 우클릭 메뉴 '다른 이름으로 링크 저장...' 개선 (`simple_handler.c`)**:
+   - 링크 컨텍스트 메뉴의 비표준 명칭 `"링크 페이지 저장"`(cmd 3002)을 엣지/크롬 표준인 **`"다른 이름으로 링크 저장..."`**으로 변경.
+   - 클릭 시 즉시 다운로드 폴더로 바로 다운로드되던 동작을 수정하여, `simple_download_trigger_save_as`를 통해 **Windows 네이티브 파일 저장 대화상자(`GetSaveFileNameW`)**가 노출되도록 연동.
+   - 대상 URL의 파일명(예: `0.log`)과 확장자별 전용 필터(`로그 파일 (*.log)`, `텍스트 파일 (*.txt;*.out;...)` 등)를 자동 추천.
+4. **경량 Gzip 인플레이스 자동 압축 해제 모듈 (`simple_gzip.h`, `simple_gzip.c`)**:
+   - 외부 종속성 없는 단일 경량 Deflate/Gzip 압축 해제 모듈(`tinf` 알고리즘 기반)을 C API 레이어에 탑재.
+   - 다운로드 완료 시점(`download_handler_on_download_updated`)에서 저장 대상 텍스트 파일의 선두 2바이트가 Gzip 매직 넘버(`0x1F, 0x8B`)인지 감지.
+   - Gzip 압축 파일인 경우 임시 원자적 파일 교체(`ReplaceFileW` / `MoveFileExW`)를 통해 즉시 인플레이스 압축 해제 수행.
+   - 최대 1GB 버퍼 지원 및 파일 잠금 방어 재시도 루프를 적용하여, "다른 이름으로 링크 저장..." 및 탭 내 "다른 이름으로 저장..." 모두 메모장에서 열었을 때 ` P` 깨짐 없는 100% 정상 텍스트로 저장 완료.
+
+### 79.3 관련 소스 코드
+- [`cef_binary_154.0.34/tests/cefsimple_capi/cefsimple_win.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/cefsimple_win.c): `HKCU` 8개 개발 확장자 `text/plain` 자동 등록 및 셸 갱신
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.c): `"다른 이름으로 링크 저장..."` 명칭 변경 및 `simple_download_trigger_save_as` 대화상자 연결
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_download_handler.h`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_download_handler.h): 인라인 텍스트 URL 매핑 함수 선언
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_download_handler.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_download_handler.c): 텍스트 확장자 식별, 임시 인라인 뷰어 다운로드 격리, 다운로드 완료 시 Gzip 압축 해제 트리거, 저장 대화상자 후보 파일명 정제
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_display_handler.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_display_handler.c): 인라인 텍스트 탭 주소창 원래 웹 URL 동기화
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_gzip.h`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_gzip.h): Gzip 판별 및 인플레이스 압축 해제 인터페이스
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_gzip.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_gzip.c): Deflate/Gzip 헤더 파싱 및 인플레이스 파일 디컴프레서 구현
+- [`cef_binary_154.0.34/tests/cefsimple_capi/CMakeLists.txt`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/CMakeLists.txt): `simple_gzip.c` 및 `simple_gzip.h` C API 타깃 빌드 포함
+
+### 79.4 빌드 및 검증 결과
+- **C API 빌드 검증**: `cef_binary_154.0.34` MSVC Debug 타깃 컴파일 및 링크 성공 (`Exit code 0, 경고 0개, 오류 0개`, `lite_browser.dll` 및 `lite_browser.exe` 정상 갱신).
+- **자동화 단위 테스트 검증**:
+  - `RegisterTextPlainFileAssociations`: `.log`, `.out`, `.err`, `.diff`, `.patch`, `.ini`, `.cfg`, `.conf` 8개 확장자에 대해 Win32 `AssocQueryStringW` 호출 결과 `0x0` 반환 및 `text/plain` 매핑 검증 완료.
+  - `simple_is_gzip_file`: 일반 텍스트(0), 빈 Gzip(1), 실제 ASCII/한글 로그 Gzip(1), 100,000라인 4.8MB Gzip(1), 손상된 Gzip(1) 판별 검증 통과.
+  - `simple_decompress_gzip_file_inplace`: 빈 Gzip, 한국어/영문 혼합 로그, 100,000라인 대용량 로그(4.76MB 원본 대비 바이트 100% 일치) 압축 해제 검증 통과.
+  - `simple_download_lookup_inline_url`: 인라인 임시 경로로부터 원본 웹 URL 역조회 100% 매칭 검증 완료.

@@ -16,6 +16,7 @@
 #include "tests/cefsimple_capi/browser_context.h"
 #include "tests/cefsimple_capi/simple_handler.h"
 #include "tests/cefsimple_capi/simple_utils.h"
+#include "tests/cefsimple_capi/simple_gzip.h"
 
 #define MAX_DOWNLOAD_RECORDS 500
 
@@ -34,6 +35,7 @@ typedef struct {
   int is_canceled;
   int is_interrupted;
   int file_exists;
+  int is_inline_view;
   int64_t start_time;
   int64_t end_time;
   cef_download_item_callback_t *active_callback;
@@ -47,6 +49,100 @@ static int g_download_cs_initialized = 0;
 static char g_pending_save_as_url[4096] = {0};
 static char g_pending_save_as_path[MAX_PATH] = {0};
 static ULONGLONG g_pending_save_as_tick = 0;
+
+typedef struct {
+  char temp_path[MAX_PATH];
+  char original_url[4096];
+} inline_url_mapping_t;
+
+#define MAX_INLINE_MAPPINGS 32
+static inline_url_mapping_t g_inline_mappings[MAX_INLINE_MAPPINGS];
+static int g_inline_mapping_count = 0;
+
+void simple_download_register_inline_mapping(const char *temp_file_path, const char *original_url) {
+  if (!temp_file_path || !original_url) return;
+  if (!g_download_cs_initialized) {
+    InitializeCriticalSection(&g_download_cs);
+    g_download_cs_initialized = 1;
+  }
+  EnterCriticalSection(&g_download_cs);
+  int idx = -1;
+  for (int i = 0; i < g_inline_mapping_count; i++) {
+    if (_stricmp(g_inline_mappings[i].temp_path, temp_file_path) == 0) {
+      idx = i;
+      break;
+    }
+  }
+  if (idx < 0) {
+    if (g_inline_mapping_count < MAX_INLINE_MAPPINGS) {
+      idx = g_inline_mapping_count++;
+    } else {
+      idx = 0;
+    }
+  }
+  strncpy(g_inline_mappings[idx].temp_path, temp_file_path, sizeof(g_inline_mappings[idx].temp_path) - 1);
+  g_inline_mappings[idx].temp_path[sizeof(g_inline_mappings[idx].temp_path) - 1] = '\0';
+  strncpy(g_inline_mappings[idx].original_url, original_url, sizeof(g_inline_mappings[idx].original_url) - 1);
+  g_inline_mappings[idx].original_url[sizeof(g_inline_mappings[idx].original_url) - 1] = '\0';
+  LeaveCriticalSection(&g_download_cs);
+}
+
+int simple_download_lookup_inline_url(const char *file_or_temp_url, char *out_url, size_t out_len) {
+  if (!file_or_temp_url || file_or_temp_url[0] == '\0' || !out_url || out_len == 0) return 0;
+  if (!g_download_cs_initialized) return 0;
+  EnterCriticalSection(&g_download_cs);
+  int found = 0;
+  for (int i = 0; i < g_inline_mapping_count; i++) {
+    const char *p1 = strrchr(g_inline_mappings[i].temp_path, '\\');
+    if (!p1) p1 = strrchr(g_inline_mappings[i].temp_path, '/');
+    const char *name1 = p1 ? (p1 + 1) : g_inline_mappings[i].temp_path;
+
+    if (strstr(file_or_temp_url, name1) != NULL ||
+        _stricmp(g_inline_mappings[i].temp_path, file_or_temp_url) == 0) {
+      strncpy(out_url, g_inline_mappings[i].original_url, out_len - 1);
+      out_url[out_len - 1] = '\0';
+      found = 1;
+      break;
+    }
+  }
+  LeaveCriticalSection(&g_download_cs);
+  return found;
+}
+
+static int IsTextFileExtension(const char *name_or_url) {
+  if (!name_or_url || name_or_url[0] == '\0') return 0;
+  const char *q = strchr(name_or_url, '?');
+  char path_clean[MAX_PATH] = {0};
+  if (q) {
+    size_t len = q - name_or_url;
+    if (len >= sizeof(path_clean)) len = sizeof(path_clean) - 1;
+    strncpy(path_clean, name_or_url, len);
+  } else {
+    strncpy(path_clean, name_or_url, sizeof(path_clean) - 1);
+  }
+
+  char *h = strchr(path_clean, '#');
+  if (h) *h = '\0';
+
+  const char *last_slash = strrchr(path_clean, '/');
+  const char *last_bslash = strrchr(path_clean, '\\');
+  const char *dot = strrchr(path_clean, '.');
+  if (!dot) return 0;
+  if (last_slash && dot < last_slash) return 0;
+  if (last_bslash && dot < last_bslash) return 0;
+
+  static const char *kTextExts[] = {
+    ".log", ".out", ".err", ".diff", ".patch",
+    ".ini", ".cfg", ".conf", ".txt", ".json",
+    ".xml", ".yaml", ".yml", ".md", ".sh", ".py"
+  };
+  for (size_t i = 0; i < sizeof(kTextExts) / sizeof(kTextExts[0]); ++i) {
+    if (_stricmp(dot, kTextExts[i]) == 0) {
+      return 1;
+    }
+  }
+  return 0;
+}
 
 static void EnsureCriticalSectionInitialized(void) {
   if (!g_download_cs_initialized) {
@@ -163,6 +259,7 @@ static void SaveDownloadsHistoryToDisk(void) {
     int written = 0;
     for (int i = 0; i < g_download_record_count; i++) {
       download_record_t *rec = &g_download_records[i];
+      if (rec->is_inline_view) continue;
       if (written > 0) fputs(",\n", fp);
 
       char esc_path[MAX_PATH * 2] = {0};
@@ -449,11 +546,10 @@ static void UpdateDownloadRecord(uint32_t id, const char *full_path, const char 
                                  int percent_complete, int64_t speed,
                                  int is_in_progress, int is_complete,
                                  int is_canceled, int is_interrupted,
+                                 int is_inline_view,
                                  cef_download_item_callback_t *callback) {
   EnsureCriticalSectionInitialized();
   EnterCriticalSection(&g_download_cs);
-
-  g_last_download_activity_tick = GetTickCount64();
 
   download_record_t *rec = NULL;
   for (int i = 0; i < g_download_record_count; i++) {
@@ -472,10 +568,14 @@ static void UpdateDownloadRecord(uint32_t id, const char *full_path, const char 
       g_download_record_count++;
       memset(rec, 0, sizeof(download_record_t));
       rec->id = id;
+      rec->is_inline_view = is_inline_view;
       rec->start_time = (int64_t)time(NULL);
     } else {
       rec = &g_download_records[0];
+      rec->is_inline_view = is_inline_view;
     }
+  } else if (is_inline_view) {
+    rec->is_inline_view = 1;
   }
 
   if (full_path && full_path[0] != '\0') strncpy(rec->full_path, full_path, sizeof(rec->full_path) - 1);
@@ -514,12 +614,17 @@ static void UpdateDownloadRecord(uint32_t id, const char *full_path, const char 
     }
   }
 
-  rec->file_exists = CheckFileExistsUtf8(rec->full_path);
+  int is_inline = rec->is_inline_view;
+  if (!is_inline) {
+    g_last_download_activity_tick = GetTickCount64();
+  }
 
   LeaveCriticalSection(&g_download_cs);
 
-  SaveDownloadsHistoryToDisk();
-  BroadcastDownloadUpdate();
+  if (!is_inline) {
+    SaveDownloadsHistoryToDisk();
+    BroadcastDownloadUpdate();
+  }
 }
 
 static void GenerateNonConflictingPath(const char *downloads_dir, const char *suggested_name, char *out_path, size_t max_len) {
@@ -599,7 +704,11 @@ int CEF_CALLBACK download_handler_on_before_download(
         cef_string_userfree_free(u);
       }
     }
-    if (g_pending_save_as_path[0] != '\0') {
+    int url_matches = (g_pending_save_as_url[0] == '\0' || item_url[0] == '\0' ||
+                       strcmp(item_url, g_pending_save_as_url) == 0 ||
+                       strstr(item_url, g_pending_save_as_url) != NULL ||
+                       strstr(g_pending_save_as_url, item_url) != NULL);
+    if (g_pending_save_as_path[0] != '\0' && url_matches) {
       strncpy(full_path, g_pending_save_as_path, sizeof(full_path) - 1);
       full_path[sizeof(full_path) - 1] = '\0';
       is_custom_save_as = 1;
@@ -618,8 +727,55 @@ int CEF_CALLBACK download_handler_on_before_download(
   }
   LeaveCriticalSection(&g_download_cs);
 
+  int is_inline_view = 0;
   if (!is_custom_save_as) {
-    GenerateNonConflictingPath(dir, name_utf8, full_path, sizeof(full_path));
+    char item_url_check[4096] = {0};
+    if (download_item && download_item->is_valid(download_item)) {
+      cef_string_userfree_t u = download_item->get_url(download_item);
+      if (u) {
+        cef_string_utf8_t u8 = {};
+        cef_string_to_utf8(u->str, u->length, &u8);
+        if (u8.str) strncpy(item_url_check, u8.str, sizeof(item_url_check) - 1);
+        cef_string_utf8_clear(&u8);
+        cef_string_userfree_free(u);
+      }
+    }
+
+    char mime_check[256] = {0};
+    if (download_item && download_item->is_valid(download_item)) {
+      cef_string_userfree_t mt = download_item->get_mime_type(download_item);
+      if (mt) {
+        cef_string_utf8_t u8 = {};
+        cef_string_to_utf8(mt->str, mt->length, &u8);
+        if (u8.str) strncpy(mime_check, u8.str, sizeof(mime_check) - 1);
+        cef_string_utf8_clear(&u8);
+        cef_string_userfree_free(mt);
+      }
+    }
+
+    int is_already_inline = (strstr(item_url_check, "inline_text") != NULL ||
+                             strstr(name_utf8, "inline_text") != NULL);
+    if (!is_already_inline &&
+        (IsTextFileExtension(name_utf8) || IsTextFileExtension(item_url_check) ||
+        (mime_check[0] && strncmp(mime_check, "text/", 5) == 0))) {
+      char temp_dir[MAX_PATH] = {0};
+      GetTempPathA(sizeof(temp_dir), temp_dir);
+      char parent_dir[MAX_PATH];
+      snprintf(parent_dir, sizeof(parent_dir), "%sLiteBrowser", temp_dir);
+      CreateDirectoryA(parent_dir, NULL);
+      char inline_dir[MAX_PATH];
+      snprintf(inline_dir, sizeof(inline_dir), "%s\\inline_text", parent_dir);
+      CreateDirectoryA(inline_dir, NULL);
+
+      snprintf(full_path, sizeof(full_path), "%s\\%llu_%s", inline_dir, GetTickCount64(), name_utf8);
+      is_inline_view = 1;
+
+      if (item_url_check[0] != '\0') {
+        simple_download_register_inline_mapping(full_path, item_url_check);
+      }
+    } else {
+      GenerateNonConflictingPath(dir, name_utf8, full_path, sizeof(full_path));
+    }
   } else {
     DeleteFileA(full_path);
   }
@@ -627,7 +783,9 @@ int CEF_CALLBACK download_handler_on_before_download(
   cef_string_t cef_path = {};
   cef_string_from_utf8(full_path, strlen(full_path), &cef_path);
 
-  g_last_download_activity_tick = GetTickCount64();
+  if (!is_inline_view) {
+    g_last_download_activity_tick = GetTickCount64();
+  }
 
   // Register the download record immediately with confirmed full_path
   if (download_item && download_item->is_valid(download_item)) {
@@ -656,6 +814,7 @@ int CEF_CALLBACK download_handler_on_before_download(
     UpdateDownloadRecord(id, full_path, url_str, name_utf8, mime_type,
                          total, 0, 0, 0,
                          1, 0, 0, 0,
+                         is_inline_view,
                          NULL);
   }
 
@@ -731,10 +890,72 @@ void CEF_CALLBACK download_handler_on_download_updated(
     cef_string_userfree_free(mt);
   }
 
+  int is_inline = 0;
+  EnsureCriticalSectionInitialized();
+  EnterCriticalSection(&g_download_cs);
+  for (int i = 0; i < g_download_record_count; i++) {
+    if (g_download_records[i].id == id) {
+      is_inline = g_download_records[i].is_inline_view;
+      break;
+    }
+  }
+  LeaveCriticalSection(&g_download_cs);
+
+  if (is_complete && full_path[0] != '\0') {
+    // 1. Check if the file is gzip compressed and should be decompressed
+    if (simple_is_gzip_file(full_path)) {
+      const char *dot = strrchr(full_path, '.');
+      int is_gz_archive = 0;
+      if (dot && (_stricmp(dot, ".gz") == 0 || _stricmp(dot, ".tgz") == 0)) {
+        is_gz_archive = 1;
+      }
+      if (!is_gz_archive) {
+        LogMsg("[Download] Auto-decompressing gzip payload for: %s\n", full_path);
+        simple_decompress_gzip_file_inplace(full_path);
+      }
+    }
+
+    // 2. If this was an inline view download, load the uncompressed plain text into the browser tab
+    if (is_inline && browser) {
+      cef_frame_t *frame = browser->get_main_frame(browser);
+      if (frame) {
+        char file_url[MAX_PATH * 2] = {0};
+        snprintf(file_url, sizeof(file_url), "file:///%s", full_path);
+        for (char *p = file_url + 8; *p; ++p) {
+          if (*p == '\\') *p = '/';
+        }
+        cef_string_t cef_u = {};
+        cef_string_from_utf8(file_url, strlen(file_url), &cef_u);
+        frame->load_url(frame, &cef_u);
+        cef_string_clear(&cef_u);
+        frame->base.release(&frame->base);
+      }
+    }
+  }
+
   UpdateDownloadRecord(id, full_path, url_str, file_name, mime_type,
                        total, received, percent, speed,
                        is_in_progress, is_complete, is_canceled, is_interrupted,
+                       is_inline,
                        callback);
+
+  if (is_complete && is_inline) {
+    EnsureCriticalSectionInitialized();
+    EnterCriticalSection(&g_download_cs);
+    for (int i = 0; i < g_download_record_count; i++) {
+      if (g_download_records[i].id == id) {
+        if (g_download_records[i].active_callback) {
+          g_download_records[i].active_callback->base.release(&g_download_records[i].active_callback->base);
+        }
+        for (int j = i; j < g_download_record_count - 1; j++) {
+          g_download_records[j] = g_download_records[j + 1];
+        }
+        g_download_record_count--;
+        break;
+      }
+    }
+    LeaveCriticalSection(&g_download_cs);
+  }
 }
 
 // Implement ref counting for simple_download_handler_t
@@ -763,10 +984,13 @@ void download_manager_get_list_json(char *out_buf, size_t max_len) {
 
   size_t offset = 0;
   offset += snprintf(out_buf + offset, max_len - offset, "[\n");
+  int written = 0;
 
   for (int i = 0; i < g_download_record_count && offset < max_len - 512; i++) {
     download_record_t *rec = &g_download_records[i];
-    if (i > 0) offset += snprintf(out_buf + offset, max_len - offset, ",\n");
+    if (rec->is_inline_view) continue;
+    if (written > 0) offset += snprintf(out_buf + offset, max_len - offset, ",\n");
+    written++;
 
     char esc_path[MAX_PATH * 2] = {0};
     char esc_url[8192] = {0};
@@ -1075,9 +1299,14 @@ int simple_download_trigger_save_as(HWND parent_hwnd, cef_browser_t *browser, co
     return 0;
   }
 
+  char orig_url_buf[4096] = {0};
   const char *download_url = current_url;
   if (strncmp(download_url, "view-source:", 12) == 0) {
     download_url += 12;
+  } else if (strncmp(download_url, "file:///", 8) == 0 && strstr(download_url, "/inline_text/") != NULL) {
+    if (simple_download_lookup_inline_url(download_url, orig_url_buf, sizeof(orig_url_buf))) {
+      download_url = orig_url_buf;
+    }
   }
 
   char url_copy[4096] = {0};
@@ -1107,7 +1336,18 @@ int simple_download_trigger_save_as(HWND parent_hwnd, cef_browser_t *browser, co
 
     char *dot = strrchr(clean_segment, '.');
     if (dot && strlen(dot + 1) > 0 && strlen(dot + 1) <= 10) {
-      strncpy(candidate_name, clean_segment, sizeof(candidate_name) - 1);
+      const char *actual_name = clean_segment;
+      const char *us = strchr(clean_segment, '_');
+      if (us && us > clean_segment) {
+        int all_digits = 1;
+        for (const char *dp = clean_segment; dp < us; ++dp) {
+          if (!isdigit((unsigned char)*dp)) { all_digits = 0; break; }
+        }
+        if (all_digits && *(us + 1) != '\0') {
+          actual_name = us + 1;
+        }
+      }
+      strncpy(candidate_name, actual_name, sizeof(candidate_name) - 1);
       strncpy(candidate_ext, dot + 1, sizeof(candidate_ext) - 1);
     }
   }
@@ -1137,8 +1377,16 @@ int simple_download_trigger_save_as(HWND parent_hwnd, cef_browser_t *browser, co
       strcmp(ext_lower, "cpp") == 0 || strcmp(ext_lower, "hpp") == 0) {
     const WCHAR f[] = L"C/C++ Source File (*.c;*.h;*.cpp)\0*.c;*.h;*.cpp\0모든 파일 (*.*)\0*.*\0\0";
     memcpy(wfilter, f, sizeof(f));
-  } else if (strcmp(ext_lower, "txt") == 0 || strcmp(ext_lower, "log") == 0 || strcmp(ext_lower, "ini") == 0) {
-    const WCHAR f[] = L"텍스트 파일 (*.txt)\0*.txt\0모든 파일 (*.*)\0*.*\0\0";
+  } else if (strcmp(ext_lower, "log") == 0) {
+    const WCHAR f[] = L"로그 파일 (*.log)\0*.log\0텍스트 파일 (*.txt)\0*.txt\0모든 파일 (*.*)\0*.*\0\0";
+    memcpy(wfilter, f, sizeof(f));
+  } else if (strcmp(ext_lower, "txt") == 0 || strcmp(ext_lower, "out") == 0 ||
+             strcmp(ext_lower, "err") == 0 || strcmp(ext_lower, "diff") == 0 ||
+             strcmp(ext_lower, "patch") == 0) {
+    const WCHAR f[] = L"텍스트 파일 (*.txt;*.out;*.err;*.diff;*.patch)\0*.txt;*.out;*.err;*.diff;*.patch\0모든 파일 (*.*)\0*.*\0\0";
+    memcpy(wfilter, f, sizeof(f));
+  } else if (strcmp(ext_lower, "ini") == 0 || strcmp(ext_lower, "cfg") == 0 || strcmp(ext_lower, "conf") == 0) {
+    const WCHAR f[] = L"설정 파일 (*.ini;*.cfg;*.conf)\0*.ini;*.cfg;*.conf\0모든 파일 (*.*)\0*.*\0\0";
     memcpy(wfilter, f, sizeof(f));
   } else if (strcmp(ext_lower, "md") == 0 || strcmp(ext_lower, "markdown") == 0) {
     const WCHAR f[] = L"Markdown 문서 (*.md)\0*.md;*.markdown\0모든 파일 (*.*)\0*.*\0\0";

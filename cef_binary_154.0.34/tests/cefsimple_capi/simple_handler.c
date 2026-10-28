@@ -366,6 +366,28 @@ static void scan_directory_recursive(const char* dir_path, char** json_ptr, size
 }
 #endif
 
+static const char* get_debug_log_path(char* out_path, size_t max_len) {
+  static char s_debug_path[MAX_PATH] = {0};
+  if (s_debug_path[0] == '\0') {
+    char user_profile[MAX_PATH] = {0};
+    if ((SHGetSpecialFolderPathA(NULL, user_profile, CSIDL_PROFILE, FALSE) && user_profile[0] != '\0') ||
+        GetEnvironmentVariableA("USERPROFILE", user_profile, MAX_PATH) > 0) {
+      char dir_path[MAX_PATH];
+      snprintf(dir_path, sizeof(dir_path), "%s\\.lite-browser", user_profile);
+      CreateDirectoryA(dir_path, NULL);
+      snprintf(s_debug_path, sizeof(s_debug_path), "%s\\.lite-browser\\debug_c.txt", user_profile);
+    } else {
+      strncpy(s_debug_path, "debug_c.txt", sizeof(s_debug_path) - 1);
+    }
+  }
+  if (out_path && max_len > 0) {
+    strncpy(out_path, s_debug_path, max_len - 1);
+    out_path[max_len - 1] = '\0';
+    return out_path;
+  }
+  return s_debug_path;
+}
+
 void LogMsg(const char *format, ...) {
   static CRITICAL_SECTION cs;
   static int cs_init = 0;
@@ -396,7 +418,8 @@ void LogMsg(const char *format, ...) {
   fflush(stdout);
 
   // 3. Persistent debug file (immediate flush)
-  FILE *f = fopen("C:\\projects\\lite_browser\\debug_c.txt", "a");
+  char log_path[MAX_PATH];
+  FILE *f = fopen(get_debug_log_path(log_path, sizeof(log_path)), "a");
   if (f) {
     fputs(prefix, f);
     fputs(buffer, f);
@@ -4556,7 +4579,7 @@ void CEF_CALLBACK context_menu_on_before_context_menu(
       AppendMenuW(hMenu, MF_STRING, 3001, L"새 탭에서 링크 열기");
       AppendMenuW(hMenu, MF_STRING, 3004, L"다른 분할 화면에서 열기");
       AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
-      AppendMenuW(hMenu, MF_STRING, 3002, L"링크 페이지 저장");
+      AppendMenuW(hMenu, MF_STRING, 3002, L"다른 이름으로 링크 저장...");
       AppendMenuW(hMenu, MF_STRING, 3003, L"링크 복사");
       AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
       AppendMenuW(hMenu, MF_STRING, MENU_ID_USER_FIRST, L"검사 (Inspect)");
@@ -4731,10 +4754,9 @@ void CEF_CALLBACK context_menu_on_before_context_menu(
         }
       } else if (cmd == 3002) {
         if (link_url_str) {
-          cef_string_t cef_url = {};
-          cef_string_from_utf8(link_url_str, strlen(link_url_str), &cef_url);
-          host->start_download(host, &cef_url);
-          cef_string_clear(&cef_url);
+          browser_window_t* win_ctx = ctx_handler->parent->window_ctx;
+          HWND parent_wnd = (win_ctx && win_ctx->main_hwnd) ? win_ctx->main_hwnd : hwnd;
+          simple_download_trigger_save_as(parent_wnd, browser, link_url_str, NULL);
         }
       } else if (cmd == 3003) {
         if (link_url_str) {

@@ -3,6 +3,7 @@
 // can be found in the LICENSE file.
 
 #include <windows.h>
+#include <shlobj.h>
 
 #include "include/capi/cef_app_capi.h"
 #include "include/cef_api_hash.h"
@@ -57,6 +58,30 @@ static LONG WINAPI CrashExceptionHandler(EXCEPTION_POINTERS* ep) {
   return EXCEPTION_CONTINUE_SEARCH;
 }
 
+__declspec(dllexport) void RegisterTextPlainFileAssociations(void) {
+  static const wchar_t* const kExtensions[] = {
+    L".log", L".out", L".err", L".diff", L".patch",
+    L".ini", L".cfg", L".conf"
+  };
+  const wchar_t* content_type = L"text/plain";
+  const wchar_t* perceived_type = L"text";
+
+  for (size_t i = 0; i < sizeof(kExtensions) / sizeof(kExtensions[0]); ++i) {
+    HKEY hKey = NULL;
+    wchar_t subkey[128];
+    swprintf_s(subkey, sizeof(subkey) / sizeof(subkey[0]), L"Software\\Classes\\%s", kExtensions[i]);
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, subkey, 0, NULL,
+                        REG_OPTION_NON_VOLATILE, KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
+      RegSetValueExW(hKey, L"Content Type", 0, REG_SZ,
+                     (const BYTE*)content_type, (DWORD)((wcslen(content_type) + 1) * sizeof(wchar_t)));
+      RegSetValueExW(hKey, L"PerceivedType", 0, REG_SZ,
+                     (const BYTE*)perceived_type, (DWORD)((wcslen(perceived_type) + 1) * sizeof(wchar_t)));
+      RegCloseKey(hKey);
+    }
+  }
+  SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, NULL, NULL);
+}
+
 static int RunMain(HINSTANCE hInstance,
                    LPTSTR lpCmdLine,
                    int nCmdShow,
@@ -102,6 +127,9 @@ static int RunMain(HINSTANCE hInstance,
 
   LogMsg("\n==================== LiteBrowser Start (PID: %lu) ====================\n", GetCurrentProcessId());
 
+  // Ensure plain text mapping in HKCU for dev/text file extensions (.log, .out, .err, etc.)
+  RegisterTextPlainFileAssociations();
+
   // Specify CEF global settings here.
   cef_settings_t settings = {};
   settings.size = sizeof(cef_settings_t);
@@ -117,6 +145,18 @@ static int RunMain(HINSTANCE hInstance,
     wchar_t root_cache[MAX_PATH];
     swprintf(root_cache, MAX_PATH, L"%s\\LiteBrowser\\User Data", local_app_data);
     cef_string_from_wide(root_cache, wcslen(root_cache), &settings.root_cache_path);
+  }
+
+  // Configure CEF engine debug log path to %USERPROFILE%\.lite-browser\cef_debug.log
+  wchar_t user_profile[MAX_PATH] = {0};
+  if ((SHGetSpecialFolderPathW(NULL, user_profile, CSIDL_PROFILE, FALSE) && user_profile[0] != L'\0') ||
+      GetEnvironmentVariableW(L"USERPROFILE", user_profile, MAX_PATH) > 0) {
+    wchar_t log_dir[MAX_PATH];
+    swprintf(log_dir, MAX_PATH, L"%s\\.lite-browser", user_profile);
+    CreateDirectoryW(log_dir, NULL);
+    wchar_t cef_log_file[MAX_PATH];
+    swprintf(cef_log_file, MAX_PATH, L"%s\\cef_debug.log", log_dir);
+    cef_string_from_wide(cef_log_file, wcslen(cef_log_file), &settings.log_file);
   }
 
   // Automatically detect Windows OS default UI language and configure CEF locale / accept_language_list
@@ -160,6 +200,7 @@ static int RunMain(HINSTANCE hInstance,
   cef_string_clear(&settings.locale);
   cef_string_clear(&settings.accept_language_list);
   cef_string_clear(&settings.root_cache_path);
+  cef_string_clear(&settings.log_file);
 
   if (!init_success) {
     // cef_initialize took ownership of the remaining app reference so we don't

@@ -16,6 +16,8 @@ set(CEFSIMPLE_CAPI_SRCS
   simple_display_handler.c
   simple_download_handler.c
   simple_download_handler.h
+  simple_gzip.c
+  simple_gzip.h
   simple_vault.c
   simple_vault.h
   simple_auth.c
