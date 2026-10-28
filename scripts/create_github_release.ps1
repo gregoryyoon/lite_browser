@@ -1,8 +1,8 @@
 ﻿# GitHub Release and Asset Upload Pipeline for Lite Browser
 param(
     [string]$Token = "",
-    [string]$TagName = "v0.2.5",
-    [string]$ReleaseName = "Lite Browser v0.2.5",
+    [string]$TagName = "v0.2.6",
+    [string]$ReleaseName = "Lite Browser v0.2.6",
     [string]$InstallerPath = "LiteBrowserInstaller.exe",
     [string]$ReleaseBody = ""
 )
@@ -75,33 +75,32 @@ if (-not $ReleaseBody) {
 
 ### 주요 변경 사항
 
-#### 1. AI 에이전트 실시간 웹페이지 인플레이스 번역 시스템
-- **CEF 내장 번역 부재 한계 극복**: Chromium 컴포넌트의 Google 독점 번역 엔진 제약을 해소하고, 사이드패널 AI Provider(Gemini 4 Argon, 3.8 Flash, ChatGPT, Claude 등)를 연동한 실시간 인플레이스 번역 파이프라인 구축
-- **DOM 구조 보존 및 양방향 원문/번역문 토글**: 하이퍼링크, 레이아웃 서식을 보존하며 인플레이스 치환하고, 도구 완료 카드의 `[원문 복원]` 및 `[번역문 다시 적용]` 버튼을 통해 실시간 양방향 전환 지원
-- **사이드패널 웰컴 카드 '한국어로 번역' 칩 연동**: 원클릭으로 현재 웹페이지 본문 전체를 번역하고 핵심 내용 3줄 요약 및 주요 용어 정리를 마크다운으로 브리핑
-- **다국어 번역 및 심층 컨테이너 순회**: 영어 외 일본어, 중국어 등 다국어 번역 지원 및 SPA 리프 노드/iframe 컨테이너 텍스트 추출 정밀화
+#### 1. 로그(.log) 및 개발/텍스트 파일 인라인 뷰어 & '다른 이름으로 링크 저장...' 대화상자
+- **Windows 레지스트리 개발 확장자 MIME Type 자동 등록**: 브라우저 실행 시 UAC 권한 없이 `HKCU\Software\Classes`에 `.log`, `.out`, `.err`, `.diff`, `.patch`, `.ini`, `.cfg`, `.conf` 8개 확장자를 `text/plain`으로 자동 등록하고 셸 캐시 즉시 갱신
+- **인라인 텍스트 뷰어 전환**: CI/웹 서버에서 전송되는 `.log` 파일 링크 클릭 시 강제 다운로드로 전환되지 않고 Microsoft Edge처럼 브라우저 탭 내에서 순수 텍스트(plain text)로 즉시 렌더링 (주소창에 원격 웹 URL 정상 표시 및 `Ctrl+S` 시 로그 전용 필터 적용)
+- **링크 우클릭 '다른 이름으로 링크 저장...' 연동**: 링크 컨텍스트 메뉴 명칭을 엣지/크롬 표준인 '다른 이름으로 링크 저장...'으로 개선하고 Windows 네이티브 파일 저장 대화상자(`GetSaveFileNameW`) 연동
+- **경량 Gzip 인플레이스 자동 압축 해제**: 서버가 `Content-Encoding: gzip`으로 전송한 파일도 C API 단일 모듈(`simple_gzip.c`)을 통해 다운로드 완료 시점에 인플레이스 자동 압축 해제하여 메모장에서 열었을 때 깨짐 없이 100% 정상 텍스트로 보존
 
-#### 2. AI 에이전트 자율 탭 제어 서브시스템 & 라이브 도구 UX
-- **자율 브라우저 탭 제어 도구군 추가**:
-  - `browser_get_tabs`: 열려 있는 모든 탭의 ID, 제목, URL, 활성/분할 상태 조회
-  - `browser_open_tab`: 자연어 명령으로 새 탭 생성 및 백그라운드 탐색 제어
-  - `browser_switch_tab` / `browser_reorder_tabs`: 탭 포커스 이동 및 인덱스 재배치
-  - `browser_split_tabs`: 2개 탭을 0.5f 듀얼 분할 화면으로 즉시 결합
-  - `browser_close_tabs`: 확인 카드 팝업 후 안전한 탭 일괄 종료
-  - `browser_get_tab_content`: 탭 본문 DOM 추출 및 텍스트/마크다운 분석
-- **지연 탐색 파이프라인 (PostDeferredNavigation)**: CEF `on_before_browse` 내부의 동기 URL 로드로 인한 Chromium NavigationThrottle 스택 오버플로우(0xC00000FD) 재진입 크래시를 원천 방지
-- **사이드패널 히든 iframe 통신 브릿지 (`sendUiAction`)**: 프레임 내비게이션으로 인한 LLM Fetch 스트리밍 취소 및 렌더러 오염 방지
-- **전 도구 실시간 진행(Running) UX 파이프라인**: 도구 호출 즉시 채팅창에 진행 카드를 표시하고(약 2초 시점), 세부 작업 단계(추출 → 분석/번역 → DOM 적용)를 실시간 반영한 뒤 제자리에서 완료 카드로 매끄럽게 전환
-- **Gemini 최신 모델 라인업 최신화**: `gemini-4-argon`, `gemini-3.8-flash` 지원 및 429 Quota Exceeded 발생 시 `RetryInfo` 기반 자동 지수 백오프 복원 파이프라인 적용
+#### 2. Chrome Gemini 스타일 5단계 본문 추출 파이프라인 & 비전(Vision) 하이브리드 폴백
+- **인라인 <code> 마크다운 분절 해결 & 코드 블록 보존**: 문장 내 인라인 코드가 단락 분절 없이 단일 백틱으로 보존되고, `<pre><code>` 블록 코드는 언어 클래스 및 들여쓰기 원형 보존
+- **YouTube 3-Tier 다중 수집 파이프라인 & 댓글 분석 도구**:
+  - 타임스탬프(`[MM:SS]`) 기반 자막 대본(`timedtext`) 수집 및 0바이트 BotGuard PO-Token 회피 시 DOM 트랜스크립트 패널(Tier 2) 안전 전환
+  - 단일 진실 공급원(SSOT) 메모리 객체 조회를 통해 10개 챕터 타임라인 및 3,500자 이상 설명글 100% 무손실 보존
+  - AI 에이전트 전용 `youtube_get_comments` 도구 신설 (시청자 반응 및 여론 분석)
+- **C 런타임 mtime 메모리 캐시 & 무중단 핫 리로딩**: 파편화된 DOM 추출 스크립트를 `ui/content_extractor.js`로 단일화하고, `_stat64` 기반 파일 수정 감지 시 런타임 재컴파일 없이 즉시 리로드
+- **Mozilla Readability 휴리스틱 노이즈 필터링 & 16k 헤드-테일 청킹**: 비본문 광고/사이드바 제거, 링크 밀도 0.65 초과 클러스터 가지치기, 긴 문서의 결론 누락을 방지하는 스마트 청킹
+- **차트/대시보드 페이지 감지 시 Win32 GDI+ 뷰포트 비전(Vision) 캡처**:
+  - Canvas, WebGL, SVG 고밀도 페이지 자동 감지 (`detectVisualContext`)
+  - 활성 탭 HWND 클라이언트 영역을 `BitBlt` 및 GDI+ 동적 로드로 80% 압축 품질 JPEG 인코딩
+  - `browser_take_screenshot` 툴 및 Gemini / OpenAI / Claude 멀티모달 LLM 비전 페이로드 연동
+  - 사이드패널 웰컴 카드 프롬프트 칩 개편 (`[현재 페이지 요약]`, `[화면 캡처 후 분석]`, `[열린 탭 비교]`)
 
-#### 3. Win32 CJK IME 및 사이드패널 포커스 안정성 강화
-- **Chrome_WidgetWin_0 네이티브 포커스 동기화**: 상단 윈도우와 네이티브 CEF 윈도우 간의 포커스 전달을 정규화하여 한국어, 일본어, 중국어(CJK) IME 조합 중 글자 잘림 및 포커스 이탈 문제 해결
-- **프롬프트 실행 중 채팅창 포커스 지속 유지**: AI 응답 스트리밍 및 도구 실행 중에도 채팅창 입력 포커스를 지속 유지하여 연속적인 프롬프트 입력 편의 제공
+#### 3. 팝업 및 새 탭 라이프사이클 안정성 강화
+- **POST 페이로드 및 창 컨텍스트 보존**: `window.open` 새 탭 팝업 시 POST 요청 페이로드와 `window.opener` 컨텍스트가 유실되지 않도록 C API 라이프사이클 가드 완비
 
-#### 4. 브라우저 안정성 및 배포 메타데이터 개선
-- **'다른 이름으로 저장' (Ctrl+S) 단축키 입력 필드 충돌 방지**: input, textarea 등 편집 필드 및 내부 시스템 페이지에서 불필요한 파일 저장 대화상자 호출 억제
-- **미등록 프로토콜 방어**: Windows 레지스트리에 미등록된 외부 스키마 호출 시 `ERR_UNKNOWN_URL_SCHEME` 에러 화면 억제
-- **PE 리소스 RT_VERSION 주입**: 빌드 후처리 파이프라인에서 `lite_browser.exe`에 정식 `RT_VERSION` 리소스 주입 및 버전 일관성 확보
+#### 4. 배포 및 업데이트 파이프라인
+- **Windows Git Credential Manager (GCM) 전자동 연동**: Windows 자격 증명 관리자에 안전하게 저장된 GitHub 토큰을 감지하여 릴리즈 및 인스톨러 배포를 100% 무인 자동화
+- **보안 및 무결성**: 최신 Authenticode SHA-256 전자 서명 및 DigiCert RFC 3161 공인 타임스탬프 적용
 "@
 }
 

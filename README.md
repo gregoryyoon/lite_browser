@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/gregoryyoon/lite_browser/releases/latest"><img src="https://img.shields.io/badge/Release-v0.2.5-brightgreen.svg?logo=github&logoColor=white" alt="Latest Release v0.2.5" /></a>
+  <a href="https://github.com/gregoryyoon/lite_browser/releases/latest"><img src="https://img.shields.io/badge/Release-v0.2.6-brightgreen.svg?logo=github&logoColor=white" alt="Latest Release v0.2.6" /></a>
   <a href="https://github.com/gregoryyoon/lite_browser"><img src="https://img.shields.io/badge/Platform-Windows%2064--bit-0078D4.svg?logo=windows&logoColor=white" alt="Platform Windows 64-bit" /></a>
   <a href="https://github.com/gregoryyoon/lite_browser"><img src="https://img.shields.io/badge/Language-C11%20%2F%20Pure%20C%20API-00599C.svg?logo=c&logoColor=white" alt="Language C11 / Pure Win32 C CAPI" /></a>
   <a href="https://github.com/gregoryyoon/lite_browser"><img src="https://img.shields.io/badge/CEF-154.0.34%20(Chromium%20154)-FF6F00.svg?logo=googlechrome&logoColor=white" alt="CEF 154.0.34 / Chromium 154" /></a>
@@ -172,6 +172,7 @@ lite_browser\
 │   ├── manager.html / css / js                # lite://favorites 차세대 북마크 대시보드
 │   ├── downloads.html / css / js              # lite://downloads 다운로드 관리자 대시보드
 │   ├── sidepanel.html / css / js              # 독립 도킹 AI 에이전트 사이드패널 UI
+│   ├── content_extractor.js                   # Chrome Gemini 스타일 5단계 본문/YouTube 추출 및 비전 하이브리드
 │   └── theme.js                               # 벤토 그리드 다크/라이트 테마 전역 브로드캐스트 엔진
 ├── cef_binary_154.0.34\                       # CEF 154.0.34 바이너리 배포본 (Chromium 154)
 │   └── tests\cefsimple_capi\                  # 순수 C11 C API 메인 백엔드 소스 디렉터리
@@ -184,6 +185,7 @@ lite_browser\
 │       ├── simple_handler.c / h               # IPC 액션 라우터, 탭 제어, 옴니박스 동기화
 │       ├── simple_life_span_handler.c         # 팝업 가로채기 및 UAF 방지 비동기 수명 주기 가드
 │       ├── simple_download_handler.c / h      # CEF 다운로드 추적, 자동 중복 순번 및 상태 동기화
+│       ├── simple_gzip.c / h                  # 경량 Deflate/Gzip 인플레이스 압축 해제기
 │       └── simple_vault.c / h                 # Windows DPAPI (CryptProtectData) 보안 볼트
 └── docs\                                      # 프로젝트 문서 및 에셋
     ├── logo.png                               # 256x256 HiDPI 투명 브라우저 로고
