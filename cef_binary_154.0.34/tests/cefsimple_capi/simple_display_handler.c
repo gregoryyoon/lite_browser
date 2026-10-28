@@ -11,7 +11,6 @@
 #include "include/capi/views/cef_window_capi.h"
 #include "tests/cefsimple_capi/ref_counted.h"
 #include "tests/cefsimple_capi/simple_handler.h"
-#include "tests/cefsimple_capi/simple_download_handler.h"
 #include "tests/cefsimple_capi/simple_utils.h"
 #include <stdarg.h>
 
@@ -138,18 +137,11 @@ display_handler_on_address_change(cef_display_handler_t* self,
 
         matching_tab_idx = i;
         if (url_utf8.str) {
-          const char *display_url = url_utf8.str;
-          char orig[4096] = {0};
-          if (strncmp(display_url, "file:///", 8) == 0 && strstr(display_url, "/inline_text/") != NULL) {
-            if (simple_download_lookup_inline_url(display_url, orig, sizeof(orig))) {
-              display_url = orig;
-            }
-          }
           if (is_right) {
-            strncpy(win_ctx->tabs[i].right_url, display_url, sizeof(win_ctx->tabs[i].right_url) - 1);
+            strncpy(win_ctx->tabs[i].right_url, url_utf8.str, sizeof(win_ctx->tabs[i].right_url) - 1);
             win_ctx->tabs[i].right_url[sizeof(win_ctx->tabs[i].right_url) - 1] = '\0';
           } else {
-            strncpy(win_ctx->tabs[i].url, display_url, sizeof(win_ctx->tabs[i].url) - 1);
+            strncpy(win_ctx->tabs[i].url, url_utf8.str, sizeof(win_ctx->tabs[i].url) - 1);
             win_ctx->tabs[i].url[sizeof(win_ctx->tabs[i].url) - 1] = '\0';
           }
         }

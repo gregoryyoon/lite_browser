@@ -41,7 +41,5 @@ void BroadcastDownloadUpdate(void);
 int simple_download_is_bubble_expected(void);
 void download_manager_set_pending_save_as(const char *url, const char *target_path);
 int simple_download_trigger_save_as(HWND parent_hwnd, cef_browser_t *browser, const char *current_url, const char *page_title);
-__declspec(dllexport) void simple_download_register_inline_mapping(const char *temp_file_path, const char *original_url);
-__declspec(dllexport) int simple_download_lookup_inline_url(const char *file_or_temp_url, char *out_url, size_t out_len);
 
 #endif // CEF_TESTS_CEFSIMPLE_CAPI_SIMPLE_DOWNLOAD_HANDLER_H_
