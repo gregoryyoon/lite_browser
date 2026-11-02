@@ -1,8 +1,8 @@
 ﻿# GitHub Release and Asset Upload Pipeline for Lite Browser
 param(
     [string]$Token = "",
-    [string]$TagName = "v0.2.6",
-    [string]$ReleaseName = "Lite Browser v0.2.6",
+    [string]$TagName = "v0.2.7",
+    [string]$ReleaseName = "Lite Browser v0.2.7",
     [string]$InstallerPath = "LiteBrowserInstaller.exe",
     [string]$ReleaseBody = ""
 )
@@ -75,31 +75,25 @@ if (-not $ReleaseBody) {
 
 ### 주요 변경 사항
 
-#### 1. 로그(.log) 및 개발/텍스트 파일 인라인 뷰어 & '다른 이름으로 링크 저장...' 대화상자
-- **Windows 레지스트리 개발 확장자 MIME Type 자동 등록**: 브라우저 실행 시 UAC 권한 없이 `HKCU\Software\Classes`에 `.log`, `.out`, `.err`, `.diff`, `.patch`, `.ini`, `.cfg`, `.conf` 8개 확장자를 `text/plain`으로 자동 등록하고 셸 캐시 즉시 갱신
-- **인라인 텍스트 뷰어 전환**: CI/웹 서버에서 전송되는 `.log` 파일 링크 클릭 시 강제 다운로드로 전환되지 않고 Microsoft Edge처럼 브라우저 탭 내에서 순수 텍스트(plain text)로 즉시 렌더링 (주소창에 원격 웹 URL 정상 표시 및 `Ctrl+S` 시 로그 전용 필터 적용)
-- **링크 우클릭 '다른 이름으로 링크 저장...' 연동**: 링크 컨텍스트 메뉴 명칭을 엣지/크롬 표준인 '다른 이름으로 링크 저장...'으로 개선하고 Windows 네이티브 파일 저장 대화상자(`GetSaveFileNameW`) 연동
-- **경량 Gzip 인플레이스 자동 압축 해제**: 서버가 `Content-Encoding: gzip`으로 전송한 파일도 C API 단일 모듈(`simple_gzip.c`)을 통해 다운로드 완료 시점에 인플레이스 자동 압축 해제하여 메모장에서 열었을 때 깨짐 없이 100% 정상 텍스트로 보존
+#### 1. 오즈리포트뷰어/전자민원 인쇄 대화상자 미표시 해결 및 Chromium 내장 PDF 뷰어 연동
+- **Chromium/Edge 내장 스킴 전체 허용**: 전자가족관계등록시스템(`efamily.scourt.go.kr`) 등 공공기관 웹사이트에서 오즈리포트뷰어(OZ Report HTML5 Viewer)의 인쇄 아이콘 클릭 시, PDF 뷰어 확장 스킴(`chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/...`)이 외부 프로토콜로 오인되어 네비게이션이 취소되던 문제를 해결
+- **Chromium 인쇄 미리보기 (Print Preview) 전면 활성화**: `enable-print-preview` 플래그 활성화를 통해 크롬 브라우저와 동일한 직관적인 인쇄 미리보기 화면(사이드바 인쇄 옵션, 레이아웃/컬러/배율 설정, 대상 프린터 선택 및 PDF 저장) 제공
+- **전역 `Ctrl + P` 인쇄 단축키 완벽 연동**: 일반 웹페이지 본문, 팝업창, 상단 주소창 포커스 상태 어디서든 `Ctrl + P` 입력 시 인쇄 미리보기가 즉시 실행되도록 단축키 파이프라인 보강
+- **팝업창 부모 HWND 보정 및 단축키 지원**: 팝업창(`BROWSER_TYPE_POPUP`)에서 모달 부모 윈도우를 팝업 창 자체로 지정하여 인쇄/저장 다이얼로그가 팝업 뒤로 가려지는 현상 방지 및 `Ctrl + W` / `Ctrl + F4` 팝업 닫기 지원
 
-#### 2. Chrome Gemini 스타일 5단계 본문 추출 파이프라인 & 비전(Vision) 하이브리드 폴백
-- **인라인 <code> 마크다운 분절 해결 & 코드 블록 보존**: 문장 내 인라인 코드가 단락 분절 없이 단일 백틱으로 보존되고, `<pre><code>` 블록 코드는 언어 클래스 및 들여쓰기 원형 보존
-- **YouTube 3-Tier 다중 수집 파이프라인 & 댓글 분석 도구**:
-  - 타임스탬프(`[MM:SS]`) 기반 자막 대본(`timedtext`) 수집 및 0바이트 BotGuard PO-Token 회피 시 DOM 트랜스크립트 패널(Tier 2) 안전 전환
-  - 단일 진실 공급원(SSOT) 메모리 객체 조회를 통해 10개 챕터 타임라인 및 3,500자 이상 설명글 100% 무손실 보존
-  - AI 에이전트 전용 `youtube_get_comments` 도구 신설 (시청자 반응 및 여론 분석)
-- **C 런타임 mtime 메모리 캐시 & 무중단 핫 리로딩**: 파편화된 DOM 추출 스크립트를 `ui/content_extractor.js`로 단일화하고, `_stat64` 기반 파일 수정 감지 시 런타임 재컴파일 없이 즉시 리로드
-- **Mozilla Readability 휴리스틱 노이즈 필터링 & 16k 헤드-테일 청킹**: 비본문 광고/사이드바 제거, 링크 밀도 0.65 초과 클러스터 가지치기, 긴 문서의 결론 누락을 방지하는 스마트 청킹
-- **차트/대시보드 페이지 감지 시 Win32 GDI+ 뷰포트 비전(Vision) 캡처**:
-  - Canvas, WebGL, SVG 고밀도 페이지 자동 감지 (`detectVisualContext`)
-  - 활성 탭 HWND 클라이언트 영역을 `BitBlt` 및 GDI+ 동적 로드로 80% 압축 품질 JPEG 인코딩
-  - `browser_take_screenshot` 툴 및 Gemini / OpenAI / Claude 멀티모달 LLM 비전 페이로드 연동
-  - 사이드패널 웰컴 카드 프롬프트 칩 개편 (`[현재 페이지 요약]`, `[화면 캡처 후 분석]`, `[열린 탭 비교]`)
+#### 2. Windows 기본 PDF 뷰어 등록 연동 (PDF File Associations)
+- **인스톨러(.nsi) 및 런타임 PDF 기본 앱 연동**: 인스톨러 설치 시 `HKCU\Software\Classes\.pdf`를 `LiteBrowserHTML`로 정식 등록하고 `OpenWithProgids` 및 `FileExts` 레지스트리를 설정하여 윈도우 탐색기 우클릭 '연결 프로그램' 및 Windows 기본 앱 목록에 LiteBrowser가 즉시 노출
+- 프로그램 제거 시 등록된 PDF 레지스트리 키를 깨끗하게 원복하도록 언인스톨러 스크립트 보강
 
-#### 3. 팝업 및 새 탭 라이프사이클 안정성 강화
-- **POST 페이로드 및 창 컨텍스트 보존**: `window.open` 새 탭 팝업 시 POST 요청 페이로드와 `window.opener` 컨텍스트가 유실되지 않도록 C API 라이프사이클 가드 완비
+#### 3. AI 사이드패널 Gemini 스타일 사고 과정(Thinking) UI 고도화
+- **CoT 사고 과정 스트리밍 아코디언 UI**: 최신 LLM(Thinking 모델)의 사고 과정을 실시간으로 확인할 수 있는 접기/펼치기 아코디언 컴포넌트 탑재
+- **반응형 펄스 인디케이터**: 모델 응답 생성 중 실시간 상태를 안내하는 펄스 애니메이션 도트 적용 및 스트리밍 완료 후 버튼 상태 동기화 개선
 
-#### 4. 배포 및 업데이트 파이프라인
-- **Windows Git Credential Manager (GCM) 전자동 연동**: Windows 자격 증명 관리자에 안전하게 저장된 GitHub 토큰을 감지하여 릴리즈 및 인스톨러 배포를 100% 무인 자동화
+#### 4. 다운로드 서브시스템 간소화 및 안정성 극대화
+- 임시 인라인 캐싱 및 복잡한 Gzip 인플레이스 디컴프레서 모듈을 정규 CEF 다운로드 스트림 파이프라인으로 일원화하여 다운로드 신뢰성 및 시스템 안정성 대폭 향상
+
+#### 5. 배포 및 업데이트 파이프라인
+- **Windows Git Credential Manager (GCM) 전자동 연동**: Windows 자격 증명 관리자에 안전하게 저장된 GitHub 토큰을 자동 감지하여 100% 무인 자동 배포
 - **보안 및 무결성**: 최신 Authenticode SHA-256 전자 서명 및 DigiCert RFC 3161 공인 타임스탬프 적용
 "@
 }
