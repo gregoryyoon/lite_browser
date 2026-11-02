@@ -278,6 +278,12 @@ void CEF_CALLBACK simple_app_on_before_command_line_processing(
   command_line->append_switch(command_line, &switch2);
   cef_string_clear(&switch2);
 
+  // Enable Chromium Print Preview (window.print() / Ctrl+P WebUI dialog)
+  cef_string_t print_switch = {};
+  cef_string_from_ascii("enable-print-preview", 20, &print_switch);
+  command_line->append_switch(command_line, &print_switch);
+  cef_string_clear(&print_switch);
+
   // Disable automatic HTTP->HTTPS upgrades to prevent intranet HTTP sites (e.g. http://jackson.cnm.com)
   // from being forced to HTTPS.
   append_disable_feature_if_missing(command_line, "HttpsUpgrades");

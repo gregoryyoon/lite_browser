@@ -1701,11 +1701,14 @@ int CEF_CALLBACK request_handler_on_before_browse(
 
     if (url_utf8.str) {
       simple_request_handler_t *req_h = (simple_request_handler_t*)self;
-      browser_window_t *w_ctx = (req_h && req_h->parent) ? req_h->parent->window_ctx : NULL;
-      HWND parent_hwnd = w_ctx ? w_ctx->main_hwnd : NULL;
+      simple_handler_t *parent_h = req_h ? req_h->parent : NULL;
+      browser_window_t *w_ctx = parent_h ? parent_h->window_ctx : NULL;
+      HWND parent_hwnd = (parent_h && parent_h->type == BROWSER_TYPE_POPUP && parent_h->popup_hwnd)
+                             ? parent_h->popup_hwnd
+                             : (w_ctx ? w_ctx->main_hwnd : NULL);
 
       if (HandleExternalProtocolForBrowser(parent_hwnd, url_utf8.str, browser, frame)) {
-        LogMsg("request_handler_on_before_browse: handled external protocol -> cancel navigation\n");
+        LogMsg("request_handler_on_before_browse: handled external protocol (url=%s) -> cancel navigation\n", url_utf8.str);
         cef_string_utf8_clear(&url_utf8);
         cef_string_userfree_free(url_userfree);
         return 1;
@@ -3521,7 +3524,7 @@ int CEF_CALLBACK request_handler_on_before_browse(
               PostMessage(win_ctx->main_hwnd, WM_CLOSE, 0, 0);
             }
           }
-        } else if (strcmp(action, "print") == 0) {
+        } else if (strcmp(action, "print") == 0 || strcmp(action, "trigger-print") == 0) {
           if (cb) {
             cef_browser_host_t* host = cb->get_host(cb);
             if (host) {
@@ -5132,13 +5135,35 @@ int CEF_CALLBACK keyboard_handler_on_pre_key_event(
     int has_ctrl = (event->modifiers & EVENTFLAG_CONTROL_DOWN) && !(event->modifiers & EVENTFLAG_ALT_DOWN);
     int has_shift = (event->modifiers & EVENTFLAG_SHIFT_DOWN);
 
-    // Ctrl + F4 or Ctrl + W: Close current active tab
+    // Ctrl + F4 or Ctrl + W: Close current active tab or popup window
     if (has_ctrl && !has_shift && (event->windows_key_code == VK_F4 || event->windows_key_code == 'W' || event->windows_key_code == 'w')) {
+      if (handler->parent->type == BROWSER_TYPE_POPUP && handler->parent->popup_hwnd) {
+        PostMessage(handler->parent->popup_hwnd, WM_CLOSE, 0, 0);
+        return 1;
+      }
       if (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
         int target_id = win_ctx->tabs[win_ctx->active_tab_index].tab_id;
         CloseTab(win_ctx, target_id);
       }
       return 1; // Handled! Suppress default Chromium internal accelerator.
+    }
+
+    // Ctrl + P: Print (System Print Dialog)
+    if (has_ctrl && !has_shift && (event->windows_key_code == 'P' || event->windows_key_code == 'p')) {
+      cef_browser_t* target_b = browser;
+      if (!target_b && win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+        tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];
+        target_b = (active_tab->is_split && active_tab->active_split == 1 && active_tab->right_browser)
+                       ? active_tab->right_browser : active_tab->browser;
+      }
+      if (target_b) {
+        cef_browser_host_t* host = target_b->get_host(target_b);
+        if (host) {
+          host->print(host);
+          host->base.release(&host->base);
+        }
+      }
+      return 1; // Handled! Suppress default Chromium accelerator.
     }
 
     // Ctrl + S: Save As...

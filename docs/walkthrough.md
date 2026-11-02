@@ -3083,3 +3083,43 @@ CI/웹 서버(예: `http://ci.chipsnmedia.com/.../0.log`)에서 제공하는 `.l
   - `simple_is_gzip_file`: 일반 텍스트(0), 빈 Gzip(1), 실제 ASCII/한글 로그 Gzip(1), 100,000라인 4.8MB Gzip(1), 손상된 Gzip(1) 판별 검증 통과.
   - `simple_decompress_gzip_file_inplace`: 빈 Gzip, 한국어/영문 혼합 로그, 100,000라인 대용량 로그(4.76MB 원본 대비 바이트 100% 일치) 압축 해제 검증 통과.
   - `simple_download_lookup_inline_url`: 인라인 임시 경로로부터 원본 웹 URL 역조회 100% 매칭 검증 완료.
+---
+
+## 80. 오즈리포트뷰어/전자민원 인쇄 대화상자 미표시 해결, Chromium 내장 PDF 뷰어 연동, 인스톨러 PDF 기본 앱 등록 및 Chrome 인쇄 미리보기 활성화 (Fix OZ Report Viewer Printing, Allow Chromium Built-in PDF Extension, Register PDF Associations in Installer & Enable Chromium Print Preview)
+
+### 80.1 개요
+대한민국 법원 전자가족관계등록시스템(`efamily.scourt.go.kr`) 등의 공공기관 웹사이트에서 가족관계증명서 발급 팝업창 내 **오즈리포트뷰어(OZ Report HTML5 Viewer)**의 인쇄 아이콘을 클릭해도 인쇄 대화상자나 미리보기가 전혀 뜨지 않던 문제를 해결했습니다.  
+원인 분석 결과, 오즈리포트가 위변조 방지 출력을 위해 생성한 PDF 문서를 렌더링하고자 Chromium 내장 PDF 뷰어(`chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/...`)를 호출했으나, LiteBrowser의 외부 프로토콜 필터가 `chrome-extension`을 미등록 외부 앱으로 오인하여 네비게이션을 강제 차단(`cancel navigation`)하고 있었습니다.  
+이에 따라 Chromium 및 Edge의 모든 내부 스킴(`chrome*`, `edge*`, `filesystem` 등)을 내장 웹 표준 스킴으로 등록하여 브라우저 내장 PDF 뷰어 및 인쇄 파이프라인을 완전히 개방하고, `enable-print-preview` 플래그를 활성화하여 크롬 브라우저와 동일한 인쇄 미리보기 화면을 제공하도록 개선했습니다. 또한 인스톨러(`installer.nsi`)와 기본 앱 등록 모듈(`default_browser.c`)에 `.pdf` 파일 확장자 및 ProgID를 추가하여 설치 시 Windows 기본 PDF 뷰어로 등록되도록 구현했습니다.
+
+### 80.2 주요 구현 내역
+1. **Chromium 내장 스킴 전체 화이트리스트 등록 (`simple_protocol_handler.c`)**:
+   - `is_standard_web_scheme` 검사 시 `_strnicmp(scheme, "chrome", 6) == 0` 및 `_strnicmp(scheme, "edge", 4) == 0` 조건을 추가하여 `chrome-extension`, `chrome-untrusted`, `chrome-search`, `edge-extension`, `filesystem`, `isolated-app` 등 모든 브라우저 내부 스킴을 표준 웹 스킴으로 일괄 허용.
+   - 오즈리포트뷰어가 숨겨진 `<iframe>`으로 `chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/index.html`을 로드할 때 외부 프로토콜로 오인되어 네비게이션이 취소되던 문제를 원천 해결.
+   - `LogMsg`를 보강하여 미등록/등록 프로토콜 및 URL 정보가 디버그 로그에 정확히 기록되도록 개선.
+2. **크롬 인쇄 미리보기 활성화 (`simple_app.c`)**:
+   - 커맨드라인 스위치에 `enable-print-preview`를 추가하여 웹페이지, 오즈리포트 인쇄 아이콘, `Ctrl + P`, 우클릭 "인쇄..." 실행 시 크롬 스타일의 인쇄 미리보기(사이드바 옵션, 레이아웃/컬러/배율 설정, 대상 프린터 선택 및 PDF 저장)가 정상적으로 표출되도록 활성화.
+3. **일반 탭 및 팝업창 전체 `Ctrl + P` 인쇄 단축키 및 부모 핸들 보강 (`simple_handler.c`, `simple_life_span_handler.c`, `ui/app.js`)**:
+   - `keyboard_handler_on_pre_key_event`에서 `Ctrl + P` 입력 시 활성 탭 브라우저 및 팝업창 브라우저의 `host->print(host)`를 호출하도록 연결.
+   - 상단 주소창 포커스 시에도 `ui/app.js`에서 `Ctrl + P`를 감지하여 백엔드 `ui-action/print`로 전달.
+   - `request_handler_on_before_browse`에서 팝업창(`BROWSER_TYPE_POPUP`)일 때 모달 부모 윈도우(`parent_hwnd`)를 메인 창이 아닌 `popup_hwnd`로 지정하여 다이얼로그가 팝업 뒤로 가려지는 현상 방지.
+   - 팝업창에서 `Ctrl + F4` 또는 `Ctrl + W` 입력 시 팝업 윈도우가 닫히도록 단축키 처리 보강.
+4. **인스톨러 및 런타임 PDF 기본 뷰어 등록 (`installer.nsi`, `default_browser.c`)**:
+   - `installer.nsi`: 설치 시 `HKCU\Software\Classes\.pdf`를 `LiteBrowserHTML`로 지정하고, `Software\Classes\.pdf\OpenWithProgids` 및 `Explorer\FileExts\.pdf\OpenWithProgids`에 LiteBrowser를 정식 등록. 프로그램 제거(Uninstall) 시 등록된 레지스트리 값을 깨끗이 정리하도록 반영.
+   - `default_browser.c`: `default_browser_register_capabilities`에 `.pdf`의 `OpenWithProgids` 및 `FileExts` 등록 코드를 추가하여 윈도우 탐색기 우클릭 "연결 프로그램" 최상단 및 기본 앱 목록에 LiteBrowser가 즉시 노출되도록 구현.
+
+### 80.3 관련 소스 코드
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_protocol_handler.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_protocol_handler.c): `chrome*`, `edge*`, `filesystem` 내장 스킴 전체 허용 및 프로토콜 로깅 보강
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_app.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_app.c): `enable-print-preview` 스위치 활성화
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.c): 팝업창 부모 HWND 보정, `Ctrl + P` 인쇄 단축키, `Ctrl + F4 / Ctrl + W` 팝업 닫기 지원
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_life_span_handler.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_life_span_handler.c): `chrome://print` 및 `chrome-untrusted://print` 내부 스킴 허용 및 URL 로깅
+- [`cef_binary_154.0.34/tests/cefsimple_capi/default_browser.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/default_browser.c): `.pdf` OpenWithProgids 및 FileExts 등록
+- [`installer.nsi`](file:///c:/projects/lite_browser/installer.nsi): `.pdf` 파일 확장자 및 OpenWithProgids 레지스트리 설치/제거 연동
+- [`ui/app.js`](file:///c:/projects/lite_browser/ui/app.js): 상단 UI 포커스 시 `Ctrl + P` 단축키 감지 및 `print` 액션 전송
+
+### 80.4 빌드 및 검증 결과
+- **C API 빌드 검증**: `cef_binary_154.0.34` MSVC Debug 타겟 컴파일 및 링크 성공 (`Exit code 0, 경고 0개, 오류 0개`, `lite_browser.dll` 및 `lite_browser.exe` 정상 갱신).
+- **실기 검증**:
+  - 대한민국 법원 전자가족관계등록시스템(`efamily.scourt.go.kr`) 증명서 발급 팝업창에서 오즈리포트뷰어 인쇄 아이콘 클릭 시, 차단 없이 Chromium 내장 PDF 뷰어 및 크롬 인쇄 미리보기 화면이 정상 팝업됨을 실기 확인.
+  - 일반 탭 및 팝업창에서 `Ctrl + P` 입력 시 인쇄 미리보기가 정상 실행됨을 확인.
+  - 브라우저를 통한 `.pdf` 문서 직접 열람 및 인쇄 파이프라인 정상 동작 확인.

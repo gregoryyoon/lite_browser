@@ -14,6 +14,7 @@
 #include <commctrl.h>
 #include "include/capi/cef_browser_capi.h"
 #include "include/capi/cef_frame_capi.h"
+#include "tests/cefsimple_capi/simple_handler.h"
 
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "shell32.lib")
@@ -74,9 +75,16 @@ static void save_allowed_protocol(const char* origin, const char* scheme) {
 }
 
 static int is_standard_web_scheme(const char* scheme) {
+  if (!scheme || !*scheme) return 0;
+
+  // Allow all Chromium and Edge internal schemes (e.g. chrome, chrome-extension, chrome-untrusted, edge, etc.)
+  if (_strnicmp(scheme, "chrome", 6) == 0) return 1;
+  if (_strnicmp(scheme, "edge", 4) == 0) return 1;
+
   static const char* kStandardSchemes[] = {
-    "http", "https", "file", "chrome", "edge", "lite", "about",
-    "data", "blob", "javascript", "ws", "wss", "devtools", "view-source", NULL
+    "http", "https", "file", "lite", "about",
+    "data", "blob", "javascript", "ws", "wss", "devtools",
+    "view-source", "filesystem", "isolated-app", NULL
   };
   for (int i = 0; kStandardSchemes[i] != NULL; i++) {
     if (_stricmp(scheme, kStandardSchemes[i]) == 0) {
@@ -184,8 +192,11 @@ int HandleExternalProtocolIfNeeded(HWND parent_hwnd, const char* url, const char
     // Protocol is not registered in Windows (e.g. astx://, touchenex:// when not installed).
     // Silently cancel navigation to prevent Chromium from navigating to ERR_UNKNOWN_URL_SCHEME,
     // preserving the current page so the user can see download/install instructions.
+    LogMsg("HandleExternalProtocolIfNeeded: unregistered protocol '%s' (url=%s) -> canceling navigation\n", scheme, url);
     return 1;
   }
+
+  LogMsg("HandleExternalProtocolIfNeeded: registered protocol '%s' (app=%ls, url=%s)\n", scheme, app_name, url);
 
   // 4. Extract site origin
   char origin[512] = {0};

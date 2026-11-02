@@ -1378,6 +1378,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.ctrlKey && !e.altKey && !e.shiftKey && (e.key === 'F4' || e.key === 'w' || e.key === 'W')) {
       e.preventDefault();
       sendUiAction('http://ui-action/close-active-tab');
+    } else if (e.ctrlKey && !e.altKey && !e.shiftKey && (e.key === 'p' || e.key === 'P')) {
+      e.preventDefault();
+      sendUiAction('http://ui-action/print');
     } else if (e.ctrlKey && (e.key === 'f' || e.key === 'F')) {
       if (!isInput) {
         e.preventDefault();

@@ -140,6 +140,13 @@ Section "Install"
   WriteRegStr HKCU "Software\Classes\LiteBrowserHTML" "FriendlyTypeName" "Lite Browser Document"
   WriteRegStr HKCU "Software\Classes\LiteBrowserHTML\DefaultIcon" "" "$\"$INSTDIR\lite_browser.exe$\",0"
   WriteRegStr HKCU "Software\Classes\LiteBrowserHTML\shell\open\command" "" "$\"$INSTDIR\lite_browser.exe$\" $\"%1$\""
+
+  ; Register File Associations and OpenWithProgids for HTML and PDF
+  WriteRegStr HKCU "Software\Classes\.htm\OpenWithProgids" "LiteBrowserHTML" ""
+  WriteRegStr HKCU "Software\Classes\.html\OpenWithProgids" "LiteBrowserHTML" ""
+  WriteRegStr HKCU "Software\Classes\.pdf" "" "LiteBrowserHTML"
+  WriteRegStr HKCU "Software\Classes\.pdf\OpenWithProgids" "LiteBrowserHTML" ""
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.pdf\OpenWithProgids" "LiteBrowserHTML" ""
   
   ; If silent installation (auto-update), relaunch lite_browser.exe
   ${If} ${Silent}
@@ -186,4 +193,12 @@ Section "Uninstall"
   DeleteRegValue HKCU "Software\RegisteredApplications" "LiteBrowser"
   DeleteRegKey HKCU "Software\Classes\LiteBrowserHTML"
   DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser"
+  DeleteRegValue HKCU "Software\Classes\.htm\OpenWithProgids" "LiteBrowserHTML"
+  DeleteRegValue HKCU "Software\Classes\.html\OpenWithProgids" "LiteBrowserHTML"
+  DeleteRegValue HKCU "Software\Classes\.pdf\OpenWithProgids" "LiteBrowserHTML"
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.pdf\OpenWithProgids" "LiteBrowserHTML"
+  ReadRegStr $0 HKCU "Software\Classes\.pdf" ""
+  ${If} $0 == "LiteBrowserHTML"
+    DeleteRegValue HKCU "Software\Classes\.pdf" ""
+  ${EndIf}
 SectionEnd

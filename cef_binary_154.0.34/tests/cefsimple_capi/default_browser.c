@@ -62,9 +62,11 @@ void default_browser_register_capabilities(void) {
   reg_set_str(HKEY_CURRENT_USER, L"Software\\Classes\\LiteBrowserHTML\\DefaultIcon", NULL, icon_path);
   reg_set_str(HKEY_CURRENT_USER, L"Software\\Classes\\LiteBrowserHTML\\shell\\open\\command", NULL, open_cmd);
 
-  // 2. OpenWithProgids for .htm and .html
+  // 2. OpenWithProgids for .htm, .html and .pdf
   reg_set_str(HKEY_CURRENT_USER, L"Software\\Classes\\.htm\\OpenWithProgids", L"LiteBrowserHTML", L"");
   reg_set_str(HKEY_CURRENT_USER, L"Software\\Classes\\.html\\OpenWithProgids", L"LiteBrowserHTML", L"");
+  reg_set_str(HKEY_CURRENT_USER, L"Software\\Classes\\.pdf\\OpenWithProgids", L"LiteBrowserHTML", L"");
+  reg_set_str(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FileExts\\.pdf\\OpenWithProgids", L"LiteBrowserHTML", L"");
 
   // 3. StartMenuInternet\LiteBrowser
   const wchar_t* smi_base = L"Software\\Clients\\StartMenuInternet\\LiteBrowser";

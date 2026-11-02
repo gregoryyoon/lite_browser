@@ -308,9 +308,16 @@ int CEF_CALLBACK life_span_handler_on_before_popup(
     cef_string_utf8_t url_utf8 = {};
     cef_string_to_utf8(target_url->str, target_url->length, &url_utf8);
     if (url_utf8.str && url_utf8.length > 0) {
+      // Allow internal Print Preview dialogs (chrome://print / chrome-untrusted://print)
+      if (strncmp(url_utf8.str, "chrome://print", 14) == 0 ||
+          strncmp(url_utf8.str, "chrome-untrusted://print", 24) == 0) {
+        cef_string_utf8_clear(&url_utf8);
+        return 0; // Let CEF/Chromium handle print preview natively
+      }
+
       HWND parent_hwnd = win_ctx ? win_ctx->main_hwnd : NULL;
       if (HandleExternalProtocolForBrowser(parent_hwnd, url_utf8.str, browser, frame)) {
-        LogMsg("life_span_handler_on_before_popup: handled external protocol -> cancel popup\n");
+        LogMsg("life_span_handler_on_before_popup: handled external protocol (url=%s) -> cancel popup\n", url_utf8.str);
         cef_string_utf8_clear(&url_utf8);
         return 1;
       }
