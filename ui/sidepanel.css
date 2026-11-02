@@ -305,7 +305,181 @@ body {
   box-shadow: var(--shadow-sm);
 }
 
-/* Thinking Box */
+/* Google Gemini Web Style Thinking Component */
+@keyframes gemini-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+@keyframes gemini-pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.85;
+  }
+  50% {
+    transform: scale(1.15);
+    opacity: 1;
+    filter: drop-shadow(0 0 4px var(--accent-color));
+  }
+}
+
+.gemini-thinking-container {
+  background: var(--accent-light, rgba(0, 102, 204, 0.08));
+  border: 1px solid var(--accent-color, #0066cc);
+  border-radius: var(--radius-sm, 8px);
+  margin: 4px 0 6px 0;
+  overflow: hidden;
+  transition: background-color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+.gemini-thinking-container.completed {
+  background: var(--bg-secondary);
+  border-color: var(--border-color);
+}
+
+.gemini-thinking-container.completed:hover {
+  border-color: var(--border-hover);
+}
+
+[data-theme="dark"] .gemini-thinking-container {
+  background: var(--accent-light, rgba(56, 189, 248, 0.12));
+  border-color: var(--accent-color, #38bdf8);
+}
+
+[data-theme="dark"] .gemini-thinking-container.completed {
+  background: var(--bg-secondary, #14161f);
+  border-color: var(--border-color, rgba(255, 255, 255, 0.08));
+}
+
+[data-theme="dark"] .gemini-thinking-container.completed:hover {
+  border-color: var(--border-hover, rgba(255, 255, 255, 0.16));
+}
+
+.gemini-thinking-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 11.5px;
+  font-weight: 500;
+  transition: background-color 0.15s ease;
+}
+
+.gemini-thinking-header:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+[data-theme="dark"] .gemini-thinking-header:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.gemini-thinking-header-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.gemini-thinking-icon {
+  width: 14px;
+  height: 14px;
+  stroke-width: 2;
+  fill: none;
+  stroke: currentColor;
+  flex-shrink: 0;
+  color: var(--accent-color);
+  transition: transform 0.2s ease, opacity 0.2s ease, color 0.2s ease;
+}
+
+.gemini-thinking-icon.pulse {
+  animation: gemini-pulse 1.8s infinite ease-in-out;
+}
+
+.gemini-thinking-container.completed .gemini-thinking-icon {
+  color: var(--text-muted);
+}
+
+.gemini-thinking-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.gemini-thinking-label.shimmer {
+  background: linear-gradient(90deg, var(--text-muted, #71717a) 0%, var(--accent-color, #0066cc) 40%, var(--accent-mint, #0d9488) 60%, var(--text-muted, #71717a) 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: gemini-shimmer 2.2s infinite linear;
+}
+
+[data-theme="dark"] .gemini-thinking-label.shimmer {
+  background: linear-gradient(90deg, var(--text-muted, #94a3b8) 0%, var(--accent-color, #38bdf8) 40%, var(--accent-mint, #2dd4bf) 60%, var(--text-muted, #94a3b8) 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: gemini-shimmer 2.2s infinite linear;
+}
+
+.gemini-thinking-chevron {
+  width: 13px;
+  height: 13px;
+  stroke-width: 2;
+  fill: none;
+  stroke: currentColor;
+  color: var(--text-muted);
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+
+.gemini-thinking-container.expanded .gemini-thinking-chevron {
+  transform: rotate(180deg);
+}
+
+.gemini-thinking-body {
+  max-height: 0;
+  overflow: hidden;
+  padding: 0 10px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  border-top: 1px solid transparent;
+  transition: max-height 0.25s ease-out, padding 0.2s ease, border-top-color 0.2s ease;
+}
+
+.gemini-thinking-container.expanded .gemini-thinking-body {
+  max-height: 350px;
+  overflow-y: auto;
+  padding: 8px 10px;
+  border-top-color: var(--border-color);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gemini-thinking-label.shimmer,
+  .gemini-thinking-icon.pulse {
+    animation: none;
+  }
+}
+
+.message-assistant .bubble-content:empty {
+  display: none;
+}
+
+.message-assistant .bubble-content:not(:empty) {
+  margin-top: 6px;
+}
+
+/* Legacy Thinking Box Fallback */
 .thinking-box {
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);

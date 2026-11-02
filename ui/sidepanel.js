@@ -700,10 +700,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
   let activeRunningToolCard = null;
 
-  // 2. Task Runtime Status & Callbacks
+  // 2. Task Runtime Status & Callbacks (SSOT for Assistant State & Send/Stop Buttons)
   window.taskRuntime.onStateChange = (newState, detail) => {
     statusBadge.textContent = newState;
     statusBadge.className = `status-badge status-${newState.toLowerCase()}`;
+
+    if (newState === TaskState.DONE || newState === TaskState.IDLE) {
+      isGenerating = false;
+      sendBtn.classList.remove('hidden');
+      stopBtn.classList.add('hidden');
+      if (promptInput) promptInput.focus();
+    } else if (newState === TaskState.RUNNING || newState === TaskState.PAUSED || newState === TaskState.WAITING || newState === TaskState.STUCK) {
+      isGenerating = true;
+      sendBtn.classList.add('hidden');
+      stopBtn.classList.remove('hidden');
+    }
 
     if (activeRunningToolCard && detail) {
       activeRunningToolCard.updateProgress(detail);
@@ -821,15 +832,86 @@ document.addEventListener('DOMContentLoaded', () => {
     const statusNotice = document.createElement('div');
     statusNotice.className = 'status-notice hidden';
 
-    const thinkingBox = document.createElement('details');
-    thinkingBox.className = 'thinking-box hidden';
-    thinkingBox.innerHTML = '<summary><svg class="icon-inline" viewBox="0 0 24 24"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/><path d="M12 18v4"/></svg> <span>사고 과정 (Thinking)...</span></summary><div class="thinking-content"></div>';
+    const thinkingContainer = document.createElement('div');
+    thinkingContainer.className = 'gemini-thinking-container';
+
+    const thinkingHeader = document.createElement('div');
+    thinkingHeader.className = 'gemini-thinking-header';
+    thinkingHeader.innerHTML = `
+      <div class="gemini-thinking-header-left">
+        <svg class="icon-inline gemini-thinking-icon pulse" viewBox="0 0 24 24">
+          <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>
+          <path d="M5 3v4"/>
+          <path d="M19 17v4"/>
+          <path d="M3 5h4"/>
+          <path d="M17 19h4"/>
+        </svg>
+        <span class="gemini-thinking-label shimmer">생각하는 중 (0초)...</span>
+      </div>
+      <svg class="icon-inline gemini-thinking-chevron" viewBox="0 0 24 24">
+        <polyline points="6 9 12 15 18 9"/>
+      </svg>
+    `;
+
+    const thinkingBody = document.createElement('div');
+    thinkingBody.className = 'gemini-thinking-body';
+
+    thinkingContainer.appendChild(thinkingHeader);
+    thinkingContainer.appendChild(thinkingBody);
+
+    const thinkingIcon = thinkingHeader.querySelector('.gemini-thinking-icon');
+    const thinkingLabel = thinkingHeader.querySelector('.gemini-thinking-label');
+
+    let thinkingSec = 0;
+    let isThinkingFinished = false;
+
+    const thinkingTimer = setInterval(() => {
+      thinkingSec++;
+      if (!isThinkingFinished && thinkingLabel) {
+        thinkingLabel.textContent = `생각하는 중 (${thinkingSec}초)...`;
+      }
+    }, 1000);
+
+    thinkingHeader.addEventListener('click', () => {
+      const isExpanded = thinkingContainer.classList.toggle('expanded');
+      const currentText = thinkingBody.textContent.trim();
+      if (isExpanded && (!currentText || currentText.startsWith('내부 추론 및 실행 계획 수립'))) {
+        if (!isThinkingFinished) {
+          thinkingBody.textContent = `내부 추론 및 실행 계획 수립 중 (경과: ${thinkingSec}초)...`;
+        } else {
+          thinkingBody.textContent = `내부 추론 및 실행 계획 수립 완료 (소요 시간: ${thinkingSec}초)`;
+        }
+      }
+    });
+
+    function finishThinking() {
+      if (isThinkingFinished) return;
+      isThinkingFinished = true;
+      if (thinkingTimer) {
+        clearInterval(thinkingTimer);
+      }
+
+      thinkingContainer.classList.add('completed');
+      if (thinkingLabel) {
+        thinkingLabel.classList.remove('shimmer');
+        thinkingLabel.textContent = `생각 완료 (${thinkingSec}초 소요)`;
+      }
+      if (thinkingIcon) {
+        thinkingIcon.classList.remove('pulse');
+        thinkingIcon.innerHTML = '<polyline points="20 6 9 17 4 12"/>';
+      }
+      const currentText = thinkingBody.textContent.trim();
+      if (!currentText || currentText.startsWith('내부 추론 및 실행 계획 수립')) {
+        thinkingBody.textContent = `내부 추론 및 실행 계획 수립 완료 (소요 시간: ${thinkingSec}초)`;
+      }
+      thinkingContainer.classList.remove('expanded');
+    }
 
     const contentDiv = document.createElement('div');
     contentDiv.className = 'bubble-content';
 
     div.appendChild(statusNotice);
-    div.appendChild(thinkingBox);
+    div.appendChild(thinkingContainer);
     div.appendChild(contentDiv);
     messagesList.appendChild(div);
     chatContainer.scrollTop = chatContainer.scrollHeight;
@@ -837,9 +919,16 @@ document.addEventListener('DOMContentLoaded', () => {
     return {
       container: div,
       statusNotice,
-      thinkingBox,
-      thinkingContent: thinkingBox.querySelector('.thinking-content'),
-      contentDiv
+      thinkingBox: thinkingContainer,
+      thinkingContainer,
+      thinkingHeader,
+      thinkingIcon,
+      thinkingLabel,
+      thinkingBody,
+      thinkingContent: thinkingBody,
+      hasThoughtText: false,
+      contentDiv,
+      finishThinking
     };
   }
 
@@ -1157,7 +1246,6 @@ document.addEventListener('DOMContentLoaded', () => {
   async function handleSendPrompt(customText = null) {
     const prompt = (customText || promptInput.value).trim();
     if (!prompt || isGenerating) return;
-    if (window.sendNativeLog) window.sendNativeLog(`[Sidepanel] User Prompt: "${prompt}"`);
 
     window.lastUserPrompt = prompt;
     if (window.taskRuntime) {
@@ -1174,6 +1262,7 @@ document.addEventListener('DOMContentLoaded', () => {
     stopBtn.classList.remove('hidden');
     abortController = new AbortController();
     let latestCapturedScreenshotInTurn = null;
+    let currentStreamingBubble = null;
 
     window.taskRuntime.setState(TaskState.RUNNING, 'AI 응답 및 작업 계획 생성 중...');
 
@@ -1228,6 +1317,7 @@ document.addEventListener('DOMContentLoaded', () => {
       while (loopCount < maxLoops) {
         loopCount++;
         const bubble = createStreamingBubble();
+        currentStreamingBubble = bubble;
         let toolCalls = [];
 
         // Filter out single-shot tools once executed in this turn to prompt final text answer
@@ -1274,21 +1364,25 @@ document.addEventListener('DOMContentLoaded', () => {
             }
           },
           onThinking: (chunk, full) => {
+            bubble.hasThoughtText = true;
             bubble.statusNotice.classList.add('hidden');
-            bubble.thinkingBox.classList.remove('hidden');
+            bubble.thinkingContainer.classList.add('expanded');
             bubble.thinkingContent.textContent = full;
+            chatContainer.scrollTop = chatContainer.scrollHeight;
           },
           onChunk: (chunk, full) => {
+            bubble.finishThinking();
             bubble.statusNotice.classList.add('hidden');
             bubble.contentDiv.innerHTML = formatMarkdown(full);
             chatContainer.scrollTop = chatContainer.scrollHeight;
           },
           onToolCall: (tc) => {
-            if (window.sendNativeLog) window.sendNativeLog(`[Sidepanel] LLM onToolCall: ${tc.name} ${JSON.stringify(tc.args)}`);
+            bubble.finishThinking();
             bubble.statusNotice.classList.add('hidden');
             toolCalls.push(tc);
           },
           onComplete: ({ fullText }) => {
+            bubble.finishThinking();
             if (fullText && !bubble.contentDiv.innerText.trim()) {
               bubble.statusNotice.classList.add('hidden');
               bubble.contentDiv.innerHTML = formatMarkdown(fullText);
@@ -1297,8 +1391,10 @@ document.addEventListener('DOMContentLoaded', () => {
           }
         });
 
+        bubble.finishThinking();
+
         const fullAssistantText = (bubble.contentDiv.innerText || '').trim();
-        const hasThinking = !bubble.thinkingBox.classList.contains('hidden');
+        const hasThinking = Boolean(bubble.hasThoughtText || loopCount === 1);
 
         // If turn only produced tool calls and no text or thinking, remove empty placeholder
         if (!fullAssistantText && !hasThinking && toolCalls.length > 0) {
@@ -1401,6 +1497,14 @@ document.addEventListener('DOMContentLoaded', () => {
         window.taskRuntime.setState(TaskState.IDLE, err.message);
       }
     } finally {
+      if (currentStreamingBubble && typeof currentStreamingBubble.finishThinking === 'function') {
+        try {
+          currentStreamingBubble.finishThinking();
+        } catch (e) {
+          console.warn('finishThinking error in finally:', e);
+        }
+      }
+      currentStreamingBubble = null;
       isGenerating = false;
       sendBtn.classList.remove('hidden');
       stopBtn.classList.add('hidden');
