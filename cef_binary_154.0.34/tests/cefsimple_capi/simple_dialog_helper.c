@@ -38,7 +38,7 @@ static int is_download_bubble_window(HWND dialog_hwnd, int dialog_w, HWND root_o
   if (ex_style & WS_EX_TOOLWINDOW) {
     UINT dpi = root_owner ? GetDpiForWindow(root_owner) : 96;
     int expected_bubble_w = (int)(418.0 * ((double)dpi / 96.0));
-    int is_w_match = (dialog_w > 0 && abs(dialog_w - expected_bubble_w) <= 8);
+    int is_w_match = (dialog_w > 0 && abs(dialog_w - expected_bubble_w) <= 24);
     int bubble_exp = simple_download_is_bubble_expected();
 
     if (bubble_exp || is_w_match) {
@@ -191,8 +191,9 @@ static int calculate_dialog_target_pos(HWND dialog_hwnd, int dialog_w, int dialo
     if (GetMonitorInfo(hMon, &mi)) {
       if (target_x < mi.rcWork.left) target_x = mi.rcWork.left;
       if (target_x + dialog_w > mi.rcWork.right) target_x = mi.rcWork.right - dialog_w;
-      if (target_y < mi.rcWork.top) target_y = mi.rcWork.top;
       if (target_y + dialog_h > mi.rcWork.bottom) target_y = mi.rcWork.bottom - dialog_h;
+      if (target_y < pt_tl.y + ui_h + margin_y) target_y = pt_tl.y + ui_h + margin_y;
+      if (target_y < mi.rcWork.top) target_y = mi.rcWork.top;
     }
 
     *out_x = target_x;
@@ -246,8 +247,9 @@ static int calculate_dialog_target_pos(HWND dialog_hwnd, int dialog_w, int dialo
     if (GetMonitorInfo(hMon, &mi)) {
       if (target_x < mi.rcWork.left) target_x = mi.rcWork.left;
       if (target_x + dialog_w > mi.rcWork.right) target_x = mi.rcWork.right - dialog_w;
-      if (target_y < mi.rcWork.top) target_y = mi.rcWork.top;
       if (target_y + dialog_h > mi.rcWork.bottom) target_y = mi.rcWork.bottom - dialog_h;
+      if (target_y < target_rect.top) target_y = target_rect.top;
+      if (target_y < mi.rcWork.top) target_y = mi.rcWork.top;
     }
 
     *out_x = target_x;
@@ -303,8 +305,8 @@ static LRESULT CALLBACK ModalDialogSubclassProc(
           h = wr.bottom - wr.top;
         }
 
-        // Modal dialog and download bubble size filter (excludes ~28px link hover tooltips)
-        if (w >= 240 && w <= 950 && h >= 80 && h <= 650) {
+        // Modal dialog, print preview, and download bubble size filter (excludes ~28px link hover tooltips)
+        if (w >= 240 && w <= 2000 && h >= 80 && h <= 1400) {
           int tx = 0, ty = 0;
           if (calculate_dialog_target_pos(hWnd, w, h, &tx, &ty)) {
             pos->x = tx;
@@ -322,7 +324,7 @@ static LRESULT CALLBACK ModalDialogSubclassProc(
         GetWindowRect(hWnd, &wr);
         int w = wr.right - wr.left;
         int h = wr.bottom - wr.top;
-        if (w >= 240 && w <= 950 && h >= 80 && h <= 650) {
+        if (w >= 240 && w <= 2000 && h >= 80 && h <= 1400) {
           int tx = 0, ty = 0;
           if (calculate_dialog_target_pos(hWnd, w, h, &tx, &ty)) {
             SetWindowPos(hWnd, NULL, tx, ty, 0, 0,
@@ -381,7 +383,7 @@ static LRESULT CALLBACK CBTProc(int nCode, WPARAM wParam, LPARAM lParam) {
       GetWindowRect(hwnd, &wr);
       int w = wr.right - wr.left;
       int h = wr.bottom - wr.top;
-      if (w >= 240 && w <= 950 && h >= 80 && h <= 650) {
+      if (w >= 240 && w <= 2000 && h >= 80 && h <= 1400) {
         int tx = 0, ty = 0;
         if (calculate_dialog_target_pos(hwnd, w, h, &tx, &ty)) {
           SetWindowPos(hwnd, NULL, tx, ty, 0, 0,
@@ -420,7 +422,7 @@ static BOOL CALLBACK EnumRepositionChildDialogs(HWND child, LPARAM lParam) {
       GetWindowRect(child, &wr);
       int w = wr.right - wr.left;
       int h = wr.bottom - wr.top;
-      if (w >= 240 && w <= 950 && h >= 80 && h <= 650) {
+      if (w >= 240 && w <= 2000 && h >= 80 && h <= 1400) {
         int tx, ty;
         if (calculate_dialog_target_pos(child, w, h, &tx, &ty)) {
           SetWindowPos(child, NULL, tx, ty, 0, 0,
