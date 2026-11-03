@@ -1,8 +1,8 @@
 ﻿# GitHub Release and Asset Upload Pipeline for Lite Browser
 param(
     [string]$Token = "",
-    [string]$TagName = "v0.2.7",
-    [string]$ReleaseName = "Lite Browser v0.2.7",
+    [string]$TagName = "v0.2.8",
+    [string]$ReleaseName = "Lite Browser v0.2.8",
     [string]$InstallerPath = "LiteBrowserInstaller.exe",
     [string]$ReleaseBody = ""
 )
@@ -75,26 +75,28 @@ if (-not $ReleaseBody) {
 
 ### 주요 변경 사항
 
-#### 1. 오즈리포트뷰어/전자민원 인쇄 대화상자 미표시 해결 및 Chromium 내장 PDF 뷰어 연동
-- **Chromium/Edge 내장 스킴 전체 허용**: 전자가족관계등록시스템(`efamily.scourt.go.kr`) 등 공공기관 웹사이트에서 오즈리포트뷰어(OZ Report HTML5 Viewer)의 인쇄 아이콘 클릭 시, PDF 뷰어 확장 스킴(`chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/...`)이 외부 프로토콜로 오인되어 네비게이션이 취소되던 문제를 해결
-- **Chromium 인쇄 미리보기 (Print Preview) 전면 활성화**: `enable-print-preview` 플래그 활성화를 통해 크롬 브라우저와 동일한 직관적인 인쇄 미리보기 화면(사이드바 인쇄 옵션, 레이아웃/컬러/배율 설정, 대상 프린터 선택 및 PDF 저장) 제공
-- **전역 `Ctrl + P` 인쇄 단축키 완벽 연동**: 일반 웹페이지 본문, 팝업창, 상단 주소창 포커스 상태 어디서든 `Ctrl + P` 입력 시 인쇄 미리보기가 즉시 실행되도록 단축키 파이프라인 보강
-- **팝업창 부모 HWND 보정 및 단축키 지원**: 팝업창(`BROWSER_TYPE_POPUP`)에서 모달 부모 윈도우를 팝업 창 자체로 지정하여 인쇄/저장 다이얼로그가 팝업 뒤로 가려지는 현상 방지 및 `Ctrl + W` / `Ctrl + F4` 팝업 닫기 지원
+#### 1. 내장 마크다운(Markdown) 위지웍 에디터 & 뷰어 탑재 (Embedded WYSIWYG Editor)
+- **완전 오프라인 번들링**: TOAST UI Editor 3.2.2 및 확장 플러그인(`tui-editor-extras`)을 로컬에 100% 내장하여 인터넷 연결 없이도 안전하게 구동
+- **웹 링크 & 로컬 파일 즉각 열람**: 웹 서핑 중 `.md` 및 `.markdown` 링크(GitHub 원문 등) 클릭 시 깔끔한 타이포그래피의 웹 문서로 실시간 렌더링하며, 로컬 마크다운 파일 열람 및 위지웍 편집/저장(`Ctrl + S`) 지원
+- **스마트 원본 서식 보존**: diff 기반 알고리즘을 적용하여 편집 후 저장 시 원본 문서의 들여쓰기 깊이, 불릿 스타일, 줄바꿈(CRLF) 서식을 정밀 보존
+- **Mermaid 다이어그램 & 테마 동기화**: 문서 내 포함된 Mermaid 다이어그램 실시간 렌더링(지연 로드 최적화 적용) 및 브라우저 전역 다크/라이트 테마 자동 동기화
+- **Windows 기본 연결 프로그램 등록**: 인스톨러(`installer.nsi`) 및 런타임(`default_browser.c`)에서 `.md`, `.markdown` 확장자 연결 프로그램(`OpenWithProgids`, `SupportedTypes`) 자동 등록
 
-#### 2. Windows 기본 PDF 뷰어 등록 연동 (PDF File Associations)
-- **인스톨러(.nsi) 및 런타임 PDF 기본 앱 연동**: 인스톨러 설치 시 `HKCU\Software\Classes\.pdf`를 `LiteBrowserHTML`로 정식 등록하고 `OpenWithProgids` 및 `FileExts` 레지스트리를 설정하여 윈도우 탐색기 우클릭 '연결 프로그램' 및 Windows 기본 앱 목록에 LiteBrowser가 즉시 노출
-- 프로그램 제거 시 등록된 PDF 레지스트리 키를 깨끗하게 원복하도록 언인스톨러 스크립트 보강
+#### 2. 업데이트 뱃지 VS Code 스타일 상세 팝오버 카드 탑재
+- **호버 정보 카드 노출**: 상단 툴바의 업데이트 준비 완료 뱃지에 마우스를 올리면 현재 버전, 최신 버전, 릴리즈 날짜를 한눈에 확인할 수 있는 미니멀 팝오버 카드 표시
+- **의도 감지 인터랙션**: 단순 커서 통과 시의 번쩍임을 차단하는 250ms 의도 감지 딜레이 및 카드 조작을 위한 200ms 이동 유예 시간(Grace Period) 적용
+- **원클릭 액션 버튼**: [릴리즈 노트] 클릭 시 브라우저 새 탭으로 GitHub Releases 페이지 열람, [지금 재시작] 클릭 시 즉각적인 무음 설치 및 자동 재시작 지원
 
-#### 3. AI 사이드패널 Gemini 스타일 사고 과정(Thinking) UI 고도화
-- **CoT 사고 과정 스트리밍 아코디언 UI**: 최신 LLM(Thinking 모델)의 사고 과정을 실시간으로 확인할 수 있는 접기/펼치기 아코디언 컴포넌트 탑재
-- **반응형 펄스 인디케이터**: 모델 응답 생성 중 실시간 상태를 안내하는 펄스 애니메이션 도트 적용 및 스트리밍 완료 후 버튼 상태 동기화 개선
+#### 3. 비밀번호 관리자(`chrome://password-manager`) 싱글톤 탭 포커스 개선
+- **일관된 탭 사용자 경험**: 웹사이트 로그인 폼의 열쇠 아이콘(비밀번호 저장/관리) 클릭 또는 `chrome://password-manager` 요청 시 팝업 대신 일반 브라우저 탭으로 생성
+- **싱글톤 탭 포커스**: 비밀번호 관리자 탭이 이미 열려 있는 경우 중복 생성 없이 해당 탭으로 즉시 전환 및 포커스 이동
 
-#### 4. 다운로드 서브시스템 간소화 및 안정성 극대화
-- 임시 인라인 캐싱 및 복잡한 Gzip 인플레이스 디컴프레서 모듈을 정규 CEF 다운로드 스트림 파이프라인으로 일원화하여 다운로드 신뢰성 및 시스템 안정성 대폭 향상
+#### 4. 다운로드 팝업 버블 위치 및 레이아웃 안정화
+- 다운로드 목록이 길어져 팝업 창 높이가 확장될 때 화면 좌표 경계 계산 오차로 인해 화면 좌상단(0, 0)으로 튕기던(fallback) 현상을 수정하여 툴바 다운로드 버튼 하단에 안정적으로 도킹
 
-#### 5. 배포 및 업데이트 파이프라인
-- **Windows Git Credential Manager (GCM) 전자동 연동**: Windows 자격 증명 관리자에 안전하게 저장된 GitHub 토큰을 자동 감지하여 100% 무인 자동 배포
-- **보안 및 무결성**: 최신 Authenticode SHA-256 전자 서명 및 DigiCert RFC 3161 공인 타임스탬프 적용
+#### 5. 배포 및 보안 파이프라인
+- **Zero-UAC 무음 설치**: Per-User (`%LOCALAPPDATA%\Programs\LiteBrowser`) 아키텍처 및 UAC 승인 창 없는 원활한 백그라운드 업데이트
+- **코드 서명 및 무결성 검증**: 최신 Authenticode SHA-256 전자 서명 및 DigiCert RFC 3161 공인 타임스탬프 적용
 "@
 }
 
