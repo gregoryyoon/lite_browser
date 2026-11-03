@@ -132,15 +132,14 @@ void CEF_CALLBACK life_span_handler_on_after_created(
     host->base.release(&host->base);
 
     if (handler->parent->type == BROWSER_TYPE_UI) {
-      if (win_ctx->ui_browser != browser) {
-        if (win_ctx->ui_browser) {
-          win_ctx->ui_browser->base.release(&win_ctx->ui_browser->base);
-        }
+      if (!win_ctx->ui_browser) {
         win_ctx->ui_browser = browser;
         browser->base.add_ref(&browser->base);
+        win_ctx->ui_hwnd = hwnd;
+        LogMsg("Set win_ctx->ui_browser = %p, hwnd = %p\n", browser, hwnd);
+      } else if (win_ctx->ui_browser != browser) {
+        LogMsg("Ignoring unexpected BROWSER_TYPE_UI on_after_created for browser=%p, hwnd=%p\n", browser, hwnd);
       }
-      win_ctx->ui_hwnd = hwnd;
-      LogMsg("Set win_ctx->ui_browser = %p, hwnd = %p\n", browser, hwnd);
       if (!win_ctx->main_hwnd || !IsWindow(win_ctx->main_hwnd)) {
         cef_browser_host_t* h = browser->get_host(browser);
         if (h) {
@@ -323,12 +322,13 @@ int CEF_CALLBACK life_span_handler_on_before_popup(
       }
 
       if (win_ctx && (strstr(url_utf8.str, "password-manager") != NULL ||
+          strstr(url_utf8.str, "passwords") != NULL ||
           strncmp(url_utf8.str, "lite://passwords", 16) == 0 ||
           strncmp(url_utf8.str, "chrome://passwords", 18) == 0 ||
           strncmp(url_utf8.str, "edge://passwords", 16) == 0)) {
-        LogMsg("life_span_handler_on_before_popup: intercepted password manager -> CreateNewTab\n");
+        LogMsg("life_span_handler_on_before_popup: intercepted password manager -> OpenPasswordManagerTab\n");
         cef_string_utf8_clear(&url_utf8);
-        CreateNewTab(win_ctx, "chrome://password-manager/passwords");
+        OpenPasswordManagerTab(win_ctx);
         return 1;
       }
       cef_string_utf8_clear(&url_utf8);

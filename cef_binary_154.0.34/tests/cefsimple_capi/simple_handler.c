@@ -14,6 +14,8 @@
 #include "tests/cefsimple_capi/simple_ai_proxy.h"
 #include "tests/cefsimple_capi/simple_protocol_handler.h"
 #include "tests/cefsimple_capi/simple_permission_handler.h"
+#include "include/capi/cef_command_handler_capi.h"
+#include "include/cef_command_ids.h"
 
 #include <stdarg.h>
 #include <stdatomic.h>
@@ -834,6 +836,15 @@ simple_focus_handler_t *focus_handler_create(simple_handler_t *parent);
 cef_focus_handler_t *CEF_CALLBACK simple_handler_get_focus_handler(cef_client_t *self);
 cef_keyboard_handler_t *CEF_CALLBACK simple_handler_get_keyboard_handler(cef_client_t *self);
 
+typedef struct _simple_command_handler_t {
+  cef_command_handler_t handler;
+  atomic_int ref_count;
+  simple_handler_t *parent;
+} simple_command_handler_t;
+
+simple_command_handler_t *command_handler_create(simple_handler_t *parent);
+cef_command_handler_t *CEF_CALLBACK simple_handler_get_command_handler(cef_client_t *self);
+
 //
 // Client handler implementation.
 //
@@ -876,6 +887,10 @@ int CEF_CALLBACK simple_handler_release(cef_base_ref_counted_t *self) {
     if (handler->keyboard_handler) {
       handler->keyboard_handler->handler.base.release(
           &handler->keyboard_handler->handler.base);
+    }
+    if (handler->command_handler) {
+      handler->command_handler->handler.base.release(
+          &handler->command_handler->handler.base);
     }
     if (handler->permission_handler) {
       handler->permission_handler->base.release(
@@ -994,6 +1009,17 @@ simple_handler_get_keyboard_handler(cef_client_t *self) {
   return NULL;
 }
 
+cef_command_handler_t *CEF_CALLBACK
+simple_handler_get_command_handler(cef_client_t *self) {
+  simple_handler_t *handler = (simple_handler_t *)self;
+  if (handler->command_handler) {
+    handler->command_handler->handler.base.add_ref(
+        &handler->command_handler->handler.base);
+    return &handler->command_handler->handler;
+  }
+  return NULL;
+}
+
 cef_permission_handler_t *CEF_CALLBACK
 simple_handler_get_permission_handler(cef_client_t *self) {
   simple_handler_t *handler = (simple_handler_t *)self;
@@ -1029,6 +1055,7 @@ simple_handler_t *simple_handler_create(int is_alloy_style) {
   handler->client.get_download_handler = simple_handler_get_download_handler;
   handler->client.get_focus_handler = simple_handler_get_focus_handler;
   handler->client.get_keyboard_handler = simple_handler_get_keyboard_handler;
+  handler->client.get_command_handler = simple_handler_get_command_handler;
   handler->client.get_permission_handler = simple_handler_get_permission_handler;
 
   // Create sub-handlers.
@@ -1048,6 +1075,8 @@ simple_handler_t *simple_handler_create(int is_alloy_style) {
   CHECK(handler->focus_handler);
   handler->keyboard_handler = keyboard_handler_create(handler);
   CHECK(handler->keyboard_handler);
+  handler->command_handler = command_handler_create(handler);
+  CHECK(handler->command_handler);
   handler->permission_handler = simple_permission_handler_create(handler);
   CHECK(handler->permission_handler);
 
@@ -1625,6 +1654,52 @@ static void SwitchToTabIndex(browser_window_t* win_ctx, int found_idx) {
   update_ui_nav_state(win_ctx);
 }
 
+void OpenPasswordManagerTab(browser_window_t* win_ctx) {
+  if (!win_ctx) {
+    win_ctx = GetActiveOrFirstWindowContext();
+  }
+  if (!win_ctx) return;
+
+  // 1. Check if a password manager tab is already open among current tabs
+  for (int i = 0; i < win_ctx->tab_count; i++) {
+    const char* u = win_ctx->tabs[i].url;
+    int is_pm = 0;
+    if (u && (strstr(u, "password-manager") != NULL ||
+              strncmp(u, "lite://passwords", 16) == 0 ||
+              strncmp(u, "chrome://passwords", 18) == 0 ||
+              strncmp(u, "edge://passwords", 16) == 0)) {
+      is_pm = 1;
+    }
+    if (!is_pm && win_ctx->tabs[i].browser) {
+      cef_frame_t* mf = win_ctx->tabs[i].browser->get_main_frame(win_ctx->tabs[i].browser);
+      if (mf) {
+        cef_string_userfree_t cur_u = mf->get_url(mf);
+        if (cur_u && cur_u->str && cur_u->length > 0) {
+          cef_string_utf8_t u8 = {};
+          cef_string_to_utf8(cur_u->str, cur_u->length, &u8);
+          if (u8.str && (strstr(u8.str, "password-manager") != NULL ||
+                         strncmp(u8.str, "chrome://passwords", 18) == 0)) {
+            is_pm = 1;
+          }
+          cef_string_utf8_clear(&u8);
+          cef_string_userfree_free(cur_u);
+        }
+        mf->base.release(&mf->base);
+      }
+    }
+    if (is_pm) {
+      LogMsg("[Tab] Password manager already open at tab %d (title=%s), switching to it\n",
+             i, win_ctx->tabs[i].title);
+      SwitchToTabIndex(win_ctx, i);
+      return;
+    }
+  }
+
+  // 2. If not open, create a new tab immediately to the right of the active tab (insert_at_end = 0)
+  LogMsg("[Tab] Opening new password manager tab next to active tab %d\n", win_ctx->active_tab_index);
+  CreateNewTabEx(win_ctx, "chrome://password-manager/passwords", 0);
+}
+
 static void CloseTab(browser_window_t* win_ctx, int target_id) {
   int found_idx = -1;
   for (int i = 0; i < win_ctx->tab_count; i++) {
@@ -1882,6 +1957,38 @@ int CEF_CALLBACK request_handler_on_before_browse(
 
       if (HandleExternalProtocolForBrowser(parent_hwnd, url_utf8.str, browser, frame)) {
         LogMsg("request_handler_on_before_browse: handled external protocol (url=%s) -> cancel navigation\n", url_utf8.str);
+        cef_string_utf8_clear(&url_utf8);
+        cef_string_userfree_free(url_userfree);
+        return 1;
+      }
+
+      int is_registered_tab = 0;
+      browser_window_t *target_win = w_ctx ? w_ctx : GetActiveOrFirstWindowContext();
+      if (target_win) {
+        for (int i = 0; i < target_win->tab_count; i++) {
+          if ((target_win->tabs[i].browser && browser->get_identifier(browser) == target_win->tabs[i].browser->get_identifier(target_win->tabs[i].browser)) ||
+              (target_win->tabs[i].right_browser && browser->get_identifier(browser) == target_win->tabs[i].right_browser->get_identifier(target_win->tabs[i].right_browser))) {
+            is_registered_tab = 1;
+            break;
+          }
+        }
+      }
+
+      // If an untracked/rogue browser created by Chromium navigates to password manager:
+      if (!is_registered_tab && (strstr(url_utf8.str, "password-manager") != NULL ||
+                                 strstr(url_utf8.str, "passwords") != NULL)) {
+        LogMsg("[RequestHandler] Rogue browser %p navigating to %s -> Intercepting to OpenPasswordManagerTab\n",
+               browser, url_utf8.str);
+        OpenPasswordManagerTab(target_win);
+        cef_browser_host_t* rogue_host = browser->get_host(browser);
+        if (rogue_host) {
+          HWND r_hwnd = rogue_host->get_window_handle(rogue_host);
+          if (r_hwnd) {
+            ShowWindow(r_hwnd, SW_HIDE);
+          }
+          rogue_host->close_browser(rogue_host, 1);
+          rogue_host->base.release(&rogue_host->base);
+        }
         cef_string_utf8_clear(&url_utf8);
         cef_string_userfree_free(url_userfree);
         return 1;
@@ -3651,7 +3758,7 @@ int CEF_CALLBACK request_handler_on_before_browse(
             } else if (cmd == 1008) {
               CreateNewTabEx(win_ctx, "lite://downloads", 1);
             } else if (cmd == 1011) {
-              CreateNewTabEx(win_ctx, "chrome://password-manager/passwords", 1);
+              OpenPasswordManagerTab(win_ctx);
             } else if (cmd == 1010) {
               CreateNewTabEx(win_ctx, "lite://settings", 1);
             } else if (cmd == 1003) {
@@ -4807,10 +4914,11 @@ int CEF_CALLBACK request_handler_on_open_urlfrom_tab(
     if (win_ctx->tab_count < MAX_TABS) {
       int in_background = (target_disposition == CEF_WOD_NEW_BACKGROUND_TAB);
       if (strstr(target_url_str, "password-manager") != NULL ||
+          strstr(target_url_str, "passwords") != NULL ||
           strncmp(target_url_str, "lite://passwords", 16) == 0 ||
           strncmp(target_url_str, "chrome://passwords", 18) == 0 ||
           strncmp(target_url_str, "edge://passwords", 16) == 0) {
-        CreateNewTabEx2(win_ctx, "chrome://password-manager/passwords", 0, in_background);
+        OpenPasswordManagerTab(win_ctx);
       } else {
         CreateNewTabEx2(win_ctx, target_url_str, 0, in_background);
       }
@@ -5605,6 +5713,51 @@ simple_keyboard_handler_t *keyboard_handler_create(simple_handler_t *parent) {
 
   handler->handler.on_pre_key_event = keyboard_handler_on_pre_key_event;
   handler->handler.on_key_event = keyboard_handler_on_key_event;
+  handler->parent = parent;
+
+  atomic_store(&handler->ref_count, 1);
+  return handler;
+}
+//
+// Command handler implementation.
+//
+
+IMPLEMENT_REFCOUNTING_SIMPLE(simple_command_handler_t, command_handler, ref_count)
+
+int CEF_CALLBACK command_handler_on_chrome_command(
+    struct _cef_command_handler_t* self,
+    struct _cef_browser_t* browser,
+    int command_id,
+    cef_window_open_disposition_t disposition) {
+  (void)browser;
+  (void)disposition;
+  simple_command_handler_t* handler = (simple_command_handler_t*)self;
+  if (!handler || !handler->parent) return 0;
+  browser_window_t* win_ctx = handler->parent->window_ctx;
+
+  LogMsg("[CommandHandler] on_chrome_command: command_id=%d, disposition=%d\n", command_id, disposition);
+
+  // Intercept Password Manager commands:
+  // IDC_MANAGE_PASSWORDS_FOR_PAGE (35010), IDC_SHOW_PASSWORD_MANAGER (35041),
+  // IDC_VIEW_PASSWORDS (40017), IDC_CONTENT_CONTEXT_SHOWALLSAVEDPASSWORDS (50178),
+  // IDC_SAFETY_HUB_SHOW_PASSWORD_CHECKUP (40280)
+  if (command_id == 35010 || command_id == 35041 || command_id == 40017 ||
+      command_id == 50178 || command_id == 40280) {
+    LogMsg("[CommandHandler] Intercepted password manager command_id=%d -> OpenPasswordManagerTab\n", command_id);
+    OpenPasswordManagerTab(win_ctx);
+    return 1;
+  }
+
+  return 0;
+}
+
+simple_command_handler_t *command_handler_create(simple_handler_t *parent) {
+  simple_command_handler_t *handler = (simple_command_handler_t *)calloc(1, sizeof(simple_command_handler_t));
+  CHECK(handler);
+
+  INIT_CEF_BASE_REFCOUNTED(&handler->handler.base, cef_command_handler_t, command_handler);
+
+  handler->handler.on_chrome_command = command_handler_on_chrome_command;
   handler->parent = parent;
 
   atomic_store(&handler->ref_count, 1);

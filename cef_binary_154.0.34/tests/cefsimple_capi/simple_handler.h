@@ -23,6 +23,7 @@ typedef struct _simple_context_menu_handler_t simple_context_menu_handler_t;
 typedef struct _simple_download_handler_t simple_download_handler_t;
 typedef struct _simple_focus_handler_t simple_focus_handler_t;
 typedef struct _simple_keyboard_handler_t simple_keyboard_handler_t;
+typedef struct _simple_command_handler_t simple_command_handler_t;
 typedef struct _cef_permission_handler_t cef_permission_handler_t;
 
 typedef enum {
@@ -50,6 +51,7 @@ typedef struct _simple_handler_t {
   simple_download_handler_t *download_handler;
   simple_focus_handler_t *focus_handler;
   simple_keyboard_handler_t *keyboard_handler;
+  simple_command_handler_t *command_handler;
   cef_permission_handler_t *permission_handler;
 
   // Pointer to the browser window context this handler belongs to.
@@ -185,6 +187,7 @@ void update_window_title(browser_window_t* win_ctx);
 void update_ui_tabs(browser_window_t* win_ctx);
 void update_ui_nav_state(browser_window_t* win_ctx);
 void CreateNewTab(browser_window_t* win_ctx, const char* url);
+void OpenPasswordManagerTab(browser_window_t* win_ctx);
 void CreateNewTabEx(browser_window_t* win_ctx, const char* url, int insert_at_end);
 void CreateNewTabEx2(browser_window_t* win_ctx, const char* url, int insert_at_end, int in_background);
 void CreateRightSplitBrowser(browser_window_t* win_ctx, tab_info_t* tab, const char* initial_url);

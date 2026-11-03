@@ -2545,6 +2545,21 @@ simple_app_t *simple_app_create(void) {
 }
 
 #if defined(OS_WIN)
+browser_window_t* GetActiveOrFirstWindowContext(void) {
+  HWND fg = GetForegroundWindow();
+  for (int i = 0; i < MAX_WINDOWS; i++) {
+    if (g_windows[i] && g_windows[i]->main_hwnd == fg) {
+      return g_windows[i];
+    }
+  }
+  for (int i = 0; i < MAX_WINDOWS; i++) {
+    if (g_windows[i] && g_windows[i]->main_hwnd && IsWindow(g_windows[i]->main_hwnd)) {
+      return g_windows[i];
+    }
+  }
+  return NULL;
+}
+
 void restart_browser_application(void) {
   char exe_path[MAX_PATH];
   if (GetModuleFileNameA(NULL, exe_path, MAX_PATH) > 0) {
