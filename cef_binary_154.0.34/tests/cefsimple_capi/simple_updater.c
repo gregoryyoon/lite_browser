@@ -23,6 +23,8 @@ static int g_updater_inited = 0;
 static update_state_t g_state = UPDATE_STATE_IDLE;
 static int g_progress = 0;
 static char g_latest_version[64] = "";
+static char g_release_date[64] = "";
+static char g_release_url[1024] = "";
 static char g_download_url[1024] = "";
 static char g_status_message[256] = "";
 static char g_installer_path[MAX_PATH] = "";
@@ -49,6 +51,9 @@ void simple_updater_init(void) {
     g_updater_inited = 1;
     g_state = UPDATE_STATE_IDLE;
     g_progress = 0;
+    g_latest_version[0] = '\0';
+    g_release_date[0] = '\0';
+    g_release_url[0] = '\0';
     snprintf(g_status_message, sizeof(g_status_message), "업데이트 확인 대기 중");
   }
 }
@@ -109,10 +114,12 @@ void simple_updater_get_status_json(char* out_buf, size_t max_len) {
   EnterCriticalSection(&g_updater_cs);
   int ready = (g_state == UPDATE_STATE_READY);
   snprintf(out_buf, max_len,
-           "{\"currentVersion\":\"%s\",\"latestVersion\":\"%s\",\"state\":\"%s\","
+           "{\"currentVersion\":\"%s\",\"latestVersion\":\"%s\",\"releaseDate\":\"%s\",\"releaseUrl\":\"%s\",\"state\":\"%s\","
            "\"progress\":%d,\"message\":\"%s\",\"isReady\":%s}",
            LITE_BROWSER_VERSION,
            g_latest_version,
+           g_release_date,
+           g_release_url,
            state_to_string(g_state),
            g_progress,
            g_status_message,
@@ -324,11 +331,15 @@ static DWORD WINAPI updater_worker_proc(LPVOID lpParam) {
   WinHttpCloseHandle(hConnect);
   WinHttpCloseHandle(hSession);
 
-  // Extract tag_name and installer URL
+  // Extract tag_name, installer URL, published_at, html_url
   char remote_ver[64] = "";
   char download_url[1024] = "";
+  char remote_date[64] = "";
+  char remote_html_url[1024] = "";
   json_extract_string(json_buf, "tag_name", remote_ver, sizeof(remote_ver));
   json_extract_installer_asset_url(json_buf, download_url, sizeof(download_url));
+  json_extract_string(json_buf, "published_at", remote_date, sizeof(remote_date));
+  json_extract_string(json_buf, "html_url", remote_html_url, sizeof(remote_html_url));
   free(json_buf);
 
   if (strlen(remote_ver) == 0 || strlen(download_url) == 0) {
@@ -343,6 +354,8 @@ static DWORD WINAPI updater_worker_proc(LPVOID lpParam) {
   EnterCriticalSection(&g_updater_cs);
   strncpy(g_latest_version, remote_ver, sizeof(g_latest_version) - 1);
   strncpy(g_download_url, download_url, sizeof(g_download_url) - 1);
+  strncpy(g_release_date, remote_date, sizeof(g_release_date) - 1);
+  strncpy(g_release_url, remote_html_url, sizeof(g_release_url) - 1);
   LeaveCriticalSection(&g_updater_cs);
 
   // SemVer comparison

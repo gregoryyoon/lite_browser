@@ -80,9 +80,32 @@
         </svg>
       </div>
     </button>
-    <button id="update-badge-btn" class="nav-btn update-badge-btn hide" onclick="applyUpdateDirectly()" title="새 버전 준비 완료 (클릭하여 지금 재시작)">
-      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4"/><path d="M12 16V8"/></svg>
-    </button>
+    <div class="update-btn-container">
+      <button id="update-badge-btn" class="nav-btn update-badge-btn hide" onclick="applyUpdateDirectly(event)" title="새 버전 준비 완료 (클릭하여 지금 재시작)">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4"/><path d="M12 16V8"/></svg>
+      </button>
+
+      <!-- VS Code 스타일 업데이트 상세 팝오버 카드 -->
+      <div id="update-popover-card" class="update-popover hide">
+        <div class="update-popover-arrow"></div>
+        <div class="update-popover-header">
+          <span class="update-popover-title">재시작하여 업데이트 적용</span>
+        </div>
+        <div class="update-popover-body">
+          <img src="logo.png" alt="Lite Browser" class="update-popover-logo" />
+          <div class="update-popover-info">
+            <div class="update-product-name">Lite Browser</div>
+            <div class="update-version-row">현재 버전: <span id="update-curr-ver">-</span></div>
+            <div class="update-version-row highlight">최신 버전: <span id="update-latest-ver">-</span></div>
+            <div class="update-version-row date">릴리즈 날짜: <span id="update-release-date">-</span></div>
+          </div>
+        </div>
+        <div class="update-popover-footer">
+          <button type="button" class="btn-release-notes" onclick="openReleaseNotes(event)">릴리즈 노트</button>
+          <button type="button" class="btn-restart-now" onclick="applyUpdateDirectly(event)">지금 재시작</button>
+        </div>
+      </div>
+    </div>
     <div class="menu-container">
       <button id="menu-btn" class="nav-btn" onclick="toggleMenu(event)" title="메뉴">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>

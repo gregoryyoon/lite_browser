@@ -1835,28 +1835,128 @@ window.showToast = function(message, type = 'info', duration = 5000) {
     }, 250);
   }, duration);
 };
+// --- Auto Updater & Popover Logic ---
+let g_updaterReleaseUrl = 'https://github.com/gregoryyoon/lite_browser/releases';
+let g_updateShowTimer = null;
+let g_updateHideTimer = null;
+
+function showUpdatePopover() {
+  if (g_updateHideTimer) {
+    clearTimeout(g_updateHideTimer);
+    g_updateHideTimer = null;
+  }
+  const popover = document.getElementById('update-popover-card');
+  if (popover) {
+    popover.classList.remove('hide');
+  }
+}
+
+function hideUpdatePopover() {
+  const popover = document.getElementById('update-popover-card');
+  if (popover) {
+    popover.classList.add('hide');
+  }
+}
+
+function scheduleShowUpdatePopover() {
+  if (g_updateHideTimer) {
+    clearTimeout(g_updateHideTimer);
+    g_updateHideTimer = null;
+  }
+  if (!g_updateShowTimer) {
+    g_updateShowTimer = setTimeout(() => {
+      g_updateShowTimer = null;
+      showUpdatePopover();
+    }, 250);
+  }
+}
+
+function scheduleHideUpdatePopover() {
+  if (g_updateShowTimer) {
+    clearTimeout(g_updateShowTimer);
+    g_updateShowTimer = null;
+  }
+  if (!g_updateHideTimer) {
+    g_updateHideTimer = setTimeout(() => {
+      g_updateHideTimer = null;
+      hideUpdatePopover();
+    }, 200);
+  }
+}
+
+window.openReleaseNotes = function(event) {
+  if (event) event.stopPropagation();
+  const url = g_updaterReleaseUrl || 'https://github.com/gregoryyoon/lite_browser/releases';
+  sendUiAction('http://ui-action/new-tab?url=' + encodeURIComponent(url));
+  hideUpdatePopover();
+};
+
+window.applyUpdateDirectly = function(event) {
+  if (event) event.stopPropagation();
+  hideUpdatePopover();
+  sendUiAction('http://ui-action/restart-update');
+};
+
 window.updateAutoUpdaterStatus = function(info) {
   if (!info) return;
   const updateBadgeBtn = document.getElementById('update-badge-btn');
+  const currVerEl = document.getElementById('update-curr-ver');
+  const latestVerEl = document.getElementById('update-latest-ver');
+  const releaseDateEl = document.getElementById('update-release-date');
+
+  if (info.currentVersion && currVerEl) {
+    currVerEl.textContent = info.currentVersion;
+  }
+  if (info.latestVersion && latestVerEl) {
+    latestVerEl.textContent = info.latestVersion;
+  }
+  if (info.releaseDate && releaseDateEl) {
+    try {
+      const d = new Date(info.releaseDate);
+      if (!isNaN(d.getTime())) {
+        releaseDateEl.textContent = d.toLocaleDateString('ko-KR', {
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric'
+        });
+      } else {
+        releaseDateEl.textContent = info.releaseDate;
+      }
+    } catch (e) {
+      releaseDateEl.textContent = info.releaseDate;
+    }
+  }
+  if (info.releaseUrl) {
+    g_updaterReleaseUrl = info.releaseUrl;
+  }
 
   if (info.state === 'READY') {
     if (updateBadgeBtn) {
       updateBadgeBtn.classList.remove('hide');
       const verText = info.latestVersion ? ` (${info.latestVersion})` : '';
-      updateBadgeBtn.setAttribute('title', `새 버전${verText} 준비 완료 - 클릭하여 지금 재시작`);
+      updateBadgeBtn.setAttribute('title', `새 버전${verText} 준비 완료 - 마우스를 올려 상세 정보 확인`);
     }
   } else {
     if (updateBadgeBtn) {
       updateBadgeBtn.classList.add('hide');
     }
+    hideUpdatePopover();
   }
-};
-
-window.applyUpdateDirectly = function() {
-  sendUiAction('http://ui-action/restart-update');
 };
 
 document.addEventListener('DOMContentLoaded', () => {
   sendUiAction('http://ui-action/get-update-status');
+
+  const updateBadgeBtn = document.getElementById('update-badge-btn');
+  const updatePopover = document.getElementById('update-popover-card');
+
+  if (updateBadgeBtn) {
+    updateBadgeBtn.addEventListener('mouseenter', scheduleShowUpdatePopover);
+    updateBadgeBtn.addEventListener('mouseleave', scheduleHideUpdatePopover);
+  }
+  if (updatePopover) {
+    updatePopover.addEventListener('mouseenter', scheduleShowUpdatePopover);
+    updatePopover.addEventListener('mouseleave', scheduleHideUpdatePopover);
+  }
 });
 
