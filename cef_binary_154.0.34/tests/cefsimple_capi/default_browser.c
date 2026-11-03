@@ -3,6 +3,7 @@
 #if defined(_WIN32) || defined(OS_WIN)
 #include <windows.h>
 #include <shellapi.h>
+#include <shlobj.h>
 #include <wchar.h>
 #include <stdio.h>
 
@@ -62,11 +63,45 @@ void default_browser_register_capabilities(void) {
   reg_set_str(HKEY_CURRENT_USER, L"Software\\Classes\\LiteBrowserHTML\\DefaultIcon", NULL, icon_path);
   reg_set_str(HKEY_CURRENT_USER, L"Software\\Classes\\LiteBrowserHTML\\shell\\open\\command", NULL, open_cmd);
 
-  // 2. OpenWithProgids for .htm, .html and .pdf
+  // ProgID Application info for Windows 10/11 Default Apps & OpenWith flyout
+  const wchar_t* prog_app = L"Software\\Classes\\LiteBrowserHTML\\Application";
+  reg_set_str(HKEY_CURRENT_USER, prog_app, L"ApplicationName", L"Lite Browser");
+  reg_set_str(HKEY_CURRENT_USER, prog_app, L"ApplicationCompany", L"Gregory Yoon");
+  reg_set_str(HKEY_CURRENT_USER, prog_app, L"ApplicationIcon", icon_path);
+  reg_set_str(HKEY_CURRENT_USER, prog_app, L"ApplicationDescription", L"Lite Browser - Fast, lightweight, AI-integrated modern browser.");
+  reg_set_str(HKEY_CURRENT_USER, prog_app, L"AppUserModelId", L"LiteBrowser");
+
+  // 1-1. Software\Classes\Applications\lite_browser.exe
+  const wchar_t* app_entry = L"Software\\Classes\\Applications\\lite_browser.exe";
+  reg_set_str(HKEY_CURRENT_USER, app_entry, L"FriendlyAppName", L"Lite Browser");
+  reg_set_str(HKEY_CURRENT_USER, app_entry, L"ApplicationCompany", L"Gregory Yoon");
+  reg_set_str(HKEY_CURRENT_USER, L"Software\\Classes\\Applications\\lite_browser.exe\\DefaultIcon", NULL, icon_path);
+  reg_set_str(HKEY_CURRENT_USER, L"Software\\Classes\\Applications\\lite_browser.exe\\shell\\open\\command", NULL, open_cmd);
+  reg_set_str(HKEY_CURRENT_USER, L"Software\\Classes\\Applications\\lite_browser.exe\\SupportedTypes", L".htm", L"");
+  reg_set_str(HKEY_CURRENT_USER, L"Software\\Classes\\Applications\\lite_browser.exe\\SupportedTypes", L".html", L"");
+  reg_set_str(HKEY_CURRENT_USER, L"Software\\Classes\\Applications\\lite_browser.exe\\SupportedTypes", L".pdf", L"");
+  reg_set_str(HKEY_CURRENT_USER, L"Software\\Classes\\Applications\\lite_browser.exe\\SupportedTypes", L".svg", L"");
+  reg_set_str(HKEY_CURRENT_USER, L"Software\\Classes\\Applications\\lite_browser.exe\\SupportedTypes", L".md", L"");
+  reg_set_str(HKEY_CURRENT_USER, L"Software\\Classes\\Applications\\lite_browser.exe\\SupportedTypes", L".markdown", L"");
+
+  // 1-2. Update Windows Shell MuiCache explicitly to override any stale "CEF Bootstrap Application"
+  wchar_t mui_name[MAX_PATH + 32] = {0};
+  swprintf_s(mui_name, MAX_PATH + 32, L"%s.FriendlyAppName", exe_path);
+  wchar_t mui_company[MAX_PATH + 32] = {0};
+  swprintf_s(mui_company, MAX_PATH + 32, L"%s.ApplicationCompany", exe_path);
+  const wchar_t* mui_key = L"Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\MuiCache";
+  reg_set_str(HKEY_CURRENT_USER, mui_key, mui_name, L"Lite Browser");
+  reg_set_str(HKEY_CURRENT_USER, mui_key, mui_company, L"Gregory Yoon");
+
+  // 2. OpenWithProgids for .htm, .html, .pdf, .md, .markdown
   reg_set_str(HKEY_CURRENT_USER, L"Software\\Classes\\.htm\\OpenWithProgids", L"LiteBrowserHTML", L"");
   reg_set_str(HKEY_CURRENT_USER, L"Software\\Classes\\.html\\OpenWithProgids", L"LiteBrowserHTML", L"");
   reg_set_str(HKEY_CURRENT_USER, L"Software\\Classes\\.pdf\\OpenWithProgids", L"LiteBrowserHTML", L"");
   reg_set_str(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FileExts\\.pdf\\OpenWithProgids", L"LiteBrowserHTML", L"");
+  reg_set_str(HKEY_CURRENT_USER, L"Software\\Classes\\.md\\OpenWithProgids", L"LiteBrowserHTML", L"");
+  reg_set_str(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FileExts\\.md\\OpenWithProgids", L"LiteBrowserHTML", L"");
+  reg_set_str(HKEY_CURRENT_USER, L"Software\\Classes\\.markdown\\OpenWithProgids", L"LiteBrowserHTML", L"");
+  reg_set_str(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FileExts\\.markdown\\OpenWithProgids", L"LiteBrowserHTML", L"");
 
   // 3. StartMenuInternet\LiteBrowser
   const wchar_t* smi_base = L"Software\\Clients\\StartMenuInternet\\LiteBrowser";
@@ -94,9 +129,14 @@ void default_browser_register_capabilities(void) {
   reg_set_str(HKEY_CURRENT_USER, file_base, L".html", L"LiteBrowserHTML");
   reg_set_str(HKEY_CURRENT_USER, file_base, L".pdf", L"LiteBrowserHTML");
   reg_set_str(HKEY_CURRENT_USER, file_base, L".svg", L"LiteBrowserHTML");
+  reg_set_str(HKEY_CURRENT_USER, file_base, L".md", L"LiteBrowserHTML");
+  reg_set_str(HKEY_CURRENT_USER, file_base, L".markdown", L"LiteBrowserHTML");
 
   // 4. RegisteredApplications
   reg_set_str(HKEY_CURRENT_USER, L"Software\\RegisteredApplications", L"LiteBrowser", L"Software\\Clients\\StartMenuInternet\\LiteBrowser\\Capabilities");
+
+  // 5. Notify Windows Shell of association and capability changes
+  SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, NULL, NULL);
 }
 
 void default_browser_open_settings(void) {

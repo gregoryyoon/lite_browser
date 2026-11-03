@@ -259,6 +259,21 @@ def inject_ico_to_exe(exe_path, ico_path, primary_group_id=120):
             
         print("Successfully injected icon into executable.")
         
+        # Update Windows Shell MuiCache and Applications registry to ensure Lite Browser displays properly
+        try:
+            import winreg
+            mui_key_path = r"Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\MuiCache"
+            with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, mui_key_path, 0, winreg.KEY_SET_VALUE) as key:
+                winreg.SetValueEx(key, f"{exe_path}.FriendlyAppName", 0, winreg.REG_SZ, "Lite Browser")
+                winreg.SetValueEx(key, f"{exe_path}.ApplicationCompany", 0, winreg.REG_SZ, "Gregory Yoon")
+            app_key_path = r"Software\Classes\Applications\lite_browser.exe"
+            with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, app_key_path, 0, winreg.KEY_SET_VALUE) as key:
+                winreg.SetValueEx(key, "FriendlyAppName", 0, winreg.REG_SZ, "Lite Browser")
+                winreg.SetValueEx(key, "ApplicationCompany", 0, winreg.REG_SZ, "Gregory Yoon")
+            print("Updated MuiCache and Applications registry keys for Lite Browser.")
+        except Exception as e:
+            print(f"Warning: Registry update in inject_icon failed: {e}")
+
         # Notify Windows Shell of icon changes
         try:
             shell32.SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, None, None)

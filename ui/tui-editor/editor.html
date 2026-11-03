@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>마크다운 에디터 - Lite Browser</title>
+  
+  <link rel="stylesheet" href="./vendor/toastui-editor.min.css">
+  <link rel="stylesheet" href="./vendor/toastui-editor-dark.min.css">
+  <link rel="stylesheet" href="./tui-extras.css">
+  <script src="../theme.js"></script>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "diff": "./vendor/diff.min.js",
+      "mermaid": "./vendor/mermaid.esm.js"
+    }
+  }
+  </script>
+  <script src="./vendor/toastui-editor-all.min.js"></script>
+  <script src="./vendor/ko-kr.min.js"></script>
+
+  <style>
+    :root {
+      --bg-page: #ffffff;
+      --bg-topbar: #f8fafc;
+      --border-color: #e2e8f0;
+      --text-main: #0f172a;
+      --text-muted: #64748b;
+      --btn-bg: #f1f5f9;
+      --btn-hover: #e2e8f0;
+      --btn-active: #cbd5e1;
+      --accent: #0284c7;
+      --accent-hover: #0369a1;
+      --accent-text: #ffffff;
+      --badge-bg: #e0f2fe;
+      --badge-text: #0369a1;
+      --badge-warn-bg: #fef3c7;
+      --badge-warn-text: #92400e;
+      --badge-success-bg: #dcfce7;
+      --badge-success-text: #166534;
+    }
+
+    [data-theme="dark"] {
+      --bg-page: #0d0f15;
+      --bg-topbar: #141721;
+      --border-color: #222634;
+      --text-main: #f4f4f5;
+      --text-muted: #94a3b8;
+      --btn-bg: #1e2230;
+      --btn-hover: #282d3f;
+      --btn-active: #32384e;
+      --accent: #38bdf8;
+      --accent-hover: #7dd3fc;
+      --accent-text: #0b1120;
+      --badge-bg: #0c4a6e;
+      --badge-text: #7dd3fc;
+      --badge-warn-bg: #451a03;
+      --badge-warn-text: #fcd34d;
+      --badge-success-bg: #052e16;
+      --badge-success-text: #86efac;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background-color: var(--bg-page);
+      color: var(--text-main);
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      user-select: none;
+    }
+
+    /* Editor Container */
+    #editor-container {
+      flex: 1;
+      height: 100vh;
+      min-height: 0;
+      position: relative;
+    }
+
+    #editor {
+      height: 100%;
+      width: 100%;
+    }
+
+    /* TUI Editor override polish */
+    .toastui-editor-defaultUI {
+      border: none !important;
+      height: 100% !important;
+    }
+
+    [data-theme="dark"] .toastui-editor-defaultUI {
+      border: none !important;
+      background-color: var(--bg-page) !important;
+    }
+
+    [data-theme="dark"] .toastui-editor-defaultUI-toolbar {
+      background-color: var(--bg-topbar) !important;
+      border-bottom: 1px solid var(--border-color) !important;
+    }
+
+    [data-theme="dark"] .toastui-editor-main {
+      background-color: var(--bg-page) !important;
+    }
+
+    [data-theme="dark"] .ProseMirror {
+      color: var(--text-main) !important;
+    }
+
+    /* Toast notification */
+    .toast-msg {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%) translateY(12px);
+      padding: 7px 18px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 500;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+      z-index: 9999;
+      opacity: 0;
+      transition: opacity 0.2s ease, transform 0.2s ease;
+      pointer-events: none;
+    }
+
+    .toast-msg.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    .toast-msg.success {
+      background-color: #0f172a;
+      color: #f8fafc;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+    }
+
+    [data-theme="dark"] .toast-msg.success {
+      background-color: #1e293b;
+      color: #f1f5f9;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+    }
+
+    .toast-msg.error {
+      background-color: #ef4444;
+      color: #ffffff;
+    }
+
+    /* Invisible action bridge */
+    #ui-action-bridge {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <main id="editor-container">
+    <div id="editor"></div>
+  </main>
+
+  <div class="toast-msg" id="toast-msg"></div>
+  <iframe id="ui-action-bridge"></iframe>
+
+  <script type="module">
+    import { mermaidPlugin } from './mermaidPlugin.js';
+    import { redrawDiagrams } from './mermaid.js';
+    import { trackFileFormat } from './fileFormat.js';
+    import { clearUndoHistory } from './undoHistory.js';
+    import { toolbarButton } from './toolbarButton.js';
+
+    // Global IPC helper for editor iframe
+    function sendUiAction(url) {
+      let bridge = document.getElementById('ui-action-bridge');
+      if (bridge) {
+        bridge.remove();
+      }
+      bridge = document.createElement('iframe');
+      bridge.id = 'ui-action-bridge';
+      bridge.style.display = 'none';
+      bridge.src = url;
+      document.body.appendChild(bridge);
+    }
+    window.sendUiAction = sendUiAction;
+
+    // Toast helper
+    function showToast(message, type = 'success') {
+      const toast = document.getElementById('toast-msg');
+      if (!toast) return;
+      toast.textContent = message;
+      toast.className = `toast-msg show ${type}`;
+      setTimeout(() => {
+        toast.className = 'toast-msg';
+      }, 2500);
+    }
+
+    // Parse target file from URL query: ?file=... or ?url=...
+    const urlParams = new URLSearchParams(window.location.search);
+    let targetFilePath = urlParams.get('file') || urlParams.get('url') || '';
+    if (targetFilePath) {
+      try {
+        targetFilePath = decodeURIComponent(targetFilePath);
+      } catch (e) {}
+    }
+
+    const isWebUrl = /^https?:\/\//i.test(targetFilePath);
+    let isReadOnly = isWebUrl;
+
+    // Extract display filename
+    let displayFileName = '새 문서.md';
+    if (targetFilePath) {
+      const cleanPath = targetFilePath.replace(/[?#].*$/, '');
+      const lastSlash = Math.max(cleanPath.lastIndexOf('/'), cleanPath.lastIndexOf('\\'));
+      if (lastSlash !== -1 && lastSlash < cleanPath.length - 1) {
+        displayFileName = cleanPath.substring(lastSlash + 1);
+      } else {
+        displayFileName = cleanPath;
+      }
+    }
+
+    document.title = `${displayFileName} - Lite Browser`;
+
+    // Modern UTF-8 <-> Base64 helpers (avoids deprecated/fragile escape/unescape)
+    function utf8ToBase64(str) {
+      if (!str) return '';
+      const bytes = new TextEncoder().encode(str);
+      let bin = '';
+      const step = 8192;
+      for (let i = 0; i < bytes.length; i += step) {
+        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + step));
+      }
+      return btoa(bin);
+    }
+
+    function base64ToUtf8(b64) {
+      if (!b64) return '';
+      const bin = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) {
+        bytes[i] = bin.charCodeAt(i);
+      }
+      return new TextDecoder('utf-8').decode(bytes);
+    }
+
+    let isModified = false;
+    let isSuppressChange = false;
+    let editor = null;
+    let contentToSave = null;
+    let lastLoadedMarkdown = '';
+
+    function isDarkTheme() {
+      const mode = document.documentElement.getAttribute('data-theme');
+      if (mode === 'dark') return true;
+      if (mode === 'light') return false;
+      return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    }
+
+    function updateThemeUI(dark) {
+      const host = document.querySelector('#editor');
+      if (host) {
+        host.classList.toggle('toastui-editor-dark', dark);
+        redrawDiagrams(host, dark);
+      }
+    }
+
+    window.addEventListener('litethemechange', (e) => {
+      const dark = e.detail ? e.detail.effectiveTheme === 'dark' : isDarkTheme();
+      updateThemeUI(dark);
+    });
+
+    function updateModifiedUI() {
+      if (isModified) {
+        document.title = `● ${displayFileName} - Lite Browser`;
+      } else {
+        document.title = `${displayFileName} - Lite Browser`;
+      }
+    }
+
+    function initOrUpdateEditor(fileText) {
+      isSuppressChange = true;
+      lastLoadedMarkdown = fileText;
+      const host = document.querySelector('#editor');
+      const dark = isDarkTheme();
+
+      if (!editor) {
+        editor = new toastui.Editor({
+          el: host,
+          height: '100%',
+          initialEditType: 'wysiwyg',
+          previewStyle: 'vertical',
+          language: 'ko-KR',
+          usageStatistics: false,
+          initialValue: fileText,
+          plugins: [mermaidPlugin(() => isDarkTheme())],
+        });
+
+        // Add custom Save button to TUI Editor toolbar
+        if (!isReadOnly) {
+          try {
+            editor.insertToolbarItem(
+              { groupIndex: Number.MAX_SAFE_INTEGER, itemIndex: 0 },
+              {
+                name: 'save-doc',
+                tooltip: '저장 (Ctrl+S)',
+                el: toolbarButton({
+                  label: '저장',
+                  svg: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>',
+                  onClick: () => saveCurrentFile(),
+                }),
+              },
+            );
+          } catch(e) {
+            console.warn('Could not insert toolbar item:', e);
+          }
+        }
+
+        // TUI Editor initial event attachment fix
+        editor.setMarkdown(fileText, false);
+        contentToSave = trackFileFormat(editor, fileText);
+        clearUndoHistory(editor);
+
+        editor.on('change', () => {
+          if (isSuppressChange) return;
+          if (!isModified) {
+            isModified = true;
+            updateModifiedUI();
+            sendUiAction('http://ui-action/md-modified?modified=1');
+          }
+        });
+      } else {
+        editor.setMarkdown(fileText, false);
+        contentToSave = trackFileFormat(editor, fileText);
+        clearUndoHistory(editor);
+      }
+
+      // Ensure view stays at the very top (first line)
+      const resetScrollTop = () => {
+        try {
+          if (typeof editor.moveCursorToStart === 'function') {
+            editor.moveCursorToStart(false);
+          }
+          const scrollEls = host.querySelectorAll('.toastui-editor, .toastui-editor-ww-container, .ProseMirror, .toastui-editor-contents, .toastui-editor-main');
+          scrollEls.forEach(el => { el.scrollTop = 0; });
+          window.scrollTo(0, 0);
+        } catch (e) {}
+      };
+      resetScrollTop();
+      requestAnimationFrame(resetScrollTop);
+      setTimeout(resetScrollTop, 50);
+      setTimeout(resetScrollTop, 150);
+
+      isModified = false;
+      updateModifiedUI();
+      sendUiAction('http://ui-action/md-modified?modified=0');
+      updateThemeUI(dark);
+      setTimeout(() => {
+        isSuppressChange = false;
+      }, 100);
+    }
+
+    function saveCurrentFile() {
+      if (isReadOnly) {
+        showToast('웹 URL 문서는 저장할 수 없습니다.', 'error');
+        return;
+      }
+      if (!editor || !contentToSave) return;
+
+      try {
+        const textToSave = contentToSave();
+        const b64Data = utf8ToBase64(textToSave);
+        const b64Path = utf8ToBase64(targetFilePath);
+        sendUiAction(`http://ui-action/md-save?path=${encodeURIComponent(b64Path)}&data=${encodeURIComponent(b64Data)}`);
+      } catch (e) {
+        console.error('Error preparing save data:', e);
+        showToast('저장 중 오류 발생: ' + e.message, 'error');
+      }
+    }
+
+    // Callbacks from C Native backend
+    window.onMarkdownLoaded = function(success, b64Data, errorMsg) {
+      if (!success) {
+        showToast(errorMsg || '파일을 불러오지 못했습니다.', 'error');
+        initOrUpdateEditor('# 파일 불러오기 실패\n\n' + (errorMsg || '파일을 열 수 없습니다.'));
+        return;
+      }
+
+      try {
+        const fileContent = base64ToUtf8(b64Data);
+        initOrUpdateEditor(fileContent);
+      } catch (e) {
+        console.error('Failed to decode markdown content:', e);
+        showToast('내용 디코딩 오류: ' + e.message, 'error');
+        initOrUpdateEditor('# 디코딩 오류\n\nUTF-8 텍스트 디코딩에 실패했습니다.');
+      }
+    };
+
+    window.onMarkdownSaved = function(success, message) {
+      if (success) {
+        isModified = false;
+        if (editor && contentToSave) {
+          const currentMarkdown = contentToSave();
+          contentToSave = trackFileFormat(editor, currentMarkdown);
+        }
+        updateModifiedUI();
+        sendUiAction('http://ui-action/md-modified?modified=0');
+        showToast(message || '저장되었습니다.', 'success');
+      } else {
+        showToast(message || '저장에 실패했습니다.', 'error');
+      }
+    };
+
+    // Keyboard shortcuts
+    window.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault();
+        saveCurrentFile();
+      }
+    });
+
+    // In-page beforeunload guard
+    window.addEventListener('beforeunload', (e) => {
+      if (isModified) {
+        e.preventDefault();
+        e.returnValue = '저장되지 않은 변경사항이 있습니다. 탭을 닫으시겠습니까?';
+        return e.returnValue;
+      }
+    });
+
+    // Initial content loading
+    if (!targetFilePath) {
+      // Default blank/scratchpad markdown
+      const defaultSample = [
+        '# 새 마크다운 문서',
+        '',
+        '이곳에서 자유롭게 마크다운 문서를 작성하고 편집할 수 있습니다.',
+        '',
+        '- **위지웍(WYSIWYG) 편집**: 서식을 바로 확인하며 작성',
+        '- **서식 보존**: 불릿, 들여쓰기, 줄바꿈(CRLF/LF) 보존',
+        '- **Mermaid 다이어그램**: 실시간 다이어그램 렌더링',
+        '',
+        '```mermaid',
+        'graph LR',
+        '  A[작성] --> B[위지웍 렌더링]',
+        '  B --> C[보존 저장]',
+        '```',
+        '',
+      ].join('\n');
+      initOrUpdateEditor(defaultSample);
+    } else if (isWebUrl) {
+      // Web URL: try fetch, fallback to native IPC
+      fetch(targetFilePath)
+        .then(res => {
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          return res.text();
+        })
+        .then(text => {
+          initOrUpdateEditor(text);
+        })
+        .catch(err => {
+          console.warn('Direct fetch failed, requesting via native IPC...', err);
+          const b64Path = utf8ToBase64(targetFilePath);
+          sendUiAction(`http://ui-action/md-load?path=${encodeURIComponent(b64Path)}`);
+        });
+    } else {
+      // Local file: load via native C IPC
+      const b64Path = utf8ToBase64(targetFilePath);
+      sendUiAction(`http://ui-action/md-load?path=${encodeURIComponent(b64Path)}`);
+    }
+  </script>
+</body>
+</html>

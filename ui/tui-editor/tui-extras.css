@@ -1,0 +1,47 @@
+/* Toolbar button from toolbarButton.js: tui's icon button box, with an SVG instead of tui's sprite (tui's wrapper has the margin). */
+.toastui-editor-toolbar-icons.tui-extras-button {
+  display: grid;
+  place-items: center;
+  margin: 0;
+  background-image: none;
+  color: #555;
+}
+.toastui-editor-dark .toastui-editor-toolbar-icons.tui-extras-button {
+  color: #c4c6cc;
+}
+
+/* mermaid diagrams (mermaidPlugin.js) */
+.mermaid-diagram {
+  margin: 8px 0 16px;
+  padding: 12px;
+  overflow-x: auto;
+  text-align: center;
+  border: 1px dashed #d0d4dc;
+  border-radius: 10px;
+}
+.mermaid-diagram:empty::before {
+  content: '다이어그램을 그리는 중…';
+  color: #8a8f98;
+  font-size: 12px;
+}
+.mermaid-diagram svg {
+  max-width: 100%;
+  height: auto;
+}
+.mermaid-error {
+  text-align: left;
+  white-space: pre-wrap;
+  font-family: monospace;
+  font-size: 12px;
+  color: #b42318;
+  background: #fef3f2;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.toastui-editor-dark .mermaid-diagram {
+  border-color: #3a3f4b;
+}
+.toastui-editor-dark .mermaid-error {
+  color: #fda29b;
+  background: #3b1a17;
+}

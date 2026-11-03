@@ -16,6 +16,7 @@ typedef struct _tab_info_t {
   int is_loaded;
   char favicon_url[2048];
   void* tab_handler;
+  int is_modified;          // 1 if document has unsaved changes, 0 otherwise
 
   // Dual tab split screen fields
   int is_split;             // 0: single view, 1: dual split view

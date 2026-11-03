@@ -306,6 +306,14 @@ window.updateAddress = function(url, displayUrl) {
       addressBar.value = 'lite://settings';
     } else if (url.indexOf('ui/sidepanel.html') !== -1 || url.indexOf('lite://sidepanel') !== -1) {
       addressBar.value = 'lite://sidepanel';
+    } else if (url.indexOf('ui/tui-editor/editor.html') !== -1 || url.indexOf('tui-editor/editor.html') !== -1) {
+      try {
+        const u = new URL(url);
+        const f = u.searchParams.get('file') || u.searchParams.get('url');
+        addressBar.value = f ? formatDisplayUrl(decodeURIComponent(f)) : 'lite://editor';
+      } catch (e) {
+        addressBar.value = 'lite://editor';
+      }
     } else {
       addressBar.value = displayUrl || formatDisplayUrl(url);
     }
@@ -323,6 +331,7 @@ const DEFAULT_GLOBE_SVG = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org
 const FAVORITES_ICON_SVG = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="%23f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/></svg>`;
 const DOWNLOADS_ICON_SVG = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="%233b82f6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>`;
 const SIDEPANEL_ICON_SVG = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="%238b5cf6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>`;
+const MARKDOWN_ICON_SVG = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="%230284c7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>`;
 
 function getDomainFromUrl(url) {
   if (!url) return '';
@@ -339,14 +348,16 @@ function getTabInfoMeta(tab) {
   const isDownloads = tab.url && (tab.url.indexOf('ui/downloads.html') !== -1 || tab.url.indexOf('lite://downloads') !== -1);
   const isSettings = tab.url && (tab.url.indexOf('ui/settings.html') !== -1 || tab.url.indexOf('lite://settings') !== -1);
   const isSidepanel = tab.url && (tab.url.indexOf('ui/sidepanel.html') !== -1 || tab.url.indexOf('lite://sidepanel') !== -1);
-  const displayTitle = isManager ? '북마크 관리자' : (isDownloads ? '다운로드 관리자' : (isSettings ? '설정' : (isSidepanel ? 'AI 사이드패널' : (tab.title || '새 탭'))));
-  return { isManager, isDownloads, isSettings, isSidepanel, displayTitle };
+  const isEditor = tab.url && (tab.url.indexOf('tui-editor/editor.html') !== -1 || tab.url.indexOf('lite://editor') !== -1 || tab.url.indexOf('lite://markdown') !== -1);
+  const displayTitle = isManager ? '북마크 관리자' : (isDownloads ? '다운로드 관리자' : (isSettings ? '설정' : (isSidepanel ? 'AI 사이드패널' : (isEditor ? (tab.title || '마크다운 에디터') : (tab.title || '새 탭')))));
+  return { isManager, isDownloads, isSettings, isSidepanel, isEditor, displayTitle };
 }
 
 function getTabFaviconUrl(tab, meta) {
   if (meta.isManager) return FAVORITES_ICON_SVG;
   if (meta.isDownloads) return DOWNLOADS_ICON_SVG;
   if (meta.isSidepanel) return SIDEPANEL_ICON_SVG;
+  if (meta.isEditor) return MARKDOWN_ICON_SVG;
   const domain = getDomainFromUrl(tab.url);
   const googleFaviconUrl = domain ? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=32` : '';
   return tab.favicon || googleFaviconUrl || DEFAULT_GLOBE_SVG;

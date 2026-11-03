@@ -1334,6 +1334,20 @@ LRESULT CALLBACK LiteBrowserMainWndProc(HWND hwnd, UINT message, WPARAM wParam,
   }
   case WM_CLOSE:
     LogMsg("WM_CLOSE: hwnd = %p, win_ctx = %p\n", hwnd, win_ctx);
+    if (win_ctx) {
+      for (int i = 0; i < win_ctx->tab_count; i++) {
+        if (win_ctx->tabs[i].is_modified) {
+          int res = MessageBoxW(hwnd,
+                                L"저장되지 않은 변경사항이 있습니다.\n창을 닫으시겠습니까?",
+                                L"Lite Browser",
+                                MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2);
+          if (res != IDYES) {
+            return 0; // Abort closing window
+          }
+          break;
+        }
+      }
+    }
     DestroyWindow(hwnd);
     return 0;
   case WM_DESTROY:

@@ -78,7 +78,7 @@ Section "Install"
   
   ; UI folder (Main UI, MD Editor, Bookmark Manager, Extractor)
   SetOutPath "$INSTDIR\ui"
-  File "c:\projects\lite_browser\ui\*.*"
+  File /r "c:\projects\lite_browser\ui\*.*"
   
   SetOutPath "$INSTDIR"
   WriteUninstaller "$INSTDIR\uninstall.exe"
@@ -132,6 +132,8 @@ Section "Install"
   WriteRegStr HKCU "Software\Clients\StartMenuInternet\LiteBrowser\Capabilities\FileAssociations" ".html" "LiteBrowserHTML"
   WriteRegStr HKCU "Software\Clients\StartMenuInternet\LiteBrowser\Capabilities\FileAssociations" ".pdf" "LiteBrowserHTML"
   WriteRegStr HKCU "Software\Clients\StartMenuInternet\LiteBrowser\Capabilities\FileAssociations" ".svg" "LiteBrowserHTML"
+  WriteRegStr HKCU "Software\Clients\StartMenuInternet\LiteBrowser\Capabilities\FileAssociations" ".md" "LiteBrowserHTML"
+  WriteRegStr HKCU "Software\Clients\StartMenuInternet\LiteBrowser\Capabilities\FileAssociations" ".markdown" "LiteBrowserHTML"
 
   WriteRegStr HKCU "Software\RegisteredApplications" "LiteBrowser" "Software\Clients\StartMenuInternet\LiteBrowser\Capabilities"
 
@@ -140,13 +142,40 @@ Section "Install"
   WriteRegStr HKCU "Software\Classes\LiteBrowserHTML" "FriendlyTypeName" "Lite Browser Document"
   WriteRegStr HKCU "Software\Classes\LiteBrowserHTML\DefaultIcon" "" "$\"$INSTDIR\lite_browser.exe$\",0"
   WriteRegStr HKCU "Software\Classes\LiteBrowserHTML\shell\open\command" "" "$\"$INSTDIR\lite_browser.exe$\" $\"%1$\""
+  WriteRegStr HKCU "Software\Classes\LiteBrowserHTML\Application" "ApplicationName" "Lite Browser"
+  WriteRegStr HKCU "Software\Classes\LiteBrowserHTML\Application" "ApplicationCompany" "Gregory Yoon"
+  WriteRegStr HKCU "Software\Classes\LiteBrowserHTML\Application" "ApplicationIcon" "$\"$INSTDIR\lite_browser.exe$\",0"
+  WriteRegStr HKCU "Software\Classes\LiteBrowserHTML\Application" "ApplicationDescription" "Lite Browser - Fast, lightweight, AI-integrated modern browser."
+  WriteRegStr HKCU "Software\Classes\LiteBrowserHTML\Application" "AppUserModelId" "LiteBrowser"
 
-  ; Register File Associations and OpenWithProgids for HTML and PDF
+  ; Register Applications\lite_browser.exe for Open With and Default Apps flyout
+  WriteRegStr HKCU "Software\Classes\Applications\lite_browser.exe" "FriendlyAppName" "Lite Browser"
+  WriteRegStr HKCU "Software\Classes\Applications\lite_browser.exe" "ApplicationCompany" "Gregory Yoon"
+  WriteRegStr HKCU "Software\Classes\Applications\lite_browser.exe\DefaultIcon" "" "$\"$INSTDIR\lite_browser.exe$\",0"
+  WriteRegStr HKCU "Software\Classes\Applications\lite_browser.exe\shell\open\command" "" "$\"$INSTDIR\lite_browser.exe$\" $\"%1$\""
+  WriteRegStr HKCU "Software\Classes\Applications\lite_browser.exe\SupportedTypes" ".htm" ""
+  WriteRegStr HKCU "Software\Classes\Applications\lite_browser.exe\SupportedTypes" ".html" ""
+  WriteRegStr HKCU "Software\Classes\Applications\lite_browser.exe\SupportedTypes" ".pdf" ""
+  WriteRegStr HKCU "Software\Classes\Applications\lite_browser.exe\SupportedTypes" ".svg" ""
+  WriteRegStr HKCU "Software\Classes\Applications\lite_browser.exe\SupportedTypes" ".md" ""
+  WriteRegStr HKCU "Software\Classes\Applications\lite_browser.exe\SupportedTypes" ".markdown" ""
+
+  ; Register and update MuiCache explicitly
+  WriteRegStr HKCU "Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\MuiCache" "$INSTDIR\lite_browser.exe.FriendlyAppName" "Lite Browser"
+  WriteRegStr HKCU "Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\MuiCache" "$INSTDIR\lite_browser.exe.ApplicationCompany" "Gregory Yoon"
+
+  ; Register File Associations and OpenWithProgids for HTML, PDF, Markdown
   WriteRegStr HKCU "Software\Classes\.htm\OpenWithProgids" "LiteBrowserHTML" ""
   WriteRegStr HKCU "Software\Classes\.html\OpenWithProgids" "LiteBrowserHTML" ""
   WriteRegStr HKCU "Software\Classes\.pdf" "" "LiteBrowserHTML"
   WriteRegStr HKCU "Software\Classes\.pdf\OpenWithProgids" "LiteBrowserHTML" ""
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.pdf\OpenWithProgids" "LiteBrowserHTML" ""
+  WriteRegStr HKCU "Software\Classes\.md" "" "LiteBrowserHTML"
+  WriteRegStr HKCU "Software\Classes\.md\OpenWithProgids" "LiteBrowserHTML" ""
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.md\OpenWithProgids" "LiteBrowserHTML" ""
+  WriteRegStr HKCU "Software\Classes\.markdown" "" "LiteBrowserHTML"
+  WriteRegStr HKCU "Software\Classes\.markdown\OpenWithProgids" "LiteBrowserHTML" ""
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.markdown\OpenWithProgids" "LiteBrowserHTML" ""
   
   ; If silent installation (auto-update), relaunch lite_browser.exe
   ${If} ${Silent}
@@ -192,6 +221,9 @@ Section "Uninstall"
   DeleteRegKey HKCU "Software\Clients\StartMenuInternet\LiteBrowser"
   DeleteRegValue HKCU "Software\RegisteredApplications" "LiteBrowser"
   DeleteRegKey HKCU "Software\Classes\LiteBrowserHTML"
+  DeleteRegKey HKCU "Software\Classes\Applications\lite_browser.exe"
+  DeleteRegValue HKCU "Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\MuiCache" "$INSTDIR\lite_browser.exe.FriendlyAppName"
+  DeleteRegValue HKCU "Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\MuiCache" "$INSTDIR\lite_browser.exe.ApplicationCompany"
   DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteBrowser"
   DeleteRegValue HKCU "Software\Classes\.htm\OpenWithProgids" "LiteBrowserHTML"
   DeleteRegValue HKCU "Software\Classes\.html\OpenWithProgids" "LiteBrowserHTML"
@@ -200,5 +232,17 @@ Section "Uninstall"
   ReadRegStr $0 HKCU "Software\Classes\.pdf" ""
   ${If} $0 == "LiteBrowserHTML"
     DeleteRegValue HKCU "Software\Classes\.pdf" ""
+  ${EndIf}
+  DeleteRegValue HKCU "Software\Classes\.md\OpenWithProgids" "LiteBrowserHTML"
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.md\OpenWithProgids" "LiteBrowserHTML"
+  ReadRegStr $0 HKCU "Software\Classes\.md" ""
+  ${If} $0 == "LiteBrowserHTML"
+    DeleteRegValue HKCU "Software\Classes\.md" ""
+  ${EndIf}
+  DeleteRegValue HKCU "Software\Classes\.markdown\OpenWithProgids" "LiteBrowserHTML"
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.markdown\OpenWithProgids" "LiteBrowserHTML"
+  ReadRegStr $0 HKCU "Software\Classes\.markdown" ""
+  ${If} $0 == "LiteBrowserHTML"
+    DeleteRegValue HKCU "Software\Classes\.markdown" ""
   ${EndIf}
 SectionEnd

@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <sys/stat.h>
 
 #include "include/capi/cef_task_capi.h"
@@ -31,6 +32,7 @@
 
 #if defined(OS_WIN)
 #include <windows.h>
+#include <winhttp.h>
 #include <ole2.h>
 #include <shlobj.h>
 #include <shellapi.h>
@@ -666,6 +668,145 @@ static char* get_query_param(const char* query, const char* param_name) {
     if (p) p++;
   }
   return NULL;
+}
+
+static int is_markdown_url(const char* url) {
+  if (!url || !url[0]) return 0;
+  if (strstr(url, "ui/tui-editor/editor.html") != NULL ||
+      strstr(url, "tui-editor/editor.html") != NULL) return 0;
+  if (strncmp(url, "http://ui-action/", 17) == 0) return 0;
+
+  if (strncmp(url, "lite://editor", 13) == 0 ||
+      strncmp(url, "lite://markdown", 15) == 0) {
+    return 1;
+  }
+
+  // If http:// or https://, ensure it's not a bare domain with .md TLD (e.g. https://point.md)
+  if (_strnicmp(url, "http://", 7) == 0 || _strnicmp(url, "https://", 8) == 0) {
+    const char* path_start = strchr(url + 8, '/');
+    if (!path_start || path_start[1] == '\0' || path_start[1] == '?' || path_start[1] == '#') {
+      return 0; // Bare domain or domain with only trailing slash
+    }
+  }
+
+  const char* end = url;
+  while (*end && *end != '?' && *end != '#') {
+    end++;
+  }
+  size_t path_len = (size_t)(end - url);
+  if (path_len >= 3 && _strnicmp(end - 3, ".md", 3) == 0) return 1;
+  if (path_len >= 9 && _strnicmp(end - 9, ".markdown", 9) == 0) return 1;
+
+  return 0;
+}
+
+static void file_url_to_windows_path(const char* url_or_path, char* out_path, size_t max_len) {
+  if (!url_or_path || !out_path || max_len == 0) return;
+  out_path[0] = '\0';
+
+  const char* p = url_or_path;
+  if (_strnicmp(p, "file:///", 8) == 0) {
+    p += 8;
+  } else if (_strnicmp(p, "file://", 7) == 0) {
+    p += 7;
+  }
+
+  size_t o = 0;
+  while (*p && *p != '?' && *p != '#' && o < max_len - 1) {
+    if (*p == '%' && isxdigit((unsigned char)p[1]) && isxdigit((unsigned char)p[2])) {
+      char hex[3] = { p[1], p[2], '\0' };
+      out_path[o++] = (char)strtol(hex, NULL, 16);
+      p += 3;
+    } else {
+      out_path[o++] = (*p == '/') ? '\\' : *p;
+      p++;
+    }
+  }
+  out_path[o] = '\0';
+}
+
+static unsigned char* fetch_web_url_bytes(const char* url, size_t* out_len) {
+  if (!url || !out_len) return NULL;
+  *out_len = 0;
+
+  wchar_t w_url[2048] = {0};
+  MultiByteToWideChar(CP_UTF8, 0, url, -1, w_url, 2047);
+
+  URL_COMPONENTS urlComp = {0};
+  urlComp.dwStructSize = sizeof(urlComp);
+  urlComp.dwHostNameLength = (DWORD)-1;
+  urlComp.dwUrlPathLength = (DWORD)-1;
+  urlComp.dwExtraInfoLength = (DWORD)-1;
+
+  if (!WinHttpCrackUrl(w_url, 0, 0, &urlComp)) {
+    return NULL;
+  }
+
+  wchar_t hostW[512] = {0};
+  wcsncpy(hostW, urlComp.lpszHostName, urlComp.dwHostNameLength < 511 ? urlComp.dwHostNameLength : 511);
+  INTERNET_PORT port = urlComp.nPort;
+  int is_https = (urlComp.nScheme == INTERNET_SCHEME_HTTPS);
+
+  HINTERNET hSession = WinHttpOpen(L"LiteBrowser/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+  if (!hSession) return NULL;
+
+  WinHttpSetTimeouts(hSession, 5000, 5000, 10000, 10000);
+
+  HINTERNET hConnect = WinHttpConnect(hSession, hostW, port, 0);
+  if (!hConnect) {
+    WinHttpCloseHandle(hSession);
+    return NULL;
+  }
+
+  DWORD open_flags = is_https ? WINHTTP_FLAG_SECURE : 0;
+  HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"GET", urlComp.lpszUrlPath, NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, open_flags);
+  if (!hRequest) {
+    WinHttpCloseHandle(hConnect);
+    WinHttpCloseHandle(hSession);
+    return NULL;
+  }
+
+  DWORD redirect_policy = WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS;
+  WinHttpSetOption(hRequest, WINHTTP_OPTION_REDIRECT_POLICY, &redirect_policy, sizeof(redirect_policy));
+
+  unsigned char* result = NULL;
+  if (WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
+      WinHttpReceiveResponse(hRequest, NULL)) {
+    DWORD status_code = 0;
+    DWORD status_size = sizeof(status_code);
+    if (WinHttpQueryHeaders(hRequest, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+                            WINHTTP_HEADER_NAME_BY_INDEX, &status_code, &status_size, WINHTTP_NO_HEADER_INDEX)) {
+      if (status_code >= 400) {
+        WinHttpCloseHandle(hRequest);
+        WinHttpCloseHandle(hConnect);
+        WinHttpCloseHandle(hSession);
+        return NULL;
+      }
+    }
+
+    size_t cap = 16384;
+    size_t total = 0;
+    result = (unsigned char*)malloc(cap);
+    DWORD bytes_read = 0;
+    while (result && WinHttpReadData(hRequest, result + total, (DWORD)(cap - total - 1), &bytes_read) && bytes_read > 0) {
+      total += bytes_read;
+      if (total + 4096 >= cap) {
+        cap *= 2;
+        unsigned char* n = (unsigned char*)realloc(result, cap);
+        if (!n) { free(result); result = NULL; break; }
+        result = n;
+      }
+    }
+    if (result) {
+      result[total] = '\0';
+      *out_len = total;
+    }
+  }
+
+  WinHttpCloseHandle(hRequest);
+  WinHttpCloseHandle(hConnect);
+  WinHttpCloseHandle(hSession);
+  return result;
 }
 
 // Global instance pointer.
@@ -1493,6 +1634,16 @@ static void CloseTab(browser_window_t* win_ctx, int target_id) {
     }
   }
   if (found_idx != -1) {
+    if (win_ctx->tabs[found_idx].is_modified) {
+      int res = MessageBoxW(win_ctx->main_hwnd,
+                            L"저장되지 않은 변경사항이 있습니다.\n탭을 닫으시겠습니까?",
+                            L"Lite Browser",
+                            MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2);
+      if (res != IDYES) {
+        update_ui_tabs(win_ctx);
+        return;
+      }
+    }
     RemoveTabAt(win_ctx, found_idx, 1);
   }
 }
@@ -1506,6 +1657,17 @@ static void CloseOtherTabs(browser_window_t* win_ctx, int keep_id) {
     }
   }
   if (keep_idx == -1) return;
+
+  for (int i = 0; i < win_ctx->tab_count; i++) {
+    if (i != keep_idx && win_ctx->tabs[i].is_modified) {
+      int res = MessageBoxW(win_ctx->main_hwnd,
+                            L"저장되지 않은 변경사항이 있는 탭이 포함되어 있습니다.\n다른 탭들을 모두 닫으시겠습니까?",
+                            L"Lite Browser",
+                            MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2);
+      if (res != IDYES) return;
+      break;
+    }
+  }
 
   for (int i = 0; i < win_ctx->tab_count; i++) {
     if (i != keep_idx) {
@@ -1590,6 +1752,17 @@ static void CloseTabsToRight(browser_window_t* win_ctx, int target_id) {
     }
   }
   if (target_idx == -1 || target_idx >= win_ctx->tab_count - 1) return;
+
+  for (int i = target_idx + 1; i < win_ctx->tab_count; i++) {
+    if (win_ctx->tabs[i].is_modified) {
+      int res = MessageBoxW(win_ctx->main_hwnd,
+                            L"저장되지 않은 변경사항이 있는 탭이 포함되어 있습니다.\n오른쪽 탭들을 모두 닫으시겠습니까?",
+                            L"Lite Browser",
+                            MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2);
+      if (res != IDYES) return;
+      break;
+    }
+  }
 
   for (int i = target_idx + 1; i < win_ctx->tab_count; i++) {
     if (win_ctx->tabs[i].hwnd && IsWindow(win_ctx->tabs[i].hwnd)) {
@@ -1772,6 +1945,43 @@ int CEF_CALLBACK request_handler_on_before_browse(
         cef_string_from_ascii("chrome://password-manager/passwords", 34, &pm_url);
         frame->load_url(frame, &pm_url);
         cef_string_clear(&pm_url);
+        cef_string_utf8_clear(&url_utf8);
+        cef_string_userfree_free(url_userfree);
+        return 1;
+      } else if (is_markdown_url(url_utf8.str)) {
+        char ed_url_buf[MAX_PATH + 32];
+        ResolveUIFilePath("ui/tui-editor/editor.html", NULL, 0, ed_url_buf, sizeof(ed_url_buf));
+        char full_editor_url[4096];
+        if (strncmp(url_utf8.str, "lite://editor", 13) == 0 ||
+            strncmp(url_utf8.str, "lite://markdown", 15) == 0) {
+          const char* q = strchr(url_utf8.str, '?');
+          if (q) {
+            snprintf(full_editor_url, sizeof(full_editor_url), "%s%s", ed_url_buf, q);
+          } else {
+            strncpy(full_editor_url, ed_url_buf, sizeof(full_editor_url) - 1);
+            full_editor_url[sizeof(full_editor_url) - 1] = '\0';
+          }
+        } else {
+          cef_string_t in_u = {};
+          cef_string_from_utf8(url_utf8.str, strlen(url_utf8.str), &in_u);
+          cef_string_userfree_t enc_u = cef_uriencode(&in_u, 0);
+          if (enc_u && enc_u->str) {
+            cef_string_utf8_t enc_u8 = {};
+            cef_string_to_utf8(enc_u->str, enc_u->length, &enc_u8);
+            snprintf(full_editor_url, sizeof(full_editor_url), "%s?file=%s", ed_url_buf, enc_u8.str ? enc_u8.str : "");
+            cef_string_utf8_clear(&enc_u8);
+            cef_string_userfree_free(enc_u);
+          } else {
+            snprintf(full_editor_url, sizeof(full_editor_url), "%s?file=%s", ed_url_buf, url_utf8.str);
+            if (enc_u) cef_string_userfree_free(enc_u);
+          }
+          cef_string_clear(&in_u);
+        }
+
+        cef_string_t ed_url = {};
+        cef_string_from_utf8(full_editor_url, strlen(full_editor_url), &ed_url);
+        frame->load_url(frame, &ed_url);
+        cef_string_clear(&ed_url);
         cef_string_utf8_clear(&url_utf8);
         cef_string_userfree_free(url_userfree);
         return 1;
@@ -3637,6 +3847,20 @@ int CEF_CALLBACK request_handler_on_before_browse(
           PostMessage(win_ctx->main_hwnd, WM_CLOSE, 0, 0);
         } else if (strncmp(action, "load?url=", 9) == 0) {
           LogMsg("[UI-ACTION] load?url= intercepted, cb=%p\n", (void*)cb);
+          if (win_ctx && win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+            if (win_ctx->tabs[win_ctx->active_tab_index].is_modified) {
+              int res = MessageBoxW(win_ctx->main_hwnd,
+                                    L"저장되지 않은 변경사항이 있습니다.\n다른 페이지로 이동하시겠습니까?",
+                                    L"Lite Browser",
+                                    MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2);
+              if (res != IDYES) {
+                cef_string_utf8_clear(&url_utf8);
+                cef_string_userfree_free(url_userfree);
+                return 1;
+              }
+              win_ctx->tabs[win_ctx->active_tab_index].is_modified = 0;
+            }
+          }
           if (cb) {
             const char *encoded_url = action + 9;
             char *decoded = (char *)malloc(strlen(encoded_url) + 1);
@@ -3976,6 +4200,150 @@ int CEF_CALLBACK request_handler_on_before_browse(
               free(decoded);
             }
             free(data_base64);
+          }
+        } else if (strncmp(action, "md-load?", 8) == 0) {
+          const char* query = action + 8;
+          char* path_param = get_query_param(query, "path");
+          cef_browser_t* target_b = (browser && browser != win_ctx->ui_browser) ? browser : cb;
+          if (path_param && target_b) {
+            for (char* p = path_param; *p; p++) if (*p == ' ') *p = '+';
+            size_t decoded_path_len = 0;
+            unsigned char* decoded_path = base64_decode(path_param, &decoded_path_len);
+            if (decoded_path) {
+              const char* target_path_str = (const char*)decoded_path;
+              if (strncmp(target_path_str, "http://", 7) == 0 ||
+                  strncmp(target_path_str, "https://", 8) == 0) {
+                size_t web_len = 0;
+                unsigned char* web_bytes = fetch_web_url_bytes(target_path_str, &web_len);
+                if (web_bytes) {
+                  char* b64_content = base64_encode(web_bytes, web_len);
+                  if (b64_content) {
+                    size_t b64_len = strlen(b64_content);
+                    size_t js_len = b64_len + 256;
+                    char* js_call = (char*)malloc(js_len);
+                    if (js_call) {
+                      snprintf(js_call, js_len, "if (window.onMarkdownLoaded) { window.onMarkdownLoaded(true, '%s', ''); }", b64_content);
+                      ExecuteJsOnBrowser(target_b, js_call);
+                      free(js_call);
+                    }
+                    free(b64_content);
+                  }
+                  free(web_bytes);
+                } else {
+                  ExecuteJsOnBrowser(target_b, "if (window.onMarkdownLoaded) { window.onMarkdownLoaded(false, '', '웹 문서를 불러오지 못했습니다.'); }");
+                }
+              } else {
+                char win_path[MAX_PATH];
+                file_url_to_windows_path(target_path_str, win_path, sizeof(win_path));
+                wchar_t w_win_path[MAX_PATH] = {0};
+                MultiByteToWideChar(CP_UTF8, 0, win_path, -1, w_win_path, MAX_PATH - 1);
+                FILE* f = _wfopen(w_win_path, L"rb");
+                if (f) {
+                  fseek(f, 0, SEEK_END);
+                  long fsize = ftell(f);
+                  fseek(f, 0, SEEK_SET);
+                  if (fsize >= 0) {
+                    unsigned char* fbuf = (unsigned char*)malloc(fsize + 1);
+                    if (fbuf) {
+                      if (fsize > 0) fread(fbuf, 1, fsize, f);
+                      fbuf[fsize] = '\0';
+                      char* b64_content = base64_encode(fbuf, fsize);
+                      if (b64_content) {
+                        size_t b64_len = strlen(b64_content);
+                        size_t js_len = b64_len + 256;
+                        char* js_call = (char*)malloc(js_len);
+                        if (js_call) {
+                          snprintf(js_call, js_len, "if (window.onMarkdownLoaded) { window.onMarkdownLoaded(true, '%s', ''); }", b64_content);
+                          ExecuteJsOnBrowser(target_b, js_call);
+                          free(js_call);
+                        }
+                        free(b64_content);
+                      }
+                      free(fbuf);
+                    }
+                  }
+                  fclose(f);
+                } else {
+                  ExecuteJsOnBrowser(target_b, "if (window.onMarkdownLoaded) { window.onMarkdownLoaded(false, '', '파일을 열 수 없습니다.'); }");
+                }
+              }
+              free(decoded_path);
+            }
+            free(path_param);
+          }
+        } else if (strncmp(action, "md-save?", 8) == 0) {
+          const char* query = action + 8;
+          char* path_param = get_query_param(query, "path");
+          char* data_param = get_query_param(query, "data");
+          cef_browser_t* target_b = (browser && browser != win_ctx->ui_browser) ? browser : cb;
+          int save_success = 0;
+          if (path_param && data_param && target_b) {
+            for (char* p = path_param; *p; p++) if (*p == ' ') *p = '+';
+            for (char* p = data_param; *p; p++) if (*p == ' ') *p = '+';
+            size_t decoded_path_len = 0;
+            unsigned char* decoded_path = base64_decode(path_param, &decoded_path_len);
+            size_t decoded_data_len = 0;
+            unsigned char* decoded_data = base64_decode(data_param, &decoded_data_len);
+            if (decoded_path && decoded_data) {
+              char win_path[MAX_PATH];
+              file_url_to_windows_path((const char*)decoded_path, win_path, sizeof(win_path));
+              wchar_t w_win_path[MAX_PATH] = {0};
+              MultiByteToWideChar(CP_UTF8, 0, win_path, -1, w_win_path, MAX_PATH - 1);
+              FILE* f = _wfopen(w_win_path, L"wb");
+              if (f) {
+                if (decoded_data_len > 0) {
+                  fwrite(decoded_data, 1, decoded_data_len, f);
+                }
+                fclose(f);
+                save_success = 1;
+
+                int tab_found = -1;
+                for (int i = 0; i < win_ctx->tab_count; i++) {
+                  if (win_ctx->tabs[i].browser == target_b || win_ctx->tabs[i].right_browser == target_b) {
+                    tab_found = i;
+                    break;
+                  }
+                }
+                if (tab_found == -1 && win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+                  tab_found = win_ctx->active_tab_index;
+                }
+                if (tab_found >= 0) {
+                  win_ctx->tabs[tab_found].is_modified = 0;
+                }
+              }
+            }
+            if (decoded_path) free(decoded_path);
+            if (decoded_data) free(decoded_data);
+          }
+          if (target_b) {
+            char js_call[256];
+            snprintf(js_call, sizeof(js_call),
+                     "if (window.onMarkdownSaved) { window.onMarkdownSaved(%d, '%s'); }",
+                     save_success, save_success ? "저장되었습니다." : "파일 저장에 실패했습니다.");
+            ExecuteJsOnBrowser(target_b, js_call);
+          }
+          if (path_param) free(path_param);
+          if (data_param) free(data_param);
+        } else if (strncmp(action, "md-modified?", 12) == 0) {
+          const char* query = action + 12;
+          char* mod_param = get_query_param(query, "modified");
+          if (mod_param && win_ctx) {
+            int is_mod = atoi(mod_param);
+            cef_browser_t* target_b = (browser && browser != win_ctx->ui_browser) ? browser : cb;
+            int tab_found = -1;
+            for (int i = 0; i < win_ctx->tab_count; i++) {
+              if (win_ctx->tabs[i].browser == target_b || win_ctx->tabs[i].right_browser == target_b) {
+                tab_found = i;
+                break;
+              }
+            }
+            if (tab_found == -1 && win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+              tab_found = win_ctx->active_tab_index;
+            }
+            if (tab_found >= 0) {
+              win_ctx->tabs[tab_found].is_modified = is_mod;
+            }
+            free(mod_param);
           }
         } else if (strncmp(action, "send-prompt?", 12) == 0) {
           const char* query = action + 12;
@@ -5172,6 +5540,13 @@ int CEF_CALLBACK keyboard_handler_on_pre_key_event(
         // Focus is currently on an editable field or rich text editor (e.g. input, textarea, contenteditable, TUI Editor).
         // Let the editor handle the shortcut; do NOT trigger browser Save As!
         return 0;
+      }
+      if (win_ctx && win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
+        const char* tab_u = win_ctx->tabs[win_ctx->active_tab_index].url;
+        if (tab_u && (strstr(tab_u, "tui-editor/editor.html") != NULL ||
+                      is_markdown_url(tab_u))) {
+          return 0; // Let markdown editor handle Ctrl+S!
+        }
       }
       if (win_ctx->active_tab_index >= 0 && win_ctx->active_tab_index < win_ctx->tab_count) {
         tab_info_t* active_tab = &win_ctx->tabs[win_ctx->active_tab_index];

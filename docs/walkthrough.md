@@ -3123,3 +3123,48 @@ CI/웹 서버(예: `http://ci.chipsnmedia.com/.../0.log`)에서 제공하는 `.l
   - 대한민국 법원 전자가족관계등록시스템(`efamily.scourt.go.kr`) 증명서 발급 팝업창에서 오즈리포트뷰어 인쇄 아이콘 클릭 시, 차단 없이 Chromium 내장 PDF 뷰어 및 크롬 인쇄 미리보기 화면이 정상 팝업됨을 실기 확인.
   - 일반 탭 및 팝업창에서 `Ctrl + P` 입력 시 인쇄 미리보기가 정상 실행됨을 확인.
   - 브라우저를 통한 `.pdf` 문서 직접 열람 및 인쇄 파이프라인 정상 동작 확인.
+
+
+---
+
+## 81. 내장 마크다운 에디터(TOAST UI Editor) 추가, 오프라인 번들링, 원본 서식 보존 및 인스톨러 .md/.markdown 연결 프로그램 등록 (Embedded WYSIWYG Markdown Editor, Offline Bundling, Smart Format Preservation & Installer Markdown Association)
+
+### 81.1 개요
+PDF 뷰어를 브라우저 내에서 기본 지원하듯이, 마크다운(`.md`, `.markdown`) 파일 또한 별도의 외부 뷰어나 에디터 없이 LiteBrowser 내에서 즉시 열람하고 위지웍(WYSIWYG) 모드로 편집 및 저장할 수 있는 내장 마크다운 에디터 시스템을 추가하였습니다.  
+`C:\projects\tui-editor-extras.zip`의 확장 모듈들을 내장하여 TOAST UI Editor 3.2.2 기반의 위지웍 렌더링, 스마트 서식 보존(`keepFormat.js`, `diffArrays`, `diffChars`를 활용한 들여쓰기/불릿 기호/CRLF 줄바꿈 보존), Mermaid 다이어그램 실시간 렌더링을 지원합니다.  
+또한 외부 CDN 없이 100% 오프라인에서 구동되도록 필수 에셋을 로컬 번들링하였으며, 윈도우 탐색기에서 `.md` 파일을 더블클릭했을 때 LiteBrowser가 호출되도록 인스톨러(`installer.nsi`)와 기본 브라우저 모듈(`default_browser.c`)에 연결 프로그램을 등록하였습니다.
+
+### 81.2 주요 구현 내역
+1. **TOAST UI Editor 및 `tui-editor-extras` 완전 오프라인 로컬 번들링 (`ui/tui-editor/`)**:
+   - `C:\projects\tui-editor-extras.zip`의 핵심 모듈(`fileFormat.js`, `keepFormat.js`, `markdownStyle.js`, `mermaidPlugin.js`, `mermaid.js`, `undoHistory.js`, `toolbarButton.js`, `tui-extras.css`)을 `ui/tui-editor/`에 이식.
+   - TOAST UI Editor 코어(`toastui-editor-all.min.js`), 라이트/다크 CSS(`toastui-editor.min.css`, `toastui-editor-dark.min.css`), 한국어 언어팩(`ko-kr.min.js`), 종속 모듈(`diff.min.js`, `mermaid.esm.js`, `mermaid.min.js`)을 `ui/tui-editor/vendor/`에 사전 번들링하여 인터넷 연결 없이 100% 오프라인 구동 지원.
+   - 2.8MB 대용량 Mermaid 모듈은 ES importmap 기반으로 다이어그램이 문서 내에 포함되었을 때만 온디맨드로 지연 로드(Lazy Loading)되도록 설계하여 탭 초기 렌더링 성능 최적화.
+2. **순수 TUI Editor 툴바 중심 전체화면 UI 및 스크롤 최적화 (`ui/tui-editor/editor.html`)**:
+   - 탭 제목 및 주소창과 중복되던 불필요한 상단 액션바(파일명, 뱃지, 저장 버튼 등)를 완전히 제거하여 PDF 뷰어와 동일하게 뷰포트 전체(100vh)를 TUI Editor 툴바와 본문 영역으로 쾌적하게 활용.
+   - 문서 로드 시 커서가 문서 끝으로 내려가면서 화면이 아래로 스크롤되던 현상을 해결: `moveCursorToStart(false)` 및 다단계 컨테이너 `scrollTop = 0` 초기화를 통해 문서 로드 직후 항상 첫 줄(1행)부터 표시되도록 보정.
+   - 문서 수정 시 탭 제목에 수정 표시 점(`● 파일명 - Lite Browser`)을 반영하고, 저장 시 화면 하단 중앙에 깔끔한 플로팅 토스트("저장되었습니다.") 알림 제공.
+   - 브라우저 전역 테마(다크/라이트 모드)와 100% 자동 동기화 및 Mermaid 다이어그램 실시간 재렌더링.
+3. **CEF C API 네이티브 마크다운 라우팅 및 안전한 파일 I/O (`simple_handler.c`, `simple_app.c`)**:
+   - 탐색기 파일 더블클릭, 커맨드라인 인자 실행, 탭 네비게이션 시 `.md` 및 `.markdown` 확장자 자동 감지 및 에디터 페이지(`ui/tui-editor/editor.html?file=...`) 리다이렉트.
+   - 몰도바 국가 도메인(`.md`, 예: `https://point.md`) 오탐 방지를 위한 URL 경로 분석 정규화.
+   - Base64 IPC 통신 및 MSVC `_wfopen()` 적용으로 한글/유니코드 경로(`C:\사용자\문서.md`)의 무손실 읽기/쓰기 보장.
+   - `Ctrl + S` 키 이벤트 가로채기(CEF 기본 HTML 저장 창 방지) 및 미저장 변경사항 보호(탭 닫기/주소창 이동 시 확인 대화상자 표시).
+4. **인스톨러 및 윈도우 연결 프로그램 등록 (`installer.nsi`, `default_browser.c`)**:
+   - `installer.nsi`: 설치 시 `ui\` 폴더 재귀 복사(`File /r`)로 에디터 에셋 포함, `HKCU\Software\Classes\.md`, `.markdown` 및 `OpenWithProgids`, `SupportedTypes` 등록 (제거 시 레지스트리 정리 포함).
+   - `default_browser.c`: 런타임 기능 등록 시 `.md`, `.markdown` 확장자 연결 동기화.
+
+### 81.3 관련 소스 코드
+- [`ui/tui-editor/editor.html`](file:///c:/projects/lite_browser/ui/tui-editor/editor.html): 순수 TUI Editor 전체화면 위지웍 에디터, 첫 줄 스크롤 보정, 테마/토스트/저장 연동
+- [`ui/tui-editor/fileFormat.js`](file:///c:/projects/lite_browser/ui/tui-editor/fileFormat.js), [`ui/tui-editor/keepFormat.js`](file:///c:/projects/lite_browser/ui/tui-editor/keepFormat.js), [`ui/tui-editor/markdownStyle.js`](file:///c:/projects/lite_browser/ui/tui-editor/markdownStyle.js): diff 기반 원본 마크다운 서식/들여쓰기/불릿/CRLF 보존 엔진
+- [`ui/tui-editor/mermaidPlugin.js`](file:///c:/projects/lite_browser/ui/tui-editor/mermaidPlugin.js), [`ui/tui-editor/mermaid.js`](file:///c:/projects/lite_browser/ui/tui-editor/mermaid.js): 지연 로드 지원 Mermaid 다이어그램 렌더링 플러그인
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_handler.c): 마크다운 URL 감지, _wfopen 기반 파일 로드/저장 IPC, Ctrl+S 단축키, 미저장 변경사항 확인창
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_app.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_app.c): 커맨드라인 및 재실행 시 로컬 마크다운 파일 URL 파싱
+- [`cef_binary_154.0.34/tests/cefsimple_capi/default_browser.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/default_browser.c): `.md`, `.markdown` OpenWithProgids 및 SupportedTypes 등록
+- [`installer.nsi`](file:///c:/projects/lite_browser/installer.nsi): 에디터 에셋 패키징 및 마크다운 파일 연결 레지스트리 설치/제거 연동
+
+### 81.4 빌드 및 검증 결과
+- **C API 빌드 검증**: `cef_binary_154.0.34` MSVC Debug 타겟 컴파일 및 링크 성공 (`Exit code 0, 경고 0개, 오류 0개`, `lite_browser.dll` 및 `lite_browser.exe` 정상 생성).
+- **실기 검증**:
+  - 로컬 마크다운 파일(`README.md`, `walkthrough.md`)을 더블클릭 또는 링크로 열었을 때 상단 중복 바 없이 첫 줄(1행)부터 즉시 위지웍 렌더링됨을 확인.
+  - TUI Editor 툴바 저장 버튼 및 `Ctrl + S`로 문서 수정 저장 시, 원본 서식이 보존되며 하단 토스트 및 탭 제목(`●`)이 정상 동기화됨을 확인.
+  - 한글 유니코드 파일 경로 입출력 및 오프라인 번들 동작 정상 확인.
