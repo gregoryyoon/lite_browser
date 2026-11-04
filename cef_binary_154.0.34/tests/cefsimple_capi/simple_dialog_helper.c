@@ -59,6 +59,7 @@ static int is_download_bubble_window(HWND dialog_hwnd, int dialog_w, HWND root_o
   return 0;
 }
 
+#if 0
 static int is_permission_bubble_window(HWND dialog_hwnd, int dialog_w, int dialog_h, HWND root_owner, browser_window_t* win_ctx) {
   if (!dialog_hwnd || !IsWindow(dialog_hwnd)) return 0;
 
@@ -149,6 +150,7 @@ static int is_web_modal_dialog_window(HWND dialog_hwnd, int dialog_w, int dialog
   SetPropA(dialog_hwnd, "LiteBrowser_IsModal", (HANDLE)2);
   return 0;
 }
+#endif
 
 static int calculate_dialog_target_pos(HWND dialog_hwnd, int dialog_w, int dialog_h, int* out_x, int* out_y) {
   if (!dialog_hwnd || !IsWindow(dialog_hwnd)) return 0;
@@ -201,6 +203,7 @@ static int calculate_dialog_target_pos(HWND dialog_hwnd, int dialog_w, int dialo
     return 1;
   }
 
+#if 0
   // 2. Web Modal Dialog & Permission Bubble positioning (alert, confirm, beforeunload, http auth, permissions - centered over tab content)
   if (is_permission_bubble_window(dialog_hwnd, dialog_w, dialog_h, root_owner, win_ctx) ||
       is_web_modal_dialog_window(dialog_hwnd, dialog_w, dialog_h, root_owner, win_ctx)) {
@@ -256,6 +259,7 @@ static int calculate_dialog_target_pos(HWND dialog_hwnd, int dialog_w, int dialo
     *out_y = target_y;
     return 1;
   }
+#endif
 
   // 3. Other windows (Autofill, suggestions, dropdowns, etc.) - do not reposition
   return 0;
