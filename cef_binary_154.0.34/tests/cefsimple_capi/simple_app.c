@@ -284,6 +284,14 @@ void CEF_CALLBACK simple_app_on_before_command_line_processing(
   command_line->append_switch(command_line, &print_switch);
   cef_string_clear(&print_switch);
 
+  // Disable Chromium's internal popup blocker so window.open() in third-party iframes
+  // (e.g. payment gateways like Naver Pay, Toss, KakaoPay, PG dialogs) is not blocked at the engine level,
+  // allowing LiteBrowser's native life_span_handler_on_before_popup to handle it cleanly.
+  cef_string_t popup_switch = {};
+  cef_string_from_ascii("disable-popup-blocking", 22, &popup_switch);
+  command_line->append_switch(command_line, &popup_switch);
+  cef_string_clear(&popup_switch);
+
   // Disable automatic HTTP->HTTPS upgrades to prevent intranet HTTP sites (e.g. http://jackson.cnm.com)
   // from being forced to HTTPS.
   append_disable_feature_if_missing(command_line, "HttpsUpgrades");
