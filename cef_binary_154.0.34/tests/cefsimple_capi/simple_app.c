@@ -297,6 +297,13 @@ void CEF_CALLBACK simple_app_on_before_command_line_processing(
   append_disable_feature_if_missing(command_line, "HttpsUpgrades");
   append_disable_feature_if_missing(command_line, "HttpsFirstMode");
 
+  // Disable Chromium's internal spell checking to prevent false red squiggly underlines
+  // under Korean text, code snippets, and technical terminology in web editors (e.g. TOAST UI Editor, Notion, Confluence).
+  cef_string_t spell_switch = {};
+  cef_string_from_ascii("disable-spell-checking", 22, &spell_switch);
+  command_line->append_switch(command_line, &spell_switch);
+  cef_string_clear(&spell_switch);
+
 #if defined(OS_WIN)
   cef_string_t lang_switch = {};
   cef_string_from_ascii("lang", 4, &lang_switch);
