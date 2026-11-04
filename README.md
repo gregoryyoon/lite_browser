@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/gregoryyoon/lite_browser/releases/latest"><img src="https://img.shields.io/badge/Release-v0.2.8-brightgreen.svg?logo=github&logoColor=white" alt="Latest Release v0.2.8" /></a>
+  <a href="https://github.com/gregoryyoon/lite_browser/releases/latest"><img src="https://img.shields.io/badge/Release-v0.2.9-brightgreen.svg?logo=github&logoColor=white" alt="Latest Release v0.2.9" /></a>
   <a href="https://github.com/gregoryyoon/lite_browser"><img src="https://img.shields.io/badge/Platform-Windows%2064--bit-0078D4.svg?logo=windows&logoColor=white" alt="Platform Windows 64-bit" /></a>
   <a href="https://github.com/gregoryyoon/lite_browser"><img src="https://img.shields.io/badge/Language-C11%20%2F%20Pure%20C%20API-00599C.svg?logo=c&logoColor=white" alt="Language C11 / Pure Win32 C CAPI" /></a>
   <a href="https://github.com/gregoryyoon/lite_browser"><img src="https://img.shields.io/badge/CEF-154.0.34%20(Chromium%20154)-FF6F00.svg?logo=googlechrome&logoColor=white" alt="CEF 154.0.34 / Chromium 154" /></a>

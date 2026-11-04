@@ -1,8 +1,8 @@
 ﻿# GitHub Release and Asset Upload Pipeline for Lite Browser
 param(
     [string]$Token = "",
-    [string]$TagName = "v0.2.8",
-    [string]$ReleaseName = "Lite Browser v0.2.8",
+    [string]$TagName = "v0.2.9",
+    [string]$ReleaseName = "Lite Browser v0.2.9",
     [string]$InstallerPath = "LiteBrowserInstaller.exe",
     [string]$ReleaseBody = ""
 )
@@ -75,24 +75,19 @@ if (-not $ReleaseBody) {
 
 ### 주요 변경 사항
 
-#### 1. 내장 마크다운(Markdown) 위지웍 에디터 & 뷰어 탑재 (Embedded WYSIWYG Editor)
-- **완전 오프라인 번들링**: TOAST UI Editor 3.2.2 및 확장 플러그인(`tui-editor-extras`)을 로컬에 100% 내장하여 인터넷 연결 없이도 안전하게 구동
-- **웹 링크 & 로컬 파일 즉각 열람**: 웹 서핑 중 `.md` 및 `.markdown` 링크(GitHub 원문 등) 클릭 시 깔끔한 타이포그래피의 웹 문서로 실시간 렌더링하며, 로컬 마크다운 파일 열람 및 위지웍 편집/저장(`Ctrl + S`) 지원
-- **스마트 원본 서식 보존**: diff 기반 알고리즘을 적용하여 편집 후 저장 시 원본 문서의 들여쓰기 깊이, 불릿 스타일, 줄바꿈(CRLF) 서식을 정밀 보존
-- **Mermaid 다이어그램 & 테마 동기화**: 문서 내 포함된 Mermaid 다이어그램 실시간 렌더링(지연 로드 최적화 적용) 및 브라우저 전역 다크/라이트 테마 자동 동기화
-- **Windows 기본 연결 프로그램 등록**: 인스톨러(`installer.nsi`) 및 런타임(`default_browser.c`)에서 `.md`, `.markdown` 확장자 연결 프로그램(`OpenWithProgids`, `SupportedTypes`) 자동 등록
+#### 1. 서드파티 결제 모듈(네이버페이, 카카오페이, 토스 등) iframe 팝업 차단 해제 및 네이티브 팝업 가드 연동
+- **`--disable-popup-blocking` 스위치 적용**: 아시아나항공 등 항공사 및 전자상거래 예매/결제 페이지에서 교차 출처(Cross-Origin) iframe 내의 `window.open()` 호출이 Chromium 내부 팝업 블로커에 의해 엔진 단에서 일방 차단되던 문제 해결
+- **네이티브 팝업 라이프사이클 가드 연동**: Chromium 엔진의 획일적인 차단 대신 `life_span_handler_on_before_popup`으로 모든 팝업 요청을 안전하게 전달받아, 테마 및 DPI 스케일링이 적용된 전용 팝업 윈도우(`LiteBrowserPopupWnd`) 또는 새 탭으로 정밀 라우팅
 
-#### 2. 업데이트 뱃지 VS Code 스타일 상세 팝오버 카드 탑재
-- **호버 정보 카드 노출**: 상단 툴바의 업데이트 준비 완료 뱃지에 마우스를 올리면 현재 버전, 최신 버전, 릴리즈 날짜를 한눈에 확인할 수 있는 미니멀 팝오버 카드 표시
-- **의도 감지 인터랙션**: 단순 커서 통과 시의 번쩍임을 차단하는 250ms 의도 감지 딜레이 및 카드 조작을 위한 200ms 이동 유예 시간(Grace Period) 적용
-- **원클릭 액션 버튼**: [릴리즈 노트] 클릭 시 브라우저 새 탭으로 GitHub Releases 페이지 열람, [지금 재시작] 클릭 시 즉각적인 무음 설치 및 자동 재시작 지원
+#### 2. 타이핑 반응성 및 웹 에디터 성능 향상을 위한 맞춤법 검사기(Spellcheck) 전역 비활성화
+- **`--disable-spell-checking` 스위치 적용**: 백그라운드 사전 대조 루프와 Hunspell 워커 스레드를 차단하여 타이핑 입력 지연(Input Latency / INP) 제거 및 RAM/CPU 리소스 최적화
+- **시각적 노이즈 완전 제거**: TOAST UI Editor, 노션(Notion), 컨플루언스(Confluence), GitHub 등 웹 기반 에디터에서 한글 문장, 소스 코드, 기술 약어 입력 시 발생하던 오작동 붉은 물결선 밑줄 원천 차단
 
-#### 3. 비밀번호 관리자(`chrome://password-manager`) 싱글톤 탭 포커스 개선
-- **일관된 탭 사용자 경험**: 웹사이트 로그인 폼의 열쇠 아이콘(비밀번호 저장/관리) 클릭 또는 `chrome://password-manager` 요청 시 팝업 대신 일반 브라우저 탭으로 생성
-- **싱글톤 탭 포커스**: 비밀번호 관리자 탭이 이미 열려 있는 경우 중복 생성 없이 해당 탭으로 즉시 전환 및 포커스 이동
+#### 3. 모달 및 권한 다이얼로그 위치 처리 리팩토링
+- 다운로드 버블 및 모달 다이얼로그 윈도우 서브클래싱 처리 로직 개선으로 윈도우 스크린 좌표 안정성 확보
 
-#### 4. 다운로드 팝업 버블 위치 및 레이아웃 안정화
-- 다운로드 목록이 길어져 팝업 창 높이가 확장될 때 화면 좌표 경계 계산 오차로 인해 화면 좌상단(0, 0)으로 튕기던(fallback) 현상을 수정하여 툴바 다운로드 버튼 하단에 안정적으로 도킹
+#### 4. 배포 문서 및 CEF 기본 정책 투명성 강화
+- `README.md` 내에 Lite Browser에서 의도적으로 비활성화한 CEF 기본 기능(팝업 차단기, 맞춤법 검사기, HTTPS 자동 승격, 사이트 격리, 확장 프로그램 등) 및 맞춤형 정책을 투명하게 공개하는 신규 섹션 반영
 
 #### 5. 배포 및 보안 파이프라인
 - **Zero-UAC 무음 설치**: Per-User (`%LOCALAPPDATA%\Programs\LiteBrowser`) 아키텍처 및 UAC 승인 창 없는 원활한 백그라운드 업데이트
