@@ -205,6 +205,34 @@ lite_browser\
 
 ---
 
+## ⚙️ CEF 기본 비활성화 기능 및 맞춤 정책 (Disabled CEF Defaults & Custom Policies)
+
+Lite Browser는 최상의 시동 속도, 극상의 메모리 효율, 그리고 국내 웹 환경(PG 전자결제, 인트라넷, 한글 에디터)과의 완벽한 호환성을 보장하기 위해 Chromium/CEF의 일부 기본 기능과 정책을 의도적으로 비활성화하거나 네이티브 서브시스템으로 대체 적용했습니다.
+
+| 분류 (Category) | 비활성화된 기본 기능 (Disabled CEF Default) | 적용 스위치 / 설정 (Flags & Settings) | 비활성화 목적 및 대체 구현 (Purpose & Alternative) |
+| :--- | :--- | :--- | :--- |
+| **웹 호환성** | **자동 HTTPS 승격 (HTTPS Upgrades)** | `--disable-features=HttpsUpgrades,HttpsFirstMode` | 사내 인트라넷, 공유기 관리 페이지, 로컬 개발 서버 등 순수 HTTP 사이트 접속 시 강제 HTTPS 변환으로 인한 접속 실패 방지 |
+| **웹 호환성** | **엔진 레벨 팝업 차단 (Popup Blocker)** | `--disable-popup-blocking` | 네이버페이·토스·카카오페이 등 PG 결제창 및 iframe 내 `window.open()` 일방 차단 방지 (네이티브 팝업 가드로 안전하게 제어) |
+| **에디터 UX** | **내장 맞춤법 검사기 (Spellcheck)** | `--disable-spell-checking` | TOAST UI Editor, 노션, 깃허브 등에서 한글 문장, 소스 코드, 기술 전문 용어 입력 시 오작동하는 붉은색 밑줄 노이즈 완전 제거 |
+| **에디터 UX** | **기본 우클릭 컨텍스트 메뉴 (Context Menu)** | `cef_menu_model->clear()` | Chromium 기본 웹 메뉴를 비우고, 시스템 다크/라이트 테마와 연동되는 Win32 네이티브 맞춤형 컨텍스트 메뉴로 완전 대체 |
+| **에디터 UX** | **기본 웹페이지 저장 가속기 (Save Page As)** | `on_pre_key_event (Ctrl + S)` | Chromium 기본 HTML 전체 저장 다이얼로그를 가로채어 내장 마크다운 에디터 저장 또는 단일 파일 다운로드 파이프라인으로 일원화 |
+| **메모리 절감** | **사이트별 프로세스 격리 (Site Isolation)** | `--disable-site-isolation-trials` | *(메모리 절감 모드 시)* 서브프레임별 프로세스 분리를 억제하고 렌더러를 통합하여 RAM 점유율 30~50% 대폭 절감 |
+| **메모리 절감** | **백그라운드 확장 프로그램 (Extensions)** | `--disable-extensions` | *(메모리 절감 모드 시)* 불필요한 백그라운드 확장 프로세스를 원천 차단하여 시스템 리소스 소모 및 배터리 방전 방지 |
+| **아키텍처** | **CEF Views 프레임워크 (Views Framework)** | `use_views = 0` | C++ Views 추상화 레이어를 배제하고 순수 Win32 C CAPI 및 벤토 그리드 웹 UI로 0px 심리스 윈도우 구현 |
+| **아키텍처** | **Chromium 샌드박스 (Sandbox)** | `settings.no_sandbox = 1` | 브로커 서비스나 관리자 권한 요구 없이 단독 포터블 실행 및 Zero-UAC 무음 설치/업데이트 파이프라인 보장 |
+
+### 📌 세부 비활성화 사유 및 아키텍처 배경
+1. **국내 웹 및 전자결제(PG) 호환성 보장**:
+   - Chromium 엔진은 서드파티 iframe 내부에서 호출되는 `window.open()`을 팝업 광고로 간주하여 차단하는 경향이 있습니다. Lite Browser는 `--disable-popup-blocking`을 적용하여 결제창 차단을 방지하고, C 네이티브 `on_before_popup` 라이프사이클 가드를 통해 보안 검증된 새 탭 또는 독립 윈도우로 안전하게 라우팅합니다.
+   - 공유기 관리 도구, 기업 내부 인트라넷, 임베디드 장비 웹페이지 등은 HTTPS 인증서가 없는 순수 HTTP 환경이 대다수입니다. Chromium의 `HttpsUpgrades` 및 `HttpsFirstMode`를 비활성화하여 사용자가 입력한 `http://` 주소 그대로 안정 접속을 보장합니다.
+2. **생산성 에디터 작업 환경 최적화**:
+   - Chromium의 기본 맞춤법 검사기는 한글 형태소 분석 한계로 인해 기술 용어나 정상적인 한글 어절에 붉은색 물결선 밑줄을 빈번히 표시합니다. 이를 비활성화하여 마크다운 문서 작성 및 텍스트 편집 시 시각적 방해를 차단했습니다.
+   - 웹페이지 본문 및 툴바 영역에서 Chromium의 기본 웹 컨텍스트 메뉴를 클리어하고, DWM 다크 모드와 연동되는 Win32 네이티브 팝업 메뉴로 일원화했습니다.
+3. **초경량 런타임 및 메모리 절감 아키텍처**:
+   - 다중 탭을 열었을 때 메모리 사용량이 급증하는 주원인인 사이트 격리(Site Isolation Trials)와 확장 프로그램(Extensions)을 메모리 절감 모드에서 비활성화하여 저사양 PC에서도 가볍고 쾌적한 브라우징을 유지합니다.
+
+---
+
 ## ⚠️ 알려진 제한 사항 및 호환성 안내 (Known Limitations & Compatibility)
 
 ### 🔒 국내 금융·증권사 보안 프로그램 (Kings Online Security 등) 호환성

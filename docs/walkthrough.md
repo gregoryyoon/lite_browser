@@ -3168,3 +3168,90 @@ PDF 뷰어를 브라우저 내에서 기본 지원하듯이, 마크다운(`.md`,
   - 로컬 마크다운 파일(`README.md`, `walkthrough.md`)을 더블클릭 또는 링크로 열었을 때 상단 중복 바 없이 첫 줄(1행)부터 즉시 위지웍 렌더링됨을 확인.
   - TUI Editor 툴바 저장 버튼 및 `Ctrl + S`로 문서 수정 저장 시, 원본 서식이 보존되며 하단 토스트 및 탭 제목(`●`)이 정상 동기화됨을 확인.
   - 한글 유니코드 파일 경로 입출력 및 오프라인 번들 동작 정상 확인.
+---
+
+## 82. 서드파티 결제 모듈(네이버페이, 카카오페이 등) iframe 팝업 차단 해제 및 라이트브라우저 네이티브 팝업 연동 (`--disable-popup-blocking` Integration for Third-Party Payment Iframes)
+
+### 82.1 개요
+아시아나항공(`flyasiana.com`) 등 주요 항공사 및 전자상거래 예매/결제 페이지에서 네이버페이(`nsp.pay.naver.com`), 카카오페이, 토스 등의 간편결제 모듈을 선택하고 결제 버튼을 클릭했을 때, *"팝업이 차단되어 결제할 수 없습니다. 팝업 및 리디렉션을 항상 허용으로 바꾸고 다시 결제창을 열어주세요."*라는 경고창이 뜨며 결제창이 열리지 않는 문제가 발생했습니다.  
+원인 분석 결과, Chromium 내부의 기본 팝업 차단기(`ChromeContentBrowserClient::CanCreateWindow`)가 교차 출처(Cross-Origin) `<iframe>` 내에서 발생하는 `window.open()` 호출을 엔진 레벨에서 선제 차단하여, CEF의 `life_span_handler_on_before_popup` 콜백에 도달조차 하지 못하고 `window.open`이 `null`을 반환하는 구조였습니다.  
+크롬/엣지와 달리 CEF 기반 커스텀 UI 브라우저는 주소창 차단 해제 팝업 UI가 부재하므로, Chromium 엔진 내부의 획일적인 팝업 차단을 비활성화(`--disable-popup-blocking`)하고 모든 팝업 요청을 라이트브라우저의 네이티브 라이프스팬 핸들러(`life_span_handler_on_before_popup`)로 직접 전달받아 독립 윈도우(`LiteBrowserPopupWnd`)로 띄우도록 개선하였습니다.
+
+### 84.2 주요 구현 내역
+1. **Chromium 내부 팝업 블로커 비활성화 명령행 스위치 적용 (`simple_app.c`)**:
+   - `simple_app_on_before_command_line_processing`에서 Chromium 엔진에 `--disable-popup-blocking` 스위치를 추가 등록.
+   - 아시아나항공 메인 도메인(`flyasiana.com`) 내에 삽입된 네이버페이 결제 iframe(`nsp.pay.naver.com`) 및 각종 금융/PG사 iframe이 `window.open()`을 호출할 때 Chromium 엔진에 의해 가로막히지 않고 정상적으로 팝업 생성 파이프라인으로 진입하도록 보장.
+2. **라이트브라우저 네이티브 팝업 처리 일원화 (`simple_life_span_handler.c`)**:
+   - Chromium 엔진의 획일적인 차단 대신, 모든 팝업 요청이 라이트브라우저의 `life_span_handler_on_before_popup` 콜백으로 수신됨.
+   - `is_popup` 플래그(`CEF_WOD_NEW_POPUP`, `popupFeatures->isPopup`, `widthSet`, `heightSet`) 감지 시 기존에 구현된 다크/라이트 테마, DPI 스케일링, 화면 중앙 정렬이 적용된 독립 네이티브 윈도우(`LiteBrowserPopupWnd`)를 생성하여 결제창을 쾌적하고 안전하게 렌더링.
+   - Google Safe Browsing(세이프 브라우징) 및 TLS/SSL 보안 검증 엔진은 독립적으로 완벽하게 유지되어 피싱/파밍 사이트에 대한 방어력 유지.
+
+### 84.3 관련 소스 코드
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_app.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_app.c): `disable-popup-blocking` 커맨드라인 스위치 추가 등록
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_life_span_handler.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_life_span_handler.c): `LiteBrowserPopupWnd` 네이티브 팝업 윈도우 및 `life_span_handler_on_before_popup` 팝업/새 탭 분기 제어
+
+### 82.4 빌드 및 검증 결과
+- **C API 빌드 검증**: `cef_binary_154.0.34` MSVC Debug 모드 빌드 성공 (`Exit code 0`, `lite_browser.dll` 및 `lite_browser.exe` 정상 갱신).
+- **실기 검증**:
+  - 아시아나항공 예약/결제 페이지(`https://flyasiana.com/I/KR/KO/RedemptionExpressBooking.do#none`)에서 네이버페이 결제 버튼 클릭 시 "팝업 차단" 경고창 없이 네이티브 팝업창으로 정상 결제창이 열리는 구조 검증.
+  - 일반 탭 및 외부 링크(`target="_blank"`)는 기존과 동일하게 상단 탭 바의 새 탭으로 안정적으로 생성됨을 확인.
+
+
+---
+
+## 83. Windows 11 기본 앱 및 연결 프로그램 목록의 App FriendlyName 표시 보정 및 MuiCache 정리 (Fix Windows 11 Default Apps Display Name & MuiCache Sync)
+
+### 83.1 개요
+Windows 11 [설정 > 기본 앱 > .pdf 파일의 기본 앱 선택] 및 탐색기 "연결 프로그램(Open With)" 추천 목록에서 브라우저 이름이 `Lite Browser`가 아닌 **`CEF Bootstrap Application`**으로 표시되는 결함을 해결했습니다.  
+원인 분석 결과, Windows 11 셸의 연결 프로그램 플라이아웃은 다음 3단계 우선순위로 프로그램 표시명을 조회합니다:
+1. ProgID(`LiteBrowserHTML`) 하위의 `Application\ApplicationName`
+2. `HKCU\Software\Classes\Applications\lite_browser.exe`의 `FriendlyAppName`
+3. Windows 다국어 UI 캐시(`MuiCache`: `HKCU\Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\MuiCache`)의 `<실행파일경로>.FriendlyAppName`
+
+기존에는 1번과 2번 레지스트리가 등록되어 있지 않았고, 메타데이터 주입 이전 구버전 실행 파일이 실행되었을 때 CEF 원본 `bootstrap.exe`의 `FileDescription`("CEF Bootstrap Application")이 `MuiCache`에 영구 캐싱되어 있었습니다.  
+이에 따라 `installer.nsi`, `default_browser.c`, `inject_icon.py` 전반에 걸쳐 `LiteBrowserHTML\Application` 및 `Applications\lite_browser.exe` 등록 로직과 `MuiCache` 명시적 동기화/정리 로직을 구축했습니다.
+
+### 84.2 주요 구현 내역
+1. **인스톨러 레지스트리 및 셸 MuiCache 동기화 (`installer.nsi`)**:
+   - `HKCU\Software\Classes\LiteBrowserHTML\Application` 키를 신설하고 `ApplicationName = "Lite Browser"`, `ApplicationCompany = "Gregory Yoon"`, `ApplicationIcon = "$INSTDIR\lite_browser.exe,0"`, `AppUserModelId = "LiteBrowser"` 등록.
+   - `HKCU\Software\Classes\Applications\lite_browser.exe` 키에 `FriendlyAppName = "Lite Browser"`, `ApplicationCompany = "Gregory Yoon"`, `SupportedTypes`(.htm, .html, .pdf, .svg, .md, .markdown) 등록.
+   - `HKCU\Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\MuiCache`에 잔존하는 `$INSTDIR\lite_browser.exe.FriendlyAppName`을 `"Lite Browser"`로 강제 갱신하고, 프로그램 삭제(Uninstall) 시 해당 항목들을 깔끔히 정리하도록 구현.
+2. **런타임 기본 앱 등록 로직 보강 (`default_browser.c`)**:
+   - `default_browser_register_capabilities` 호출 시 런타임 실행 파일 경로를 기반으로 `LiteBrowserHTML\Application` 및 `Applications\lite_browser.exe` 레지스트리를 즉시 등록.
+   - MuiCache 내의 실행 파일 `FriendlyAppName`을 `"Lite Browser"`로 갱신하고 `SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, NULL, NULL)`를 호출하여 윈도우 셸 캐시 즉시 리프레시.
+3. **PE 빌드 후처리 자동 갱신 (`inject_icon.py`)**:
+   - 개발 빌드(Debug/Release) 수행 시 PE 리소스 주입 직후, 로컬 빌드 바이너리 경로에 대한 MuiCache 및 Applications 레지스트리를 자동으로 `"Lite Browser"`로 동기화.
+
+### 84.3 관련 소스 코드
+- [`installer.nsi`](file:///c:/projects/lite_browser/installer.nsi): ProgID Application, Classes\Applications 및 MuiCache 등록/삭제 반영
+- [`cef_binary_154.0.34/tests/cefsimple_capi/default_browser.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/default_browser.c): 런타임 Capabilities 및 MuiCache 동기화, SHChangeNotify 호출
+- [`cef_binary_154.0.34/tests/cefsimple_capi/win/inject_icon.py`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/win/inject_icon.py): 로컬 빌드 바이너리 MuiCache 레지스트리 자동 갱신
+
+---
+
+## 84. 타이핑 반응성 및 웹 에디터 성능 향상을 위한 Chromium 맞춤법 검사(Spellcheck) 전역 비활성화 (Disable Chromium Spell Checking for Responsiveness & Web Editor Performance)
+
+### 84.1 개요
+사내 인트라넷(`http://gregory.cnm.com/`) 등 웹 기반 마크다운 위지웍 에디터(TOAST UI Editor) 접속 시, 거의 모든 한글 단어 및 개발 약어 밑에 붉은색 물결선(Misspelling Marker)이 표시되는 현상을 분석하고 성능 최적화를 적용했습니다.  
+- **원인 분석**:
+  1. TOAST UI Editor 위지웍 모드는 `<div class="ProseMirror" contenteditable="true">`를 사용하며, HTML5 표준에 따라 `contenteditable` 영역은 브라우저의 맞춤법 검사가 기본 활성화(`spellcheck="true"`)됩니다.
+  2. 웹페이지의 언어 태그(`lang`)가 지정되지 않았거나 기본값으로 처리될 경우 Chromium은 기본 영어(en-US) 사전을 기준으로 철자를 검사합니다.
+  3. 영어 사전에는 모든 한글 단어("에이전트", "운영", "지시서", "비디오", "디코더" 등) 및 기술 용어/약어("v4l2_stateless", "gstreamer", "VPU", "virtiofs" 등)가 등록되어 있지 않아 모조리 오탈자로 판정되어 붉은 물결선이 발생했습니다.
+  4. 반면 로컬 파일(`file://`)은 Chromium의 보안/격리 정책상 원격 사전 서비스 및 백그라운드 맞춤법 검사가 기본 제한되고, 내장 에디터(`editor.html`)에는 `<html lang="ko">` 및 `language: 'ko-KR'`이 명시되어 있어 검사기가 간섭하지 않았습니다.
+- **최적화 방향**:
+  코드 및 기술 문서, 마크다운 위주로 사용하는 브라우징 환경에서 불필요한 백그라운드 사전 대조 루프를 차단하여 타이핑 지연(Input Latency / INP)을 제거하고 메모리(RAM) 및 CPU 사용량을 절감하기 위해 엔진 차원에서 맞춤법 검사를 전역 비활성화했습니다.
+
+### 84.2 주요 구현 내역
+1. **Chromium 엔진 맞춤법 검사기 비활성화 (`simple_app.c`)**:
+   - `simple_app_on_before_command_line_processing`에 `--disable-spell-checking` 명령줄 스위치를 추가.
+   - 브라우저 프로세스(`SpellcheckService`) 및 모든 렌더러 프로세스(`SpellCheckProvider`)에서 Hunspell 및 플랫폼 네이티브 맞춤법 검사 워커 스레드가 원천 차단됨.
+   - TOAST UI Editor, Notion, Confluence, Jira 등 웹 기반 에디터 전반에서 한글 및 코드/약어에 불필요한 붉은 물결선이 완전히 사라지고 순수 타이핑 반응성이 대폭 향상됨.
+
+### 84.3 관련 소스 코드
+- [`cef_binary_154.0.34/tests/cefsimple_capi/simple_app.c`](file:///c:/projects/lite_browser/cef_binary_154.0.34/tests/cefsimple_capi/simple_app.c): `disable-spell-checking` 커맨드라인 스위치 추가
+
+### 84.4 빌드 및 검증 결과
+- **C API 빌드 검증**: `cef_binary_154.0.34` MSVC Debug 타겟 정상 컴파일 및 링크 완료 (`Exit code 0, 경고 0개, 오류 0개`).
+- **실기 검증**:
+  - Windows 11 [설정 > 기본 앱 > .pdf 파일의 기본 앱 선택] 창에서 `Lite Browser`로 정상 표시 확인.
+  - 디버그 빌드 실행 시 브라우저 및 렌더러 프로세스에 `--disable-spell-checking` 스위치가 주입되어 불필요한 철자 검사 오버헤드 및 물결선이 제거됨을 확인.
